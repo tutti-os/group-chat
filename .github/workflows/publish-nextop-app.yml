@@ -17,6 +17,9 @@ on:
         required: false
         type: boolean
         default: false
+  push:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -24,15 +27,13 @@ permissions:
 
 jobs:
   publish:
-    uses: tutti-os/tutti/.github/workflows/publish-tutti-app-release.yml@main
+    uses: tutti-os/tutti/.github/workflows/publish-nextop-app-release.yml@main
     with:
       app_id: group-chat
       package_command: pnpm package:nextop
       package_dir: build/nextop-app/package
       icon_path: build/nextop-app/package/icon.svg
       release_version: ${{ inputs.release_version || '' }}
-      auto_bump_version: false
-      version_manifest_path: tutti.app.json
       runner: macos-latest
       pnpm_version: 10.11.0
       aws_region: ${{ vars.NEXTOP_APP_RELEASES_PRODUCTION_AWS_REGION || vars.NEXTOP_APP_RELEASES_AWS_REGION }}
@@ -40,6 +41,6 @@ jobs:
       s3_bucket: ${{ vars.NEXTOP_APP_RELEASES_PRODUCTION_S3_BUCKET || vars.NEXTOP_APP_RELEASES_S3_BUCKET }}
       s3_prefix: ${{ vars.NEXTOP_APP_RELEASES_PRODUCTION_S3_PREFIX || vars.NEXTOP_APP_RELEASES_S3_PREFIX }}
       release_assets_base_url: ${{ vars.NEXTOP_APP_RELEASES_PRODUCTION_BASE_URL || vars.NEXTOP_APP_RELEASES_BASE_URL }}
-      publish_catalog: ${{ inputs.publish_catalog }}
+      publish_catalog: ${{ (github.event_name == 'workflow_dispatch' && inputs.publish_catalog) || (github.event_name != 'workflow_dispatch' && vars.NEXTOP_APP_RELEASES_PRODUCTION_PUBLISH_CATALOG == 'true') }}
       catalog_only: ${{ github.event_name == 'workflow_dispatch' && inputs.catalog_only }}
       catalog_cloudfront_distribution_id: ${{ vars.NEXTOP_APP_RELEASES_PRODUCTION_CLOUDFRONT_DISTRIBUTION_ID || vars.NEXTOP_APP_RELEASES_CLOUDFRONT_DISTRIBUTION_ID || '' }}

@@ -35,7 +35,7 @@ const MANIFEST_LOCALIZATIONS = {
 
 export function createManifest({ version }) {
   return {
-    schemaVersion: "tutti.app.manifest.v1",
+    schemaVersion: "nextop.app.manifest.v1",
     appId: APP_ID,
     version,
     name: APP_NAME,
@@ -61,7 +61,7 @@ export function createManifest({ version }) {
       })),
     },
     author: {
-      name: "Tutti",
+      name: "Nextop",
     },
     tags: ["local-first", "agent", "chat", "team"],
   };
@@ -93,13 +93,13 @@ exec "$node_bin" "$package_dir/server/server.js"
 }
 
 export function renderAgentsGuide() {
-  return `# Group Chat Tutti Package
+  return `# Group Chat Nextop Package
 
-This package runs Group Chat as a Tutti workspace app.
+This package runs Group Chat as a Nextop workspace app.
 
 ## Files
 
-- \`tutti.app.json\`: Tutti app manifest.
+- \`nextop.app.json\`: Nextop app manifest.
 - \`bootstrap.sh\`: maps \`NEXTOP_APP_*\` runtime variables into Group Chat env and starts the server.
 - \`server/server.js\`: bundled Fastify server.
 - \`dist/\`: built React/Vite frontend.
@@ -107,12 +107,12 @@ This package runs Group Chat as a Tutti workspace app.
 
 ## Runtime
 
-Tutti starts \`bootstrap.sh\` with no arguments. The app binds to
+Nextop starts \`bootstrap.sh\` with no arguments. The app binds to
 \`NEXTOP_APP_HOST:NEXTOP_APP_PORT\`, serves \`dist/\`, and stores durable
 SQLite data, uploads, room workspaces, and agent workspaces under
 \`NEXTOP_APP_DATA_DIR\` via \`GROUP_CHAT_HOME\`.
 
-The app intentionally does not expose a \`tutti.cli.json\` manifest in this
+The app intentionally does not expose a \`nextop.cli.json\` manifest in this
 phase. Keep the package focused on the GUI/local-agent IM experience.
 `;
 }
@@ -135,7 +135,7 @@ export async function readRootPackage() {
 }
 
 export async function readSourceManifest() {
-  const data = await readFile(path.join(rootDir, "tutti.app.json"), "utf8");
+  const data = await readFile(path.join(rootDir, "nextop.app.json"), "utf8");
   return JSON.parse(data);
 }
 
@@ -163,7 +163,7 @@ async function writePackageFiles(manifest) {
   await mkdir(path.join(packageRoot, "server"), { recursive: true });
 
   await writeFile(
-    path.join(packageRoot, "tutti.app.json"),
+    path.join(packageRoot, "nextop.app.json"),
     `${JSON.stringify(manifest, null, 2)}\n`,
   );
   for (const { file, metadata } of Object.values(MANIFEST_LOCALIZATIONS)) {
@@ -223,7 +223,7 @@ export async function assertNoSymlinks(root) {
 
 export async function validatePackageRoot(root) {
   const requiredFiles = [
-    "tutti.app.json",
+    "nextop.app.json",
     "AGENTS.md",
     "bootstrap.sh",
     "icon.svg",
@@ -239,9 +239,9 @@ export async function validatePackageRoot(root) {
     }
   }
 
-  const manifest = JSON.parse(await readFile(path.join(root, "tutti.app.json"), "utf8"));
-  if (manifest.schemaVersion !== "tutti.app.manifest.v1") {
-    throw new Error("Manifest schemaVersion must be tutti.app.manifest.v1");
+  const manifest = JSON.parse(await readFile(path.join(root, "nextop.app.json"), "utf8"));
+  if (manifest.schemaVersion !== "nextop.app.manifest.v1") {
+    throw new Error("Manifest schemaVersion must be nextop.app.manifest.v1");
   }
   if (manifest.appId !== APP_ID) {
     throw new Error(`Manifest appId must be ${APP_ID}`);
@@ -250,7 +250,7 @@ export async function validatePackageRoot(root) {
     throw new Error("Manifest runtime must not declare kind");
   }
   if (manifest.cli) {
-    throw new Error("Group Chat GUI package must not include a Tutti CLI manifest");
+    throw new Error("Group Chat GUI package must not include a Nextop CLI manifest");
   }
   if (!manifest.runtime?.bootstrap || !manifest.runtime?.healthcheckPath?.startsWith("/")) {
     throw new Error("Manifest runtime bootstrap and healthcheckPath are required");
@@ -287,7 +287,6 @@ export async function packageNextopApp() {
     version,
   };
 
-  await run("pnpm", ["--filter", "@group-chat/shared", "build"]);
   await run("pnpm", ["--filter", "@group-chat/web", "build"]);
   await mkdir(buildRoot, { recursive: true });
   await writePackageFiles(manifest);

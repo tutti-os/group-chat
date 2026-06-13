@@ -20,7 +20,7 @@ async function makeTempPackageRoot() {
 
 test("createManifest returns the Nextop package manifest contract", () => {
   assert.deepEqual(createManifest({ version: "1.2.3" }), {
-    schemaVersion: "tutti.app.manifest.v1",
+    schemaVersion: "nextop.app.manifest.v1",
     appId: "group-chat",
     version: "1.2.3",
     name: "Group Chat",
@@ -48,13 +48,13 @@ test("createManifest returns the Nextop package manifest contract", () => {
       ],
     },
     author: {
-      name: "Tutti",
+      name: "Nextop",
     },
     tags: ["local-first", "agent", "chat", "team"],
   });
 });
 
-test("root Tutti app manifest matches the generated package manifest", async () => {
+test("root Nextop app manifest matches the generated package manifest", async () => {
   const manifest = await readSourceManifest();
 
   assert.deepEqual(manifest, createManifest({ version: manifest.version }));
@@ -86,7 +86,7 @@ test("validatePackageRoot accepts the required Nextop package files", async () =
   await mkdir(path.join(root, "server"), { recursive: true });
   await mkdir(path.join(root, "dist"), { recursive: true });
   await mkdir(path.join(root, "locales", "zh-CN"), { recursive: true });
-  await writeFile(path.join(root, "tutti.app.json"), `${JSON.stringify(createManifest({ version: "1.2.3" }), null, 2)}\n`);
+  await writeFile(path.join(root, "nextop.app.json"), `${JSON.stringify(createManifest({ version: "1.2.3" }), null, 2)}\n`);
   await writeFile(path.join(root, "locales", "zh-CN", "manifest.json"), `${JSON.stringify({ name: "群聊" }, null, 2)}\n`);
   await writeFile(path.join(root, "AGENTS.md"), renderAgentsGuide());
   await writeFile(path.join(root, "bootstrap.sh"), renderBootstrap({ version: "1.2.3" }));
@@ -106,10 +106,10 @@ test("assertNoSymlinks rejects symlinks", async () => {
   await assert.rejects(() => assertNoSymlinks(root), /Package contains symlink/);
 });
 
-test("root Tutti manifest is valid JSON", async () => {
-  const manifest = JSON.parse(await readFile("tutti.app.json", "utf8"));
+test("root Nextop manifest is valid JSON", async () => {
+  const manifest = JSON.parse(await readFile("nextop.app.json", "utf8"));
 
-  assert.equal(manifest.schemaVersion, "tutti.app.manifest.v1");
+  assert.equal(manifest.schemaVersion, "nextop.app.manifest.v1");
   assert.equal(manifest.appId, "group-chat");
   assert.equal(manifest.name, "Group Chat");
   assert.equal(manifest.runtime.healthcheckPath, "/api/health");

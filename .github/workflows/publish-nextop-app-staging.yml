@@ -24,14 +24,13 @@ permissions:
 
 jobs:
   publish:
-    uses: tutti-os/tutti/.github/workflows/publish-tutti-app-release.yml@main
+    uses: tutti-os/tutti/.github/workflows/publish-nextop-app-release.yml@main
     with:
       app_id: group-chat
       package_command: pnpm package:nextop
       package_dir: build/nextop-app/package
       icon_path: build/nextop-app/package/icon.svg
       release_version: ${{ inputs.release_version || '' }}
-      version_manifest_path: tutti.app.json
       runner: macos-latest
       pnpm_version: 10.11.0
       aws_region: ${{ vars.NEXTOP_APP_RELEASES_STAGING_AWS_REGION || vars.NEXTOP_APP_RELEASES_AWS_REGION }}
