@@ -1505,9 +1505,14 @@ function buildMentionOptions(
   ) {
     options.push({ kind: "all", key: "all", label: "所有人" });
   }
-  for (const participant of participants) {
-    if (mentionedIds.has(participant.id)) continue;
-    if (!participant.displayName.toLowerCase().includes(normalizedQuery)) continue;
+  const matchingParticipants = participants
+    .filter((participant) => !mentionedIds.has(participant.id) && participant.displayName.toLowerCase().includes(normalizedQuery))
+    .sort((left, right) => {
+      const byCreatedAt = right.createdAt.localeCompare(left.createdAt);
+      if (byCreatedAt !== 0) return byCreatedAt;
+      return right.sortOrder - left.sortOrder;
+    });
+  for (const participant of matchingParticipants) {
     options.push({
       kind: "participant",
       key: participant.id,

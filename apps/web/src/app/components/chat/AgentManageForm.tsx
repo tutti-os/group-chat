@@ -33,6 +33,7 @@ export function AgentManageForm(props: {
   onUpdateParticipant: (participantId: string, input: UpdateParticipantRequest) => Promise<unknown>;
   onRemoveParticipant?: (participantId: string) => Promise<unknown>;
   onSaved?: () => void;
+  onRemoved?: () => void;
 }) {
   const { participant, identity, runtimeProfile } = props;
   const isAddMode = props.mode === "add";
@@ -238,7 +239,7 @@ export function AgentManageForm(props: {
                 className={"[display:inline-flex] [height:32px] [align-items:center] [border:0] [border-radius:10px] [padding:0_12px] [color:var(--danger)] [background:#fde8e7] [font-size:12px] [font-weight:650]"}
                 onClick={() => {
                   if (!window.confirm(`确定将 ${participant.displayName} 移出此群吗？`)) return;
-                  void props.onRemoveParticipant!(participant.id).then(() => props.onSaved?.());
+                  void props.onRemoveParticipant!(participant.id).then(() => props.onRemoved?.());
                 }}
               >
                 移除

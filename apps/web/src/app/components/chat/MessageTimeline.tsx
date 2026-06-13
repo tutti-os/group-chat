@@ -320,7 +320,10 @@ export function MessageTimeline(props: {
           onOpenMembers={props.onOpenMembers}
         />
       ) : null}
-      {visibleMessages.map((message) => (
+      {visibleMessages.map((message) =>
+        message.role === "system" ? (
+          <SystemNoticeRow key={message.id} message={message} />
+        ) : (
         <MessageRow
           key={message.id}
           message={message}
@@ -367,7 +370,8 @@ export function MessageTimeline(props: {
           onRecallMessage={() => props.onRecallMessage(message)}
           onSelectMessage={() => enterSelectionMode(message)}
         />
-      ))}
+        ),
+      )}
       {selectionMode && props.bulkToolbarHost
         ? createPortal(
             <BulkMessageToolbar
@@ -553,6 +557,23 @@ function buildReferencedThread(
     current = resolveReferencedMessage(current, messages, participants, identities);
   }
   return chain;
+}
+
+function SystemNoticeRow(props: { message: Message }) {
+  if (props.message.status === "deleted" || props.message.status === "recalled") return null;
+  const text = props.message.content.trim();
+  if (!text) return null;
+  return (
+    <div
+      data-message-id={props.message.id}
+      data-role="system"
+      className={"[display:flex] [justify-content:center] [margin:6px_0_14px] [padding:0_20px]"}
+    >
+      <span className={"[inline-flex] [max-width:min(560px,_100%)] [align-items:center] [justify-content:center] [border-radius:999px] [padding:4px_12px] [color:var(--muted)] [background:#00000008] [font-size:12px] [line-height:18px] [text-align:center]"}>
+        {text}
+      </span>
+    </div>
+  );
 }
 
 function MessageRow(props: {
@@ -926,7 +947,13 @@ function SummaryAgentPicker(props: {
   onSelect: (participant: Participant) => void;
   onClose: () => void;
 }) {
-  const agents = props.participants.filter((participant) => participant.kind === "ai" && participant.status === "active");
+  const agents = props.participants
+    .filter((participant) => participant.kind === "ai" && participant.status === "active")
+    .sort((left, right) => {
+      const byCreatedAt = right.createdAt.localeCompare(left.createdAt);
+      if (byCreatedAt !== 0) return byCreatedAt;
+      return right.sortOrder - left.sortOrder;
+    });
   const preview = props.messages.length > 1
     ? `引用 ${props.messages.length} 条消息 · ${compactInline(props.messages[0]?.content || "[附件]")}`
     : compactInline(props.messages[0]?.content || "[附件]");

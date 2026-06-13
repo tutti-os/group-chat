@@ -201,9 +201,7 @@ server.patch<{ Params: { conversationId: string }; Body: UpdateConversationPinRe
 
 server.post<{ Params: { conversationId: string }; Body: AddParticipantRequest }>(
   "/api/conversations/:conversationId/participants",
-  async (request) => ({
-    participant: chat.addParticipant(request.params.conversationId, request.body),
-  }),
+  async (request) => chat.addParticipant(request.params.conversationId, request.body),
 );
 
 server.patch<{ Params: { participantId: string }; Body: { muted: boolean } }>(

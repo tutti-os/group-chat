@@ -27,6 +27,7 @@ export function AgentProfileDialog(props: {
   showRemove?: boolean;
   onClose: () => void;
   onSaved?: () => void;
+  onRemoved?: () => void;
   onOpenIdentity?: (identityId: string) => void;
   onMention: (participant: Participant) => void;
   onAddParticipant?: (
@@ -242,6 +243,7 @@ export function AgentProfileDialog(props: {
             onUpdateParticipant={props.onUpdateParticipant}
             onRemoveParticipant={props.onRemoveParticipant}
             onSaved={props.onSaved ?? props.onClose}
+            onRemoved={props.onRemoved ?? props.onClose}
           />
         </div>
       </div>

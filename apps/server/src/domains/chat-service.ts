@@ -163,7 +163,8 @@ export class ChatService {
       conversationId,
       payload: { participant },
     });
-    return participant;
+    const systemMessage = this.emitSystemNotice(conversation, `${participant.displayName} 加入了群聊`);
+    return { participant, systemMessage };
   }
 
   updateParticipant(participantId: string, input: UpdateParticipantRequest) {
@@ -558,6 +559,22 @@ export class ChatService {
     const identity = participant.identityId ? this.repo.getIdentity(participant.identityId) : null;
     if (identity) this.workspaces.materializeIdentity(identity);
     this.workspaces.materializeParticipant({ conversation, participant, identity });
+  }
+
+  private emitSystemNotice(conversation: Conversation, content: string) {
+    const message = this.repo.createMessage({
+      conversationId: conversation.id,
+      role: "system",
+      content,
+      status: "success",
+    });
+    this.events.emit({
+      type: "message.created",
+      roomId: conversation.roomId,
+      conversationId: conversation.id,
+      payload: { message },
+    });
+    return message;
   }
 
   private recoverReplyQueueOnce() {

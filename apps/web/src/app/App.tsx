@@ -143,7 +143,8 @@ export function App() {
     if (events.length === 0) return;
     setState((current) => {
       let next = current;
-      for (const event of events) {
+      const pending = [...events].sort((left, right) => left.seq - right.seq);
+      for (const event of pending) {
         if (event.seq <= lastSeqRef.current) continue;
         next = applyEvent(next, event);
         lastSeqRef.current = event.seq;
@@ -211,13 +212,13 @@ export function App() {
       if (message.type === "event" && message.event) {
         handleStreamEvent(message.event);
       } else if (message.type === "replay" && message.events) {
-        message.events.forEach(handleStreamEvent);
+        applyEvents(message.events);
       }
     });
     ws.addEventListener("close", () => setConnectionStatus("disconnected"));
     ws.addEventListener("error", () => setConnectionStatus("disconnected"));
     return () => ws.close();
-  }, [state.ready, handleStreamEvent]);
+  }, [state.ready, handleStreamEvent, applyEvents]);
 
   const currentConversation = state.conversations.find((item) => item.id === currentConversationId) ?? null;
   const currentRoom = currentConversation
@@ -228,7 +229,9 @@ export function App() {
     : [];
   const currentAgents = currentParticipants.filter((item) => item.kind === "ai");
   const currentMessages = currentConversation
-    ? state.messages.filter((item) => item.conversationId === currentConversation.id)
+    ? state.messages
+        .filter((item) => item.conversationId === currentConversation.id)
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
     : [];
   const currentActiveRuns = currentConversation
     ? visibleActiveRuns(
@@ -321,6 +324,11 @@ export function App() {
     setAgentProfileParticipantId(null);
     setAgentProfileShowRemove(false);
     setPendingAgentSetupIdentityId(null);
+  };
+  const finishAgentProfileAdd = () => {
+    clearAgentProfileDialog();
+    setMembersPanelOpen(true);
+    setMembersPanelStartAdding(false);
   };
   const finishAgentProfileDialog = () => {
     clearAgentProfileDialog();
@@ -421,10 +429,14 @@ export function App() {
   };
 
   const onAddParticipant = async (conversationId: string, input: Parameters<typeof addParticipant>[1]) => {
-    const result = (await addParticipant(conversationId, input)) as { participant: Participant };
+    const result = (await addParticipant(conversationId, input)) as {
+      participant: Participant;
+      systemMessage?: Message | null;
+    };
     setState((current) => ({
       ...current,
       participants: upsert(current.participants, result.participant),
+      messages: result.systemMessage ? upsert(current.messages, result.systemMessage) : current.messages,
     }));
     return result;
   };
@@ -1019,7 +1031,6 @@ export function App() {
                     setAgentProfileParticipantId(null);
                     setAgentProfileShowRemove(false);
                     setMembersPanelStartAdding(false);
-                    setMembersPanelOpen(false);
                   }}
                   onOpenParticipant={(participant) => {
                     setPendingAgentSetupIdentityId(null);
@@ -1130,11 +1141,9 @@ export function App() {
                   onAddParticipant={onAddParticipant}
                   onUpdateParticipant={onUpdateParticipant}
                   onToggleMute={onToggleMute}
-                  onRemoveParticipant={async (participantId) => {
-                    await onRemoveParticipant(participantId);
-                    finishAgentProfileDialog();
-                  }}
-                  onSaved={finishAgentProfileDialog}
+                  onRemoveParticipant={onRemoveParticipant}
+                  onRemoved={clearAgentProfileDialog}
+                  onSaved={pendingAgentSetupIdentity ? finishAgentProfileAdd : finishAgentProfileDialog}
                   onOpenIdentity={openTeamIdentity}
                 />
                 <RunInspector
