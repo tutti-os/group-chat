@@ -38,6 +38,9 @@ test("createManifest returns the Tutti package manifest contract", () => {
     cli: {
       manifest: "tutti.cli.json",
     },
+    references: {
+      searchEndpoint: "/tutti/references/search",
+    },
     window: {
       minimizeBehavior: "keep-mounted",
       minWidth: 960,
@@ -133,5 +136,6 @@ test("root Tutti manifest is valid JSON", async () => {
   assert.equal(manifest.appId, "group-chat");
   assert.equal(manifest.name, "Group Chat");
   assert.equal(manifest.cli.manifest, "tutti.cli.json");
+  assert.equal(manifest.references.searchEndpoint, "/tutti/references/search");
   assert.equal(manifest.runtime.healthcheckPath, "/api/health");
 });

@@ -51,6 +51,9 @@ export function createManifest({ version }) {
     cli: {
       manifest: "tutti.cli.json",
     },
+    references: {
+      searchEndpoint: "/tutti/references/search",
+    },
     window: {
       minimizeBehavior: "keep-mounted",
       minWidth: 960,
@@ -109,6 +112,7 @@ This package runs Group Chat as a Tutti workspace app.
 - \`icon.svg\`: package icon.
 - \`tutti.cli.json\`: read-only Tutti CLI command manifest.
 - \`COMMANDS.md\`: command documentation.
+- \`/tutti/references/search\`: app reference search endpoint for public Group Chat artifacts.
 
 ## Runtime
 
@@ -119,6 +123,8 @@ SQLite data, uploads, room workspaces, and agent workspaces under
 
 The app exposes read-only Tutti CLI commands under \`/tutti/cli/*\` so external
 agents can discover rooms and conversations without driving the UI.
+It also exposes \`/tutti/references/search\` so Tutti app mentions can surface
+public Group Chat artifacts as host-managed file references.
 `;
 }
 
@@ -503,6 +509,9 @@ export async function validatePackageRoot(root) {
   }
   if (manifest.cli?.manifest !== "tutti.cli.json") {
     throw new Error("Manifest cli.manifest must be tutti.cli.json");
+  }
+  if (manifest.references?.searchEndpoint !== "/tutti/references/search") {
+    throw new Error("Manifest references.searchEndpoint must be /tutti/references/search");
   }
   const cliManifest = JSON.parse(await readFile(path.join(root, "tutti.cli.json"), "utf8"));
   if (cliManifest.schemaVersion !== "tutti.app.cli.v1") {
