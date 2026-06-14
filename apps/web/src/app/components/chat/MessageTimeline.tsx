@@ -4,7 +4,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Braces, BrainCircuit, CheckSquare, ChevronsDown, Copy, Edit3, FileText, MoreHorizontal, Reply, RotateCcw, SendToBack, Terminal, Trash2, Wrench, X } from "lucide-react";
 import type { Artifact, Conversation, Identity, Message, MessageBlock, Participant, Room, RuntimeProfile } from "@group-chat/shared";
-import { openArtifactInSystem } from "../../../api/client.js";
+import { resolveMessageVisibility } from "@group-chat/shared";
+import { openArtifact } from "../../artifact-actions.js";
 import { formatBytes, formatMessageStatus } from "../../formatting.js";
 import type { LocalUserProfile } from "../../user-profile.js";
 import { UserAvatar, type UserAvatarSize } from "../ui/UserAvatar.js";
@@ -159,27 +160,8 @@ export function MessageTimeline(props: {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [selectionMode, openMessageMenu, closeOpenMessageMenu, summaryAgentPickerMessages, props.openBackgroundTask, detailReplyMessageId]);
 
-  const openArtifact = async (artifact: Artifact) => {
-    if (artifact.mimeType.startsWith("image/")) {
-      setPreview({ title: artifact.filename, mimeType: artifact.mimeType, url: artifact.publicUrl });
-      return;
-    }
-    if (isTextAttachment(artifact.mimeType, artifact.filename)) {
-      setPreview({ title: artifact.filename, mimeType: artifact.mimeType, loading: true });
-      try {
-        const response = await fetch(artifact.publicUrl);
-        const text = response.ok ? await response.text() : artifact.textPreview;
-        setPreview({ title: artifact.filename, mimeType: artifact.mimeType, text: text ?? "" });
-      } catch {
-        setPreview({ title: artifact.filename, mimeType: artifact.mimeType, text: artifact.textPreview ?? "" });
-      }
-      return;
-    }
-    try {
-      await openArtifactInSystem(artifact.id);
-    } catch {
-      window.open(artifact.publicUrl, "_blank", "noopener,noreferrer");
-    }
+  const handleOpenArtifact = async (artifact: Artifact) => {
+    await openArtifact(artifact, setPreview);
   };
 
   const toggleSelectedMessage = (messageId: string) => {
@@ -340,7 +322,7 @@ export function MessageTimeline(props: {
           userProfile={props.userProfile}
           onOpenAgentProfile={props.onOpenAgentProfile}
           onMentionParticipant={mentionParticipantKeepingScroll}
-          onOpenArtifact={openArtifact}
+          onOpenArtifact={handleOpenArtifact}
           onOpenMessageLink={props.onOpenMessageLink}
           onOpenSummaryLink={props.onOpenSummaryLink}
           onEnsureSummaryTask={props.onEnsureSummaryTask}
@@ -429,7 +411,7 @@ export function MessageTimeline(props: {
             scrollToMessage(messageId);
             setDetailReplyMessageId(null);
           }}
-          onOpenArtifact={openArtifact}
+          onOpenArtifact={handleOpenArtifact}
         />
       ) : null}
       {summaryAgentPickerMessages?.length ? (
@@ -516,6 +498,7 @@ function EmptyTimelineState(props: { participantsCount: number; onOpenMembers: (
 }
 
 function shouldShowMessage(message: Message) {
+  if (message.role === "assistant" && message.status === "error") return true;
   return !(message.role === "assistant" && !message.content.trim() && (message.status === "cancelled" || message.status === "streaming"));
 }
 
@@ -557,6 +540,14 @@ function buildReferencedThread(
     current = resolveReferencedMessage(current, messages, participants, identities);
   }
   return chain;
+}
+
+function WhisperBadge() {
+  return (
+    <span data-whisper-badge="true" className={"[display:inline-flex] [flex:0_0_auto] [height:18px] [align-items:center] [border:1px_dashed_#c4b5fd] [border-radius:999px] [padding:0_6px] [color:#7c3aed] [background:#f5f3ff] [font-size:10px] [font-weight:650] [line-height:18px]"}>
+      悄悄话
+    </span>
+  );
 }
 
 function SystemNoticeRow(props: { message: Message }) {
@@ -624,12 +615,14 @@ function MessageRow(props: {
     ? props.identities.find((identity) => identity.id === props.participant?.identityId) ?? null
     : null;
   const senderLabel = resolveMessageSenderLabel(props.message, props.participant, participantIdentity);
+  const isWhisper = resolveMessageVisibility(props.message, props.allMessages) === "whisper";
   return (
     <article
       data-message-id={props.message.id}
       data-role={props.message.role}
+      data-whisper={isWhisper || undefined}
       data-selected={props.selected || undefined}
-      className={`group/message [position:relative] [display:grid] [grid-template-columns:34px_minmax(0,_1fr)] [gap:8px] [margin-bottom:12px] [align-items:start] [border-radius:18px] [transition:background-color_0.2s_ease,_box-shadow_0.2s_ease] [&[data-selected=true]]:[background:#eaf2ff66] [&[data-flash=true]]:[background:#fef3c7] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] ${props.selectionMode ? "[padding-left:30px]" : ""} [&[data-role=user]]:[grid-template-columns:minmax(0,_1fr)_34px] [&[data-role=user]_[data-slot=message-avatar]]:[grid-column:2] [&[data-role=user]_[data-slot=message-avatar]]:[grid-row:1] [&[data-role=user]_[data-slot=message-body]]:[grid-column:1] [&[data-role=user]_[data-slot=message-body]]:[grid-row:1] [&[data-role=user]_[data-slot=message-body]]:[width:fit-content] [&[data-role=user]_[data-slot=message-body]]:[justify-self:end] [&[data-role=user]_[data-slot=message-meta]]:[justify-content:flex-end] [&[data-role=user]_[data-slot=message-block]]:[margin-left:auto] [&[data-role=user]_[data-slot=message-block]:not([data-link-only])]:[border-color:transparent] [&[data-role=user]_[data-slot=message-block]:not([data-link-only])]:[background:#d6e9ff] [&[data-role=user]_[data-slot=message-block][data-link-only]]:[background:transparent] [&[data-role=user]_[data-slot=message-block][data-link-only]]:[justify-items:end] [&[data-role=user]_[data-slot=message-block-shell]]:[margin-left:auto] [&[data-role=user]_[data-slot=event-block]]:[margin-left:auto] [&[data-role=user]_[data-slot=artifact-block]]:[margin-left:auto]`}
+      className={`group/message [position:relative] [display:grid] [grid-template-columns:34px_minmax(0,_1fr)] [gap:8px] [margin-bottom:12px] [align-items:start] [border-radius:18px] [transition:background-color_0.2s_ease,_box-shadow_0.2s_ease] [&[data-selected=true]]:[background:#eaf2ff66] [&[data-flash=true]]:[background:#fef3c7] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] ${props.selectionMode ? "[padding-left:30px]" : ""} [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#c4b5fd] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[background:#faf5ff] [&[data-role=user]]:[grid-template-columns:minmax(0,_1fr)_34px] [&[data-role=user]_[data-slot=message-avatar]]:[grid-column:2] [&[data-role=user]_[data-slot=message-avatar]]:[grid-row:1] [&[data-role=user]_[data-slot=message-body]]:[grid-column:1] [&[data-role=user]_[data-slot=message-body]]:[grid-row:1] [&[data-role=user]_[data-slot=message-body]]:[width:fit-content] [&[data-role=user]_[data-slot=message-body]]:[justify-self:end] [&[data-role=user]_[data-slot=message-meta]]:[justify-content:flex-end] [&[data-role=user]_[data-slot=message-block]]:[margin-left:auto] [&[data-role=user]_[data-slot=message-block]:not([data-link-only])]:[border-color:transparent] [&[data-role=user]_[data-slot=message-block]:not([data-link-only])]:[background:#d6e9ff] [&[data-whisper=true][data-role=user]_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#c4b5fd] [&[data-whisper=true][data-role=user]_[data-slot=message-block]:not([data-link-only])]:[background:#f3e8ff] [&[data-role=user]_[data-slot=message-block][data-link-only]]:[background:transparent] [&[data-role=user]_[data-slot=message-block][data-link-only]]:[justify-items:end] [&[data-role=user]_[data-slot=message-block-shell]]:[margin-left:auto] [&[data-role=user]_[data-slot=event-block]]:[margin-left:auto] [&[data-role=user]_[data-slot=artifact-block]]:[margin-left:auto]`}
     >
       {props.selectionMode ? (
         <label className={"[position:absolute] [left:2px] [top:8px] [display:grid] [width:22px] [height:22px] [place-items:center] [cursor:pointer]"}>
@@ -691,8 +684,8 @@ function MessageRow(props: {
             onSelect={props.onSelectMessage}
           />
         ) : null}
-        {!isUserMessage || statusLabel ? (
-          <div data-slot="message-meta" className={`[&_span]:[color:var(--muted)] [&_span]:[font-size:12px] [display:flex] [align-items:center] [gap:7px] [min-height:20px] [margin-bottom:4px] [&_strong]:[color:var(--muted)] [&_strong]:[font-size:12px] [&_strong]:[font-weight:550] ${isUserMessage ? "[justify-content:flex-end]" : ""}`}>
+        {!isUserMessage || statusLabel || isWhisper ? (
+          <div data-slot="message-meta" className={`[&_span:not([data-whisper-badge=true])]:[color:var(--muted)] [&_span:not([data-whisper-badge=true])]:[font-size:12px] [display:flex] [align-items:center] [gap:7px] [min-height:20px] [margin-bottom:4px] [&_strong]:[color:var(--muted)] [&_strong]:[font-size:12px] [&_strong]:[font-weight:550] ${isUserMessage ? "[width:100%] [justify-content:flex-end]" : ""}`}>
             {!isUserMessage ? (
               props.participant && props.participant.status !== "removed" ? (
                 <button
@@ -713,6 +706,7 @@ function MessageRow(props: {
               )
             ) : null}
             {statusLabel ? <span>{statusLabel}</span> : null}
+            {isWhisper ? <WhisperBadge /> : null}
           </div>
         ) : null}
         {isRemoved ? (
@@ -1522,7 +1516,7 @@ function MessageBlockRenderer(props: {
     <div
       data-slot="message-block"
       data-link-only={isLinkOnly || undefined}
-      className={`message-prose [width:fit-content] [max-width:100%] [border:0] [border-radius:16px] [color:var(--text)] ${isLinkOnly ? "[display:grid] [gap:6px] [padding:0] [background:transparent]" : "[padding:10px_13px] [background:#00000008]"} ${props.block.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""}`}
+      className={`message-prose [width:fit-content] [max-width:100%] [border:0] [border-radius:16px] [color:var(--text)] ${isLinkOnly ? "[display:grid] [gap:6px] [padding:0] [background:transparent]" : "[padding:10px_13px] [background:#00000008]"} ${props.block.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${props.block.status === "error" ? "[border:1px_solid_#fecaca] [color:var(--danger)] [background:#fef2f2]" : ""}`}
     >
       {props.quotedMessage ? (
         <ReferencedMessagePreview

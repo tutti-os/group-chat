@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm --filter @group-chat/shared build && pnpm --parallel --filter @group-chat/server --filter @group-chat/web dev",
+    "dev:server-access": "pnpm --filter @group-chat/shared build && pnpm --filter @group-chat/web build && pnpm --filter @group-chat/server dev",
     "dev:web": "pnpm --filter @group-chat/web dev",
     "dev:server": "pnpm --filter @group-chat/server dev",
     "build": "pnpm -r build",

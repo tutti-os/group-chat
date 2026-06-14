@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent } from "react";
-import { FileText, ImageIcon, Paperclip, Send, Square, Users, X, Zap } from "lucide-react";
+import { Ear, FileText, ImageIcon, Paperclip, Send, Square, Users, X, Zap } from "lucide-react";
 import type { AgentRun, Artifact, Conversation, Identity, MentionTarget, Message, Participant, Room, RuntimeProfile } from "@group-chat/shared";
 import { cancelRun, sendMessage, updateMessage, uploadArtifact } from "../../../api/client.js";
 import { formatBytes, fileToBase64 } from "../../formatting.js";
@@ -81,11 +81,13 @@ export function Composer(props: {
       }
       const artifacts = await uploadQueuedItems(uploadItems);
       const editorMentions = collectMentionTargetsFromEditor(editorRef.current, mentionableParticipants);
+      const isWhisper = hasWhisperChipInEditor(editorRef.current);
       await props.onSend(props.conversationId, {
         content: quotes.length ? `${formatQuotesForMessage(quotes)}\n\n${text}` : text,
         artifactIds: artifacts.map((artifact) => artifact.id),
         parentMessageId: quotes.length === 1 ? quotes[0]!.messageId : null,
         mentions: editorMentions,
+        visibility: isWhisper ? "whisper" : "public",
       });
       setText("");
       setEditorText(editorRef.current, "", 0);
@@ -297,6 +299,44 @@ export function Composer(props: {
       insertMention(option.participant);
     }
     setMentionQuery(null);
+  };
+
+  const insertWhisperMention = (participant: Participant) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    captureActiveMentionQueryRange(editor);
+
+    suppressEditorSyncRef.current = true;
+    let trailingSpace: Text | null = null;
+    try {
+      let queryRange = mentionQueryRangeRef.current;
+      if (
+        queryRange &&
+        (!editor.contains(queryRange.startContainer) || !editor.contains(queryRange.endContainer))
+      ) {
+        queryRange = null;
+      }
+      if (!queryRange) {
+        restoreMentionSelection(editor);
+        queryRange = findActiveMentionQueryRange(editor);
+      }
+      if (queryRange && !rangeCrossesMentionChip(queryRange)) {
+        trailingSpace = replaceMentionQueryRange(queryRange.cloneRange(), participant.displayName, participant.id);
+      } else {
+        trailingSpace = appendMentionChipToEditor(editor, participant.displayName, participant.id);
+      }
+      trailingSpace = attachWhisperChipBeforeTrailingSpace(editor, trailingSpace);
+      normalizeEditorAfterMentionInsert(editor);
+      focusAfterTrailingSpace(trailingSpace, editor);
+    } finally {
+      suppressEditorSyncRef.current = false;
+    }
+
+    setText(editorText(editor));
+    syncMentionedIdsFromEditor(editor);
+    setMentionQuery(null);
+    mentionSelectionRef.current = null;
+    mentionQueryRangeRef.current = null;
   };
 
   const queueFiles = (files: FileList | File[] | null) => {
@@ -630,36 +670,69 @@ export function Composer(props: {
           aria-label="Mention suggestions"
         >
           {mentionOptions.map((option, index) => (
-            <button
-              key={option.key}
-              type="button"
-              role="option"
-              aria-selected={index === activeMentionIndex}
-              data-active={index === activeMentionIndex || undefined}
-              className={"[display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:9px] [width:100%] [min-width:0] [height:38px] [border:0] [border-radius:12px] [padding:0_8px] [color:var(--text)] [text-align:left] [background:transparent] [transition:background-color_0.12s_ease] [&[data-active=true]]:[background:#00000008] [&:hover]:[background:#00000008] [&_strong]:[display:block] [&_strong]:[min-width:0] [&_strong]:[overflow:hidden] [&_strong]:[font-size:12px] [&_strong]:[font-weight:500] [&_strong]:[line-height:16px] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap]"}
-              onMouseDown={(event) => {
-                event.preventDefault();
-                saveMentionSelection();
-                selectMentionOption(option);
-              }}
-              onMouseEnter={() => setActiveMentionIndex(index)}
-            >
-              {option.kind === "all" ? (
+            option.kind === "all" ? (
+              <button
+                key={option.key}
+                type="button"
+                role="option"
+                aria-selected={index === activeMentionIndex}
+                data-active={index === activeMentionIndex || undefined}
+                className={"[display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:9px] [width:100%] [min-width:0] [height:38px] [border:0] [border-radius:12px] [padding:0_8px] [color:var(--text)] [text-align:left] [background:transparent] [transition:background-color_0.12s_ease] [&[data-active=true]]:[background:#00000008] [&:hover]:[background:#00000008] [&_strong]:[display:block] [&_strong]:[min-width:0] [&_strong]:[overflow:hidden] [&_strong]:[font-size:12px] [&_strong]:[font-weight:500] [&_strong]:[line-height:16px] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap]"}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  saveMentionSelection();
+                  selectMentionOption(option);
+                }}
+                onMouseEnter={() => setActiveMentionIndex(index)}
+              >
                 <span className={"[display:inline-grid] [width:32px] [height:32px] [place-items:center] [border-radius:999px] [color:#ffffff] [background:var(--primary)] [box-shadow:inset_0_0_0_1px_#ffffff66]"}>
                   <Users size={14} />
                 </span>
-              ) : (
+                <span className={"[display:inline-flex] [min-width:0] [align-items:center] [gap:6px]"}>
+                  <strong>{option.label}</strong>
+                </span>
+              </button>
+            ) : (
+              <div
+                key={option.key}
+                role="option"
+                aria-selected={index === activeMentionIndex}
+                data-active={index === activeMentionIndex || undefined}
+                className={"[display:grid] [grid-template-columns:32px_minmax(0,_1fr)_30px] [align-items:center] [gap:9px] [width:100%] [min-width:0] [height:38px] [border-radius:12px] [padding:0_4px_0_8px] [color:var(--text)] [transition:background-color_0.12s_ease] [&[data-active=true]]:[background:#00000008] [&:hover]:[background:#00000008]"}
+                onMouseEnter={() => setActiveMentionIndex(index)}
+              >
                 <MentionParticipantAvatar
                   participant={option.participant}
                   identities={props.identities}
                   runtimeProfiles={props.runtimeProfiles}
                 />
-              )}
-              <span className={"[display:inline-flex] [min-width:0] [align-items:center] [gap:6px]"}>
-                <strong>{option.label}</strong>
-                {option.kind === "participant" ? <Zap size={13} fill="currentColor" className={"[flex:0_0_auto] [color:#111111]"} /> : null}
-              </span>
-            </button>
+                <button
+                  type="button"
+                  className={"[display:inline-flex] [min-width:0] [align-items:center] [gap:6px] [height:100%] [border:0] [padding:0] [color:inherit] [text-align:left] [background:transparent] [&:focus-visible]:[outline:none] [&_strong]:[display:block] [&_strong]:[min-width:0] [&_strong]:[overflow:hidden] [&_strong]:[font-size:12px] [&_strong]:[font-weight:500] [&_strong]:[line-height:16px] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap]"}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    saveMentionSelection();
+                    selectMentionOption(option);
+                  }}
+                >
+                  <strong>{option.label}</strong>
+                  <Zap size={13} fill="currentColor" className={"[flex:0_0_auto] [color:#111111]"} />
+                </button>
+                <button
+                  type="button"
+                  className={"[display:inline-grid] [width:30px] [height:30px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [&:hover]:[color:#7c3aed] [&:hover]:[background:#f3e8ff] [&:focus-visible]:[outline:none] [&:focus-visible]:[box-shadow:0_0_0_2px_#ddd6fe]"}
+                  aria-label={`跟 ${option.label} 说悄悄话`}
+                  title="悄悄话"
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    saveMentionSelection();
+                    insertWhisperMention(option.participant);
+                  }}
+                >
+                  <Ear size={15} />
+                </button>
+              </div>
+            )
           ))}
         </div>
       ) : null}
@@ -832,7 +905,7 @@ function needsLeadingSpaceBeforeMentionRange(range: Range): boolean {
 function isInsideMentionChip(node: Node | null): boolean {
   let current: Node | null = node;
   while (current) {
-    if (current instanceof HTMLElement && isMentionChip(current)) return true;
+    if (current instanceof HTMLElement && (isMentionChip(current) || isWhisperChip(current))) return true;
     current = current.parentNode;
   }
   return false;
@@ -1020,6 +1093,53 @@ function createMentionChip(label: string, mentionId: string) {
   return chip;
 }
 
+function createWhisperChip() {
+  const chip = document.createElement("span");
+  chip.contentEditable = "false";
+  chip.dataset.whisperChip = "true";
+  chip.textContent = "悄悄话";
+  chip.className = [
+    "[display:inline-flex]",
+    "[align-items:center]",
+    "[gap:3px]",
+    "[margin-inline:2px]",
+    "[border:1px_dashed_#c4b5fd]",
+    "[border-radius:999px]",
+    "[padding:0_6px]",
+    "[color:#7c3aed]",
+    "[font-size:11px]",
+    "[font-weight:600]",
+    "[line-height:18px]",
+    "[vertical-align:baseline]",
+    "[white-space:nowrap]",
+    "[background:#f5f3ff]",
+  ].join(" ");
+  return chip;
+}
+
+function removeWhisperChips(editor: HTMLDivElement) {
+  for (const chip of editor.querySelectorAll("[data-whisper-chip='true']")) {
+    chip.remove();
+  }
+}
+
+function hasWhisperChipInEditor(editor: HTMLDivElement | null) {
+  return Boolean(editor?.querySelector("[data-whisper-chip='true']"));
+}
+
+function attachWhisperChipBeforeTrailingSpace(editor: HTMLDivElement, trailingSpace: Text | null): Text {
+  removeWhisperChips(editor);
+  const whisper = createWhisperChip();
+  if (trailingSpace?.parentNode) {
+    trailingSpace.parentNode.insertBefore(whisper, trailingSpace);
+    return trailingSpace;
+  }
+  const space = document.createTextNode(" ");
+  editor.appendChild(whisper);
+  editor.appendChild(space);
+  return space;
+}
+
 function textRange(editor: HTMLDivElement, start: number, end: number) {
   const range = document.createRange();
   const startPoint = textPosition(editor, start);
@@ -1065,6 +1185,7 @@ function textPosition(editor: HTMLDivElement, offset: number) {
 }
 
 function nodeTextValue(node: Node) {
+  if (isWhisperChip(node)) return "";
   if (isMentionChip(node)) return `@${node.dataset.mentionLabel ?? node.textContent?.replace(/^@/, "") ?? ""}`;
   if (isMessageLinkChip(node)) return formatMessageLink(node.dataset.messageLinkId ?? "");
   if (isSummaryLinkChip(node)) return formatSummaryLink(node.dataset.summaryLinkId ?? "");
@@ -1081,6 +1202,10 @@ function rangeTextValue(range: Range) {
   return nodeTextValue(fragment);
 }
 
+function isWhisperChip(node: Node): node is HTMLElement {
+  return node instanceof HTMLElement && node.dataset.whisperChip === "true";
+}
+
 function isMentionChip(node: Node): node is HTMLElement {
   return node instanceof HTMLElement && node.dataset.mentionChip === "true";
 }
@@ -1094,7 +1219,7 @@ function isSummaryLinkChip(node: Node): node is HTMLElement {
 }
 
 function isAtomicEditorChip(node: Node): node is HTMLElement {
-  return isMentionChip(node) || isMessageLinkChip(node) || isSummaryLinkChip(node);
+  return isMentionChip(node) || isWhisperChip(node) || isMessageLinkChip(node) || isSummaryLinkChip(node);
 }
 
 function childIndex(node: Node) {

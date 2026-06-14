@@ -184,6 +184,7 @@ export interface Message {
   senderName: string | null;
   content: string;
   mentions: MentionTarget[];
+  visibility: MessageVisibility;
   status: MessageStatus;
   branchId: string | null;
   parentMessageId: string | null;
@@ -227,10 +228,12 @@ export interface AgentRun {
   roomId: Id;
   participantId: string | null;
   assistantMessageId: string | null;
+  triggerMessageId: string | null;
   runtime: string;
   provider: string;
   model: string;
   status: AgentRunStatus;
+  visibility: MessageVisibility;
   resumeMode: "fresh" | "provider-local" | "handoff";
   createdAt: string;
   updatedAt: string;
@@ -389,12 +392,15 @@ export interface UpdateParticipantRequest {
   reasoningEffort?: ReasoningEffort | null;
 }
 
+export type MessageVisibility = "public" | "whisper";
+
 export interface SendMessageRequest {
   content: string;
   artifactIds?: string[];
   mentions?: MentionTarget[];
   parentMessageId?: string | null;
   maxReplyRounds?: number;
+  visibility?: MessageVisibility;
 }
 
 export type PrivateTaskType = "summary" | "agent";
@@ -458,3 +464,89 @@ export const defaultReplyPolicy: ReplyPolicy = {
   maxRounds: 1,
   mentionFollowupRounds: 1,
 };
+
+export function isMessageVisibleToParticipant(message: Message, participantId: string) {
+  if (message.visibility !== "whisper") return true;
+  if (message.role === "user") {
+    return message.mentions.some((mention) => mention.participantId === participantId);
+  }
+  if (message.role === "assistant") {
+    return message.senderParticipantId === participantId;
+  }
+  return false;
+}
+
+export function resolveMessageVisibility(message: Message, messages: Message[] = []): MessageVisibility {
+  if (message.visibility === "whisper") return "whisper";
+  if (message.role !== "user") return "public";
+
+  for (const candidate of messages) {
+    if (candidate.role !== "assistant" || candidate.visibility !== "whisper") continue;
+    if (candidate.createdAt < message.createdAt) continue;
+    if (!candidate.senderParticipantId) continue;
+    if (message.mentions.some((mention) => mention.participantId === candidate.senderParticipantId)) {
+      return "whisper";
+    }
+  }
+
+  return "public";
+}
+
+export function isAgentRunVisibleToParticipant(run: AgentRun, participantId: string) {
+  if (run.visibility !== "whisper") return true;
+  return run.participantId === participantId;
+}
+
+export function resolveAgentRunVisibility(run: AgentRun, messages: Message[]): MessageVisibility {
+  if (run.visibility === "whisper") return "whisper";
+
+  if (run.triggerMessageId) {
+    const trigger = messages.find((message) => message.id === run.triggerMessageId);
+    if (trigger?.visibility === "whisper") return "whisper";
+  }
+
+  const linkedAssistant = run.assistantMessageId
+    ? messages.find((message) => message.id === run.assistantMessageId)
+    : messages.find((message) => message.runId === run.id && message.role === "assistant");
+  if (linkedAssistant?.visibility === "whisper") return "whisper";
+
+  let latestTrigger: Message | null = null;
+  for (const message of messages) {
+    if (message.conversationId !== run.conversationId) continue;
+    if (message.role !== "user") continue;
+    if (!run.participantId) continue;
+    if (!message.mentions.some((mention) => mention.participantId === run.participantId)) continue;
+    if (!latestTrigger || message.createdAt.localeCompare(latestTrigger.createdAt) > 0) {
+      latestTrigger = message;
+    }
+  }
+  if (latestTrigger?.visibility === "whisper") return "whisper";
+
+  return "public";
+}
+
+export function enrichAgentRun(run: AgentRun, messages: Message[]): AgentRun {
+  const visibility = resolveAgentRunVisibility(run, messages);
+  const triggerMessageId = run.triggerMessageId
+    ?? (() => {
+      if (visibility !== "whisper") return run.triggerMessageId;
+      let latestTrigger: Message | null = null;
+      for (const message of messages) {
+        if (message.conversationId !== run.conversationId) continue;
+        if (message.role !== "user") continue;
+        if (message.visibility !== "whisper") continue;
+        if (!run.participantId) continue;
+        if (!message.mentions.some((mention) => mention.participantId === run.participantId)) continue;
+        if (!latestTrigger || message.createdAt.localeCompare(latestTrigger.createdAt) > 0) {
+          latestTrigger = message;
+        }
+      }
+      return latestTrigger?.id ?? run.triggerMessageId;
+    })();
+  if (visibility === run.visibility && triggerMessageId === run.triggerMessageId) return run;
+  return { ...run, visibility, triggerMessageId };
+}
+
+export function enrichAgentRuns(runs: AgentRun[], messages: Message[]): AgentRun[] {
+  return runs.map((run) => enrichAgentRun(run, messages));
+}

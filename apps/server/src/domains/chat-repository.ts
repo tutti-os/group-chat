@@ -565,6 +565,7 @@ export class ChatRepository {
     senderName?: string | null;
     content?: string;
     mentions?: MentionTarget[];
+    visibility?: Message["visibility"];
     status?: "pending" | "streaming" | "success" | "error" | "cancelled";
     parentMessageId?: string | null;
     runId?: string | null;
@@ -574,8 +575,8 @@ export class ChatRepository {
     getDb()
       .prepare(
         `INSERT INTO messages
-         (id, conversation_id, role, sender_participant_id, sender_name, content, mentions, status, branch_id, parent_message_id, run_id, token_usage, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?)`,
+         (id, conversation_id, role, sender_participant_id, sender_name, content, mentions, visibility, status, branch_id, parent_message_id, run_id, token_usage, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?)`,
       )
       .run(
         id,
@@ -585,6 +586,7 @@ export class ChatRepository {
         input.senderName ?? null,
         input.content ?? "",
         json(input.mentions ?? []),
+        input.visibility ?? "public",
         input.status ?? "success",
         input.parentMessageId ?? null,
         input.runId ?? null,
@@ -611,13 +613,16 @@ export class ChatRepository {
     return rows.reverse().map(rowToMessage);
   }
 
-  updateMessage(messageId: string, updates: Partial<Pick<Message, "content" | "status" | "runId" | "mentions">>) {
+  updateMessage(
+    messageId: string,
+    updates: Partial<Pick<Message, "content" | "status" | "runId" | "mentions" | "visibility">>,
+  ) {
     const current = this.getMessage(messageId);
     if (!current) return null;
     const next = { ...current, ...updates, updatedAt: new Date().toISOString() };
     getDb()
-      .prepare(`UPDATE messages SET content = ?, mentions = ?, status = ?, run_id = ?, updated_at = ? WHERE id = ?`)
-      .run(next.content, json(next.mentions), next.status, next.runId, next.updatedAt, messageId);
+      .prepare(`UPDATE messages SET content = ?, mentions = ?, visibility = ?, status = ?, run_id = ?, updated_at = ? WHERE id = ?`)
+      .run(next.content, json(next.mentions), next.visibility, next.status, next.runId, next.updatedAt, messageId);
     return this.getMessage(messageId);
   }
 
@@ -716,17 +721,19 @@ export class ChatRepository {
     conversationId: string;
     participantId: string | null;
     assistantMessageId: string | null;
+    triggerMessageId?: string | null;
     runtime: string;
     provider: string;
     model: string;
+    visibility?: AgentRun["visibility"];
   }): AgentRun {
     const id = nanoid();
     const now = new Date().toISOString();
     getDb()
       .prepare(
         `INSERT INTO agent_runs
-         (id, conversation_id, room_id, participant_id, assistant_message_id, runtime, provider, model, status, resume_mode, created_at, updated_at, completed_at, error)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'accepted', 'fresh', ?, ?, NULL, NULL)`,
+         (id, conversation_id, room_id, participant_id, assistant_message_id, trigger_message_id, runtime, provider, model, visibility, status, resume_mode, created_at, updated_at, completed_at, error)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'accepted', 'fresh', ?, ?, NULL, NULL)`,
       )
       .run(
         id,
@@ -734,9 +741,11 @@ export class ChatRepository {
         input.roomId,
         input.participantId,
         input.assistantMessageId,
+        input.triggerMessageId ?? null,
         input.runtime,
         input.provider,
         input.model,
+        input.visibility ?? "public",
         now,
         now,
       );
@@ -1185,6 +1194,7 @@ function rowToMessage(row: any): Message {
     senderName: row.sender_name,
     content: row.content,
     mentions: parseJson<MentionTarget[]>(row.mentions, []),
+    visibility: row.visibility === "whisper" ? "whisper" : "public",
     status: row.status,
     branchId: row.branch_id,
     parentMessageId: row.parent_message_id,
@@ -1234,10 +1244,12 @@ function rowToAgentRun(row: any): AgentRun {
     roomId: row.room_id,
     participantId: row.participant_id,
     assistantMessageId: row.assistant_message_id,
+    triggerMessageId: row.trigger_message_id ?? null,
     runtime: row.runtime,
     provider: row.provider,
     model: row.model,
     status: row.status,
+    visibility: row.visibility === "whisper" ? "whisper" : "public",
     resumeMode: row.resume_mode,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

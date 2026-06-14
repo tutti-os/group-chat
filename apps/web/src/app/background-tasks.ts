@@ -14,6 +14,7 @@ export interface AgentRunTaskItem {
   participantName: string;
   status: "running";
   preview: string;
+  visibility: "public" | "whisper";
 }
 
 export function createOptimisticBackgroundTask(input: {

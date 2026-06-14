@@ -206,15 +206,15 @@ export function ConversationFilesPanel(props: {
             return (
               <article
                 key={artifact.id}
-                className={"[display:grid] [grid-template-columns:52px_minmax(0,_1fr)_auto] [align-items:center] [gap:10px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:10px] [background:#ffffff] [transition:border-color_0.12s_ease,_background-color_0.12s_ease] hover:[border-color:#d4d4d8] hover:[background:#fbfbfc]"}
+                className={"[display:grid] [grid-template-columns:40px_minmax(0,_1fr)_auto] [align-items:center] [gap:8px] [border:1px_solid_var(--border)] [border-radius:12px] [padding:8px] [background:#ffffff] [transition:border-color_0.12s_ease,_background-color_0.12s_ease] hover:[border-color:#d4d4d8] hover:[background:#fbfbfc]"}
               >
                 <button
                   type="button"
-                  className={"[display:grid] [grid-column:1_/_3] [grid-template-columns:52px_minmax(0,_1fr)] [align-items:center] [gap:10px] [border:0] [padding:0] [text-align:left] [color:inherit] [background:transparent] [&:focus-visible]:[outline:none]"}
+                  className={"[display:grid] [grid-column:1_/_3] [grid-template-columns:40px_minmax(0,_1fr)] [align-items:center] [gap:8px] [border:0] [padding:0] [text-align:left] [color:inherit] [background:transparent] [&:focus-visible]:[outline:none]"}
                   title={artifact.messageId ? "定位到原消息" : "暂无关联消息"}
                   onClick={() => openSourceMessage(artifact)}
                 >
-                  <span className={"[display:grid] [width:52px] [height:52px] [place-items:center] [overflow:hidden] [border-radius:12px] [background:#f3f4f6]"}>
+                  <span className={"[display:grid] [width:40px] [height:40px] [place-items:center] [overflow:hidden] [border-radius:8px] [background:#f3f4f6]"}>
                     {artifactCategory === "image" ? (
                       <img
                         src={artifact.publicUrl}
@@ -222,45 +222,41 @@ export function ConversationFilesPanel(props: {
                         className={"[width:100%] [height:100%] [object-fit:cover]"}
                       />
                     ) : (
-                      <span className={"[display:grid] [width:40px] [height:46px] [place-items:center] [border-radius:7px] [color:#ffffff] [background:#8d96a3]"}>
-                        {artifactCategory === "video" ? <Video size={20} /> : <FileText size={20} />}
+                      <span className={"[display:grid] [width:30px] [height:34px] [place-items:center] [border-radius:6px] [color:#ffffff] [background:#8d96a3]"}>
+                        {artifactCategory === "video" ? <Video size={16} /> : <FileText size={16} />}
                       </span>
                     )}
                   </span>
-                  <span className={"[display:grid] [min-width:0] [gap:4px]"}>
-                    <strong className={"[overflow:hidden] [font-size:13px] [font-weight:650] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>
+                  <span className={"[display:grid] [min-width:0] [gap:2px]"}>
+                    <strong className={"[overflow:hidden] [font-size:13px] [font-weight:650] [line-height:1.25] [text-overflow:ellipsis] [white-space:nowrap]"}>
                       {artifact.filename}
                     </strong>
-                    <span className={"[display:flex] [min-width:0] [align-items:center] [gap:6px] [color:var(--muted)] [font-size:11px] [line-height:1.35]"}>
-                      <span>{formatBytes(artifact.sizeBytes)}</span>
-                      <span>·</span>
-                      <span>{formatShortDate(artifact.createdAt)}</span>
-                    </span>
-                    <span className={"[overflow:hidden] [color:var(--muted)] [font-size:11px] [text-overflow:ellipsis] [white-space:nowrap]"}>
-                      {message ? `${formatMessageSender(message)} 发送` : "未关联消息"}
+                    <span className={"[overflow:hidden] [color:var(--muted)] [font-size:11px] [line-height:1.3] [text-overflow:ellipsis] [white-space:nowrap]"}>
+                      {formatBytes(artifact.sizeBytes)} · {formatShortDate(artifact.createdAt)}
+                      {message ? ` · ${formatMessageSender(message)} 发送` : " · 未关联消息"}
                     </span>
                   </span>
                 </button>
-                <div className={"[display:flex] [align-items:center] [gap:4px]"}>
+                <div className={"[display:flex] [align-items:center] [gap:2px]"}>
                   <button
                     type="button"
-                    className={"[display:inline-grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [&:focus-visible]:[outline:none]"}
+                    className={"[display:inline-grid] [width:28px] [height:28px] [place-items:center] [border:0] [border-radius:8px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [&:focus-visible]:[outline:none]"}
                     aria-label={`预览 ${artifact.filename}`}
                     title="预览"
                     onPointerDown={stopPanelPointerBubble}
                     onClick={(event) => handlePreview(artifact, event)}
                   >
-                    <Eye size={14} />
+                    <Eye size={13} />
                   </button>
                   <button
                     type="button"
-                    className={"[display:inline-grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [&:focus-visible]:[outline:none]"}
+                    className={"[display:inline-grid] [width:28px] [height:28px] [place-items:center] [border:0] [border-radius:8px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [&:focus-visible]:[outline:none]"}
                     aria-label={`下载 ${artifact.filename}`}
                     title="下载"
                     onPointerDown={stopPanelPointerBubble}
                     onClick={(event) => handleDownload(artifact, event)}
                   >
-                    <Download size={14} />
+                    <Download size={13} />
                   </button>
                 </div>
               </article>

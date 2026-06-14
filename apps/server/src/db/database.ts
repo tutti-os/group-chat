@@ -245,6 +245,9 @@ function migrate(database: DatabaseSync) {
   `);
 
   ensureColumn(database, "messages", "mentions", "TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn(database, "messages", "visibility", "TEXT NOT NULL DEFAULT 'public'");
+  ensureColumn(database, "agent_runs", "visibility", "TEXT NOT NULL DEFAULT 'public'");
+  ensureColumn(database, "agent_runs", "trigger_message_id", "TEXT");
   ensureColumn(database, "participants", "listen_mode", "TEXT NOT NULL DEFAULT 'passive'");
   ensureColumn(database, "participants", "room_instructions", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(database, "conversations", "collaboration_rules", "TEXT NOT NULL DEFAULT ''");

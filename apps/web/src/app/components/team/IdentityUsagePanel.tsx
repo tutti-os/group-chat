@@ -19,7 +19,7 @@ export function IdentityUsagePanel(props: {
       {hasUsage ? (
         <>
           <p className={"[margin:0] [color:var(--muted)] [font-size:12px] [line-height:1.55]"}>
-            已加入 {roomCount} 个房间 · {cloneCount} 个分身。删除 Agent 会从房间移除，历史消息保留。
+            已加入 {roomCount} 个房间 · {cloneCount} 个分身员工。删除 Agent 会从房间移除，历史消息保留。
           </p>
           <div className={"[display:grid] [gap:8px]"}>
             {props.usage.map((room) => (
@@ -81,10 +81,10 @@ function UsageRoomSection(props: {
           type="button"
           className={"[display:inline-flex] [flex-shrink:0] [align-items:center] [gap:4px] [border:0] [padding:10px_12px_10px_4px] [color:var(--muted)] [background:transparent] [font-size:11px] [font-weight:650] [white-space:nowrap] [cursor:pointer] [&:hover]:[color:var(--text)] [&:focus-visible]:[outline:none]"}
           aria-expanded={expanded}
-          aria-label={`${expanded ? "收起" : "展开"} ${room.title} 的分身列表`}
+          aria-label={`${expanded ? "收起" : "展开"} ${room.title} 的分身员工列表`}
           onClick={() => setExpanded((current) => !current)}
         >
-          {room.clones.length} 个分身
+          {room.clones.length} 个分身员工
           <ChevronRight
             size={16}
             className={`[flex-shrink:0] [transition:transform_0.15s_ease] ${expanded ? "[transform:rotate(90deg)]" : ""}`}

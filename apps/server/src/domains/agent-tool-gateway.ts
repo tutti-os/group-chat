@@ -1,4 +1,5 @@
 import type { UploadArtifactRequest } from "@group-chat/shared";
+import { isAgentRunVisibleToParticipant, isMessageVisibleToParticipant, enrichAgentRun } from "@group-chat/shared";
 import { participantWorkspaceRoot } from "../local/paths.js";
 import { EventHub } from "../ws/event-hub.js";
 import { AgentToolTokenStore, type AgentToolCredential } from "./agent-tool-tokens.js";
@@ -24,6 +25,7 @@ export class AgentToolGateway {
     const snapshot = this.repo.snapshot();
     const messages = snapshot.messages
       .filter((message) => message.conversationId === conversation.id)
+      .filter((message) => isMessageVisibleToParticipant(message, participant.id))
       .slice(-30);
     const messageIds = new Set(messages.map((message) => message.id));
     return {
@@ -37,7 +39,14 @@ export class AgentToolGateway {
       messages,
       messageBlocks: snapshot.messageBlocks.filter((block) => messageIds.has(block.messageId)),
       artifacts: snapshot.artifacts.filter((artifact) => artifact.conversationId === conversation.id),
-      activeRuns: snapshot.activeRuns.filter((run) => run.conversationId === conversation.id),
+      activeRuns: snapshot.activeRuns.filter(
+        (run) =>
+          run.conversationId === conversation.id
+          && isAgentRunVisibleToParticipant(
+            enrichAgentRun(run, snapshot.messages),
+            participant.id,
+          ),
+      ),
       toolRun: {
         runId: grant.runId,
         expiresAt: grant.expiresAt,

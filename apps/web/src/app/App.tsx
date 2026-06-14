@@ -1,6 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { Bot, MessageCircle, WifiOff } from "lucide-react";
-import type { AgentRun, Conversation, CreateIdentityRequest, Identity, LocalAgentProviderStatus, Message, Participant, PrivateTaskSnapshot, Room, StreamEvent, UpdateIdentityRequest, UpdateMessageRequest, UpdateParticipantRequest, UpdateRoomRequest, WsServerMessage } from "@group-chat/shared";
+import { enrichAgentRuns, resolveAgentRunVisibility, type AgentRun,
+  type Conversation,
+  type CreateIdentityRequest,
+  type Identity,
+  type LocalAgentProviderStatus,
+  type Message,
+  type Participant,
+  type PrivateTaskSnapshot,
+  type Room,
+  type StreamEvent,
+  type UpdateIdentityRequest,
+  type UpdateMessageRequest,
+  type UpdateParticipantRequest,
+  type UpdateRoomRequest,
+  type WsServerMessage,
+} from "@group-chat/shared";
 import {
   addParticipant,
   cancelRun,
@@ -32,7 +47,6 @@ import { AgentRunPanel } from "./components/chat/AgentRunPanel.js";
 import { RoomAgentsDialog } from "./components/chat/RoomAgentsDialog.js";
 import { AgentProfileDialog } from "./components/chat/AgentProfileDialog.js";
 import { MessageTimeline } from "./components/chat/MessageTimeline.js";
-import { RunInspector } from "./components/chat/RunInspector.js";
 import { Composer } from "./components/chat/Composer.js";
 import { BackgroundTaskBar } from "./components/chat/BackgroundTaskBar.js";
 import { AppNavRail } from "./components/nav/AppNavRail.js";
@@ -48,7 +62,7 @@ import {
   type ConversationReadAtMap,
 } from "./conversation-read-state.js";
 import { UnreadBadge } from "./components/ui/UnreadBadge.js";
-import { applyEvent, applyRoomUpdate, emptyState, removeActiveRun, removeDeletedRoom, upsert, upsertIdentity, upsertMany, upsertParticipant, type AppState } from "./state.js";
+import { applyEvent, applyRoomUpdate, emptyState, normalizeSnapshot, removeActiveRun, removeDeletedRoom, upsert, upsertIdentity, upsertMany, upsertMessage, upsertParticipant, type AppState } from "./state.js";
 import { backgroundTaskFromSnapshot, createOptimisticBackgroundTask, enrichBackgroundTask, loadDismissedBackgroundTaskIds, loadLocalTaskBarTaskIds, mergeBackgroundTask, removeLocalTaskBarTaskId, saveDismissedBackgroundTaskIds, addLocalTaskBarTaskId, type AgentRunTaskItem, type BackgroundTask } from "./background-tasks.js";
 import { resolveAgentProfileParticipant } from "./chat-links.js";
 
@@ -130,7 +144,7 @@ export function App() {
     fetchSnapshot().then((snapshot) => {
       if (cancelled) return;
       lastSeqRef.current = snapshot.lastSeq;
-      setState({ ...snapshot, ready: true });
+      setState(normalizeSnapshot(snapshot));
       setCurrentConversationId((current) => current ?? snapshot.conversations[0]?.id ?? null);
     });
     void refreshLocalAgentProviders();
@@ -269,14 +283,19 @@ export function App() {
           ?? null,
       }
     : null;
-  const agentRunTasks: AgentRunTaskItem[] = currentActiveRuns.map((run) => ({
-    id: run.id,
-    type: "agent-run",
-    conversationId: run.conversationId,
-    participantName: currentParticipants.find((participant) => participant.id === run.participantId)?.displayName ?? "Agent",
-    status: "running",
-    preview: "Agent 正在回复",
-  }));
+  const agentRunTasks: AgentRunTaskItem[] = currentActiveRuns.map((run) => {
+    const visibility = resolveAgentRunVisibility(run, currentMessages);
+    const participantName = currentParticipants.find((participant) => participant.id === run.participantId)?.displayName ?? "Agent";
+    return {
+      id: run.id,
+      type: "agent-run",
+      conversationId: run.conversationId,
+      participantName,
+      status: "running",
+      preview: `${participantName} 执行中`,
+      visibility,
+    };
+  });
   const openAgentRun = openAgentRunId
     ? currentActiveRuns.find((run) => run.id === openAgentRunId)
       ?? (openAgentRunSnapshot?.id === openAgentRunId ? openAgentRunSnapshot : null)
@@ -734,17 +753,21 @@ export function App() {
   const refreshSnapshot = useCallback(async () => {
     const snapshot = await fetchSnapshot();
     lastSeqRef.current = Math.max(lastSeqRef.current, snapshot.lastSeq);
-    setState({ ...snapshot, ready: true });
+    setState(normalizeSnapshot(snapshot));
     setCurrentConversationId((current) => current ?? snapshot.conversations[0]?.id ?? null);
   }, []);
 
   const mergeSentMessage = useCallback((result: SendMessageResponse) => {
-    setState((current) => ({
-      ...current,
-      messages: upsert(current.messages, result.message),
-      messageBlocks: upsertMany(current.messageBlocks, result.blocks ?? []),
-      artifacts: upsertMany(current.artifacts, result.artifacts ?? []),
-    }));
+    setState((current) => {
+      const messages = upsertMessage(current.messages, result.message);
+      return {
+        ...current,
+        messages,
+        messageBlocks: upsertMany(current.messageBlocks, result.blocks ?? []),
+        artifacts: upsertMany(current.artifacts, result.artifacts ?? []),
+        activeRuns: enrichAgentRuns(current.activeRuns, messages),
+      };
+    });
   }, []);
 
   const onSendMessage = useCallback(
@@ -1145,12 +1168,6 @@ export function App() {
                   onRemoved={clearAgentProfileDialog}
                   onSaved={pendingAgentSetupIdentity ? finishAgentProfileAdd : finishAgentProfileDialog}
                   onOpenIdentity={openTeamIdentity}
-                />
-                <RunInspector
-                  participants={currentParticipants}
-                  activeRuns={currentActiveRuns}
-                  openAgentRunId={openAgentRunId}
-                  onOpenAgentRun={openAgentRunPanel}
                 />
                 <BackgroundTaskBar
                   tasks={currentBackgroundTasks}

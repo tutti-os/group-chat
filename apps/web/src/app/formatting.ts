@@ -3,9 +3,9 @@ import type { Message, ParticipantListenMode } from "@group-chat/shared";
 export function formatMessageStatus(status: Message["status"]) {
   if (status === "success") return "";
   if (status === "streaming") return "";
-  if (status === "pending") return "Pending";
-  if (status === "error") return "Error";
-  if (status === "cancelled") return "Cancelled";
+  if (status === "pending") return "等待中";
+  if (status === "error") return "失败";
+  if (status === "cancelled") return "已取消";
   return status;
 }
 

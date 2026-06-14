@@ -1,7 +1,21 @@
-import type { ChatSnapshot, Identity, Participant, StreamEvent, UpdateRoomRequest } from "@group-chat/shared";
+import type { ChatSnapshot, Identity, Message, Participant, StreamEvent, UpdateRoomRequest, AgentRun } from "@group-chat/shared";
+import { enrichAgentRun, enrichAgentRuns, resolveMessageVisibility } from "@group-chat/shared";
 
 export interface AppState extends ChatSnapshot {
   ready: boolean;
+}
+
+export function normalizeSnapshot(snapshot: ChatSnapshot): AppState {
+  const messages = snapshot.messages.map((message) => ({
+    ...message,
+    visibility: resolveMessageVisibility(message, snapshot.messages),
+  }));
+  return {
+    ...snapshot,
+    messages,
+    ready: true,
+    activeRuns: enrichAgentRuns(snapshot.activeRuns, messages),
+  };
 }
 
 export const emptyState: AppState = {
@@ -58,8 +72,14 @@ export function applyEvent(state: AppState, event: StreamEvent): AppState {
     case "participant.updated":
       return { ...withSeq, participants: upsertParticipant(state.participants, payload.participant) };
     case "message.created":
-    case "message.updated":
-      return { ...withSeq, messages: upsert(state.messages, payload.message) };
+    case "message.updated": {
+      const messages = upsertMessage(state.messages, payload.message);
+      const withMessages = { ...withSeq, messages };
+      return {
+        ...withMessages,
+        activeRuns: enrichAgentRuns(withMessages.activeRuns, messages),
+      };
+    }
     case "message_block.created":
     case "message_block.updated":
       return { ...withSeq, messageBlocks: upsert(state.messageBlocks, payload.block) };
@@ -71,7 +91,15 @@ export function applyEvent(state: AppState, event: StreamEvent): AppState {
       return { ...withSeq, agentRunEvents: upsert(state.agentRunEvents, payload.event) };
     case "run.accepted":
     case "run.started":
-      return payload.run ? { ...withSeq, activeRuns: upsert(state.activeRuns, payload.run) } : withSeq;
+      return payload.run
+        ? {
+            ...withSeq,
+            activeRuns: upsert(
+              withSeq.activeRuns,
+              enrichAgentRun(payload.run as AgentRun, withSeq.messages),
+            ),
+          }
+        : withSeq;
     case "run.completed":
     case "run.failed":
     case "run.cancelled": {
@@ -102,6 +130,15 @@ export function upsert<T extends { id: string }>(items: T[], item: T | null | un
   if (!item) return items;
   const exists = items.some((current) => current.id === item.id);
   return exists ? items.map((current) => (current.id === item.id ? item : current)) : [...items, item];
+}
+
+export function upsertMessage(messages: Message[], incoming: Message | null | undefined): Message[] {
+  if (!incoming) return messages;
+  const mergedMessages = upsert(messages, incoming);
+  return mergedMessages.map((message) => ({
+    ...message,
+    visibility: resolveMessageVisibility(message, mergedMessages),
+  }));
 }
 
 export function upsertIdentity(identities: Identity[], incoming: Identity | null | undefined): Identity[] {

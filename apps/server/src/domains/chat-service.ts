@@ -1,5 +1,6 @@
 import {
   DEFAULT_PARTICIPANT_LISTEN_MODE,
+  isMessageVisibleToParticipant,
   type AddParticipantRequest,
   type AgentRun,
   type Conversation,
@@ -334,6 +335,7 @@ export class ChatService {
       senderName: "You",
       content,
       mentions: this.normalizeMentions(conversationId, input.mentions ?? []),
+      visibility: input.visibility === "whisper" ? "whisper" : "public",
       status: "success",
       parentMessageId: input.parentMessageId ?? null,
     });
@@ -423,6 +425,7 @@ export class ChatService {
         displayNameSnapshot: participant.displayName,
         mentionType: "participant",
       }],
+      visibility: "public",
       status: "success",
       branchId: sourceMessage?.branchId ?? null,
       parentMessageId: sourceMessage?.id ?? null,
@@ -759,6 +762,7 @@ export class ChatService {
   ) {
     if (!assistantMessage.content.trim()) return [];
     if (mentionScoped) return [];
+    if (assistantMessage.visibility === "whisper") return [];
     const senderParticipantId = assistantMessage.senderParticipantId;
     return this.repo
       .listParticipants(conversationId)
@@ -781,7 +785,9 @@ export class ChatService {
     const runtimeProfile = participant.runtimeProfileId ? this.repo.getRuntimeProfile(participant.runtimeProfileId) : null;
     const identity = participant.identityId ? this.repo.getIdentity(participant.identityId) : null;
     const attachments = this.repo.listArtifactsForMessage(userMessage.id);
-    const recentMessages = this.repo.listRecentMessages(conversationId, 24);
+    const recentMessages = this.repo
+      .listRecentMessages(conversationId, 24)
+      .filter((message) => isMessageVisibleToParticipant(message, participant.id));
     const provider = this.runtimes.getProvider(runtimeProfile);
     const runtimeContext: RuntimeReplyContext = {
       conversation,
@@ -798,9 +804,11 @@ export class ChatService {
       conversationId,
       participantId: participant.id,
       assistantMessageId: null,
+      triggerMessageId: userMessage.id,
       runtime: runDescriptor.runtime,
       provider: runDescriptor.provider,
       model: runDescriptor.model,
+      visibility: userMessage.visibility,
     });
     this.events.emit({
       type: "run.accepted",
@@ -884,6 +892,7 @@ export class ChatService {
         senderParticipantId: participant.id,
         senderName: participant.displayName,
         content: "",
+        visibility: userMessage.visibility,
         status: "streaming",
         runId: run.id,
       });
@@ -1038,40 +1047,19 @@ export class ChatService {
         await this.finalizeRunCancellation(run.id, "Cancelled by user");
         return null;
       }
-      const errorText = error instanceof Error ? error.message : "Runtime provider failed";
-      createRunEvent("error", { content: errorText, status: "error" });
-      const finalBlock = visibleReply.block
-        ? this.repo.updateMessageBlock(visibleReply.block.id, { content, status: "error" })
-        : null;
-      const finalMessage = visibleReply.message
-        ? this.repo.updateMessage(visibleReply.message.id, { content, status: "error" })
-        : null;
-      const finalRun = this.repo.updateAgentRun(run.id, { status: "failed", error: errorText });
-      emitBlockUpdated(finalBlock);
-      if (visibleReply.message && visibleReply.block) {
-        for (const streamingBlock of this.repo
-          .listMessageBlocks(visibleReply.message.id)
-          .filter((item) => item.id !== visibleReply.block?.id && (item.status === "streaming" || item.status === "pending"))) {
-          emitBlockUpdated(this.repo.updateMessageBlock(streamingBlock.id, { status: "error" }));
-        }
-      }
-      if (finalMessage) {
-        this.events.emit({
-          type: "message.updated",
-          roomId,
-          conversationId,
-          runId: run.id,
-          payload: { message: finalMessage },
-        });
-      }
-      this.events.emit({
-        type: "run.failed",
+      const errorText = this.formatRunFailureMessage(error);
+      this.publishAssistantFailure({
         roomId,
         conversationId,
         runId: run.id,
-        payload: { run: finalRun },
+        participant,
+        visibleReply,
+        errorText,
+        existingContent: content,
+        visibility: userMessage.visibility,
+        createRunEvent,
+        emitBlockUpdated,
       });
-      this.toolTokens.revokeRun(run.id);
       return null;
     }
 
@@ -1081,15 +1069,19 @@ export class ChatService {
     }
 
     if (!visibleReply.message || !visibleReply.block) {
-      const finalRun = this.repo.updateAgentRun(run.id, { status: "completed" });
-      this.events.emit({
-        type: "run.completed",
+      this.publishAssistantFailure({
         roomId,
         conversationId,
         runId: run.id,
-        payload: { run: finalRun },
+        participant,
+        visibleReply,
+        errorText: nextRunEventSortOrder > 0
+          ? "Agent 执行结束，但未返回文本回复。"
+          : "Agent 未返回任何内容。",
+        visibility: userMessage.visibility,
+        createRunEvent,
+        emitBlockUpdated,
       });
-      this.toolTokens.revokeRun(run.id);
       return null;
     }
 
@@ -1314,6 +1306,116 @@ export class ChatService {
 
   private isRunCancelled(runId: string) {
     return this.cancelledRunIds.has(runId) || this.repo.getAgentRun(runId)?.status === "cancelled";
+  }
+
+  private formatRunFailureMessage(error: unknown) {
+    const raw = (error instanceof Error ? error.message : String(error)).trim();
+    if (!raw) return "Agent 执行失败。";
+    if (/SIGTERM|timed?\s*out|timeout|AbortError|aborted|time.?limit/i.test(raw)) {
+      return "Agent 执行超时或已被中断。";
+    }
+    if (/local-agent command exited/i.test(raw)) {
+      const detail = raw.replace(/^local-agent command exited with /, "").trim();
+      return detail ? `Agent 执行异常退出：${detail}` : "Agent 执行异常退出。";
+    }
+    if (/^Agent (执行|未)/.test(raw)) return raw;
+    return `Agent 执行失败：${raw}`;
+  }
+
+  private publishAssistantFailure(params: {
+    roomId: string;
+    conversationId: string;
+    runId: string;
+    participant: Participant;
+    visibleReply: { message: Message | null; block: MessageBlock | null };
+    errorText: string;
+    existingContent?: string;
+    visibility?: Message["visibility"];
+    createRunEvent: (
+      type: Parameters<ChatRepository["createAgentRunEvent"]>[0]["type"],
+      input?: Omit<Parameters<ChatRepository["createAgentRunEvent"]>[0], "runId" | "conversationId" | "type">,
+    ) => void;
+    emitBlockUpdated: (block: MessageBlock | null) => void;
+  }) {
+    const messageContent = params.existingContent?.trim() || params.errorText;
+    const visibility = params.visibility ?? "public";
+    params.createRunEvent("error", { content: params.errorText, status: "error" });
+
+    if (!params.visibleReply.message || !params.visibleReply.block) {
+      params.visibleReply.message = this.repo.createMessage({
+        conversationId: params.conversationId,
+        role: "assistant",
+        senderParticipantId: params.participant.id,
+        senderName: params.participant.displayName,
+        content: messageContent,
+        visibility,
+        status: "error",
+        runId: params.runId,
+      });
+      params.visibleReply.block = this.repo.createMessageBlock({
+        messageId: params.visibleReply.message.id,
+        type: "main_text",
+        content: messageContent,
+        status: "error",
+      });
+      this.repo.updateAgentRun(params.runId, {
+        assistantMessageId: params.visibleReply.message.id,
+        status: "failed",
+        error: params.errorText,
+      });
+      this.events.emit({
+        type: "message.created",
+        roomId: params.roomId,
+        conversationId: params.conversationId,
+        runId: params.runId,
+        payload: { message: params.visibleReply.message },
+      });
+      this.events.emit({
+        type: "message_block.created",
+        roomId: params.roomId,
+        conversationId: params.conversationId,
+        runId: params.runId,
+        payload: { block: params.visibleReply.block },
+      });
+    } else {
+      const finalBlock = this.repo.updateMessageBlock(params.visibleReply.block.id, {
+        content: messageContent,
+        status: "error",
+      });
+      const finalMessage = this.repo.updateMessage(params.visibleReply.message.id, {
+        content: messageContent,
+        status: "error",
+      });
+      params.emitBlockUpdated(finalBlock);
+      for (const streamingBlock of this.repo
+        .listMessageBlocks(params.visibleReply.message.id)
+        .filter(
+          (item) =>
+            item.id !== params.visibleReply.block?.id
+            && (item.status === "streaming" || item.status === "pending"),
+        )) {
+        params.emitBlockUpdated(this.repo.updateMessageBlock(streamingBlock.id, { status: "error" }));
+      }
+      if (finalMessage) {
+        this.events.emit({
+          type: "message.updated",
+          roomId: params.roomId,
+          conversationId: params.conversationId,
+          runId: params.runId,
+          payload: { message: finalMessage },
+        });
+      }
+    }
+
+    const finalRun = this.repo.updateAgentRun(params.runId, { status: "failed", error: params.errorText });
+    this.events.emit({
+      type: "run.failed",
+      roomId: params.roomId,
+      conversationId: params.conversationId,
+      runId: params.runId,
+      payload: { run: finalRun },
+    });
+    this.toolTokens.revokeRun(params.runId);
   }
 
   private async finalizeRunCancellation(runId: string, reason: string) {

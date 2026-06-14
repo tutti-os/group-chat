@@ -1,6 +1,7 @@
 import type { Artifact } from "@group-chat/shared";
 import { openArtifactInSystem } from "../api/client.js";
 import { isTextAttachment, type AttachmentPreview } from "./components/chat/AttachmentPreviewDialog.js";
+import { tryOpenArtifactInTutti } from "./tutti-bridge.js";
 
 export type ArtifactCategory = "image" | "video" | "file";
 export type ArtifactFilterCategory = "all" | ArtifactCategory;
@@ -53,10 +54,20 @@ export async function downloadArtifactFile(artifact: Artifact) {
   }
 }
 
+export async function openArtifact(
+  artifact: Artifact,
+  setPreview: (preview: AttachmentPreview | null) => void,
+) {
+  return openArtifactPreview(artifact, setPreview);
+}
+
 export async function openArtifactPreview(
   artifact: Artifact,
   setPreview: (preview: AttachmentPreview | null) => void,
 ) {
+  if (await tryOpenArtifactInTutti(artifact)) {
+    return;
+  }
   if (artifact.mimeType.startsWith("image/") || artifact.mimeType.startsWith("video/")) {
     setPreview({ title: artifact.filename, mimeType: artifact.mimeType, url: artifact.publicUrl });
     return;

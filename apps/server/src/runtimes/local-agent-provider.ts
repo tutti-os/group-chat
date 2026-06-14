@@ -162,6 +162,9 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       const [code, signal] = (await once(child, "close")) as [number | null, NodeJS.Signals | null];
       if (code !== 0) {
         const stderr = stderrChunks.join("").trim();
+        if (signal === "SIGTERM" && code === null) {
+          throw new Error("Agent 执行超时，已被终止");
+        }
         throw new Error(`local-agent command exited with ${code ?? signal ?? "unknown"}${stderr ? `: ${stderr}` : ""}`);
       }
     } finally {

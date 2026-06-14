@@ -5,7 +5,7 @@ import { DEFAULT_PARTICIPANT_LISTEN_MODE } from "@group-chat/shared";
 import { createIdentity, deleteIdentity } from "../../../api/client.js";
 import { countIdentityActiveRooms } from "../../identity-usage.js";
 import { resolveAgentAvatar } from "../../identity-avatar.js";
-import { runtimeStatusSummary } from "../../runtime.js";
+import { defaultIdentityNameForRuntime, preferredDefaultRuntimeProfile, resolveCanonicalRuntimeProfile, runtimeStatusSummary } from "../../runtime.js";
 import { AgentAvatar } from "../ui/AgentAvatar.js";
 import { IdentityEditor } from "./IdentityEditor.js";
 
@@ -29,7 +29,9 @@ export function TeamMembersPage(props: {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const selected = props.identities.find((identity) => identity.id === selectedId) ?? null;
   const visibleIdentities = props.identities;
-  const draftLocalAgent = creatingLocalAgent ? createDraftLocalAgent(props.identities.length + 1, props.runtimeProfiles) : null;
+  const draftLocalAgent = creatingLocalAgent
+    ? createDraftLocalAgent(props.runtimeProfiles, props.localAgentProviders)
+    : null;
 
   const selectIdentity = (identityId: string | null) => {
     setSelectedId(identityId);
@@ -154,7 +156,7 @@ export function TeamMembersPage(props: {
       <section className={"[display:grid] [min-width:0] [min-height:0] [height:100vh] [overflow:hidden] [background:var(--panel)]"}>
         {draftLocalAgent ? (
           <IdentityEditor
-            key={draftLocalAgent.id}
+            key={`${draftLocalAgent.id}:${draftLocalAgent.defaultRuntimeProfileId}:${props.localAgentProviders.length}`}
             embedded
             identity={draftLocalAgent}
             inUseCount={0}
@@ -212,15 +214,19 @@ export function TeamMembersPage(props: {
   );
 }
 
-function createDraftLocalAgent(index: number, runtimeProfiles: RuntimeProfile[]): Identity {
-  const localRuntime = runtimeProfiles.find((profile) => profile.kind === "local-agent");
+function createDraftLocalAgent(
+  runtimeProfiles: RuntimeProfile[],
+  localAgentProviders: LocalAgentProviderStatus[],
+): Identity {
+  const localRuntime = preferredDefaultRuntimeProfile(runtimeProfiles);
+  const canonicalRuntime = resolveCanonicalRuntimeProfile(localRuntime, runtimeProfiles);
   return {
     id: "__new-local-agent__",
-    name: `本地 Agent ${index}`,
+    name: defaultIdentityNameForRuntime(canonicalRuntime, localAgentProviders),
     icon: "",
     systemPrompt: "",
     stylePrompt: "",
-    defaultRuntimeProfileId: localRuntime?.id ?? runtimeProfiles[0]?.id ?? null,
+    defaultRuntimeProfileId: canonicalRuntime?.id ?? runtimeProfiles[0]?.id ?? null,
     defaultListenMode: DEFAULT_PARTICIPANT_LISTEN_MODE,
     defaultReasoningEffort: null,
     temperature: 0.7,
