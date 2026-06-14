@@ -1,5 +1,6 @@
 import type { Artifact, Message, Participant, PrivateTaskSnapshot, Identity } from "@group-chat/shared";
 import type { BackgroundTask } from "./background-tasks.js";
+import { loadUserProfile } from "./user-profile.js";
 
 export const SUMMARY_LINK_MIME = "text/x-group-chat-summary-link";
 const SUMMARY_LINK_CLIPBOARD_KEY = "group-chat:summary-link";
@@ -74,12 +75,30 @@ export function resolveMessageAgentParticipant(
   return participant?.kind === "ai" ? participant : null;
 }
 
+export function resolveLocalUserDisplayName(explicitName?: string | null) {
+  const explicit = explicitName?.trim();
+  if (explicit) return explicit;
+  return loadUserProfile().displayName.trim() || "Group Chat";
+}
+
+const LEGACY_USER_SENDER_NAMES = new Set(["You", "Group Chat"]);
+
+function isLegacyUserSenderName(name: string | null | undefined) {
+  const trimmed = name?.trim();
+  return !trimmed || LEGACY_USER_SENDER_NAMES.has(trimmed);
+}
+
 export function resolveMessageSenderLabel(
   message: Message,
   participant: Participant | null,
   identity?: Pick<Identity, "name"> | null,
+  userDisplayName?: string | null,
 ) {
-  if (message.role === "user") return "我";
+  if (message.role === "user") {
+    const stored = message.senderName?.trim();
+    if (stored && !isLegacyUserSenderName(stored)) return stored;
+    return resolveLocalUserDisplayName(userDisplayName);
+  }
   const roomAlias = participant?.displayName?.trim();
   if (roomAlias) return roomAlias;
   const identityName = identity?.name?.trim();
@@ -91,6 +110,7 @@ export function messageSenderLabel(
   message: Message,
   participants: Participant[] = [],
   identities: Array<Pick<Identity, "id" | "name">> = [],
+  userDisplayName?: string | null,
 ) {
   const participant = message.senderParticipantId
     ? participants.find((item) => item.id === message.senderParticipantId) ?? null
@@ -98,7 +118,7 @@ export function messageSenderLabel(
   const identity = participant?.identityId
     ? identities.find((item) => item.id === participant.identityId) ?? null
     : null;
-  return resolveMessageSenderLabel(message, participant, identity);
+  return resolveMessageSenderLabel(message, participant, identity, userDisplayName);
 }
 
 export function summaryLinkLabel(task: Pick<PrivateTaskSnapshot, "participantName"> | null | undefined) {

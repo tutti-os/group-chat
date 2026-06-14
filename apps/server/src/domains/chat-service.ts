@@ -338,7 +338,7 @@ export class ChatService {
     const message = this.repo.createMessage({
       conversationId,
       role: "user",
-      senderName: "You",
+      senderName: normalizeUserSenderName(input.senderName),
       content,
       mentions: this.normalizeMentions(conversationId, input.mentions ?? []),
       visibility: input.visibility === "whisper" ? "whisper" : "public",
@@ -1670,4 +1670,9 @@ function shouldAdaptiveReply(userText: string) {
   return /(?:怎么|如何|为什么|是否|可以|帮|建议|方案|计划|评审|看看|讨论|下一步|next|plan|review|help|should|how|why)/i.test(
     text,
   );
+}
+
+function normalizeUserSenderName(senderName?: string | null) {
+  const trimmed = senderName?.trim();
+  return trimmed || "You";
 }

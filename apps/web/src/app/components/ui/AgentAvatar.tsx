@@ -14,12 +14,12 @@ export function AgentAvatar(props: {
 
   return (
     <span
-      className={`[position:relative] [display:inline-flex] [flex:0_0_auto] ${props.className ?? ""}`}
+      className={`[position:relative] [display:inline-flex] [flex:0_0_auto] [overflow:visible] ${props.className ?? ""}`}
       style={{ width: size, height: size }}
     >
-      <RoomAvatar title={props.title} avatar={props.avatar} provider={props.provider} size={size} />
+      <RoomAvatar title={props.title} avatar={props.avatar} provider={props.provider} size={size} className={"[relative] [z-index:0]"} />
       <span
-        className={"[position:absolute] [top:-2px] [right:-2px] [z-index:1] [display:grid] [place-items:center] [border-radius:999px] [color:#525252] [background:#ffffff] [box-shadow:0_0_0_1px_#e5e7eb]"}
+        className={"[position:absolute] [top:-2px] [right:-2px] [z-index:10] [display:grid] [place-items:center] [border-radius:999px] [color:#525252] [background:#ffffff] [box-shadow:0_0_0_1px_#e5e7eb]"}
         style={{ width: badgeSize, height: badgeSize }}
         aria-hidden
       >
