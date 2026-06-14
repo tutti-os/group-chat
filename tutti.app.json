@@ -15,6 +15,9 @@
   "cli": {
     "manifest": "tutti.cli.json"
   },
+  "references": {
+    "searchEndpoint": "/tutti/references/search"
+  },
   "window": {
     "minimizeBehavior": "keep-mounted",
     "minWidth": 960,

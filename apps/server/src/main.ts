@@ -35,6 +35,7 @@ import {
   type CliCommandError,
   type CliCommandOutput,
 } from "./domains/tutti-cli.js";
+import { isReferenceSearchError, searchAppReferences } from "./domains/tutti-references.js";
 import { EventHub } from "./ws/event-hub.js";
 
 const webDist = process.env.GROUP_CHAT_WEB_DIST
@@ -83,6 +84,12 @@ server.post<{ Body: unknown }>("/tutti/cli/artifacts/list", async (request, repl
 server.post<{ Body: unknown }>("/tutti/cli/artifacts/get", async (request, reply) =>
   sendCliOutput(reply, getArtifactCliOutput(chat.bootstrap(), normalizeCliEnvelope(request.body))),
 );
+
+server.post<{ Body: unknown }>("/tutti/references/search", async (request, reply) => {
+  const output = searchAppReferences(chat.bootstrap(), request.body ?? {});
+  if (isReferenceSearchError(output)) return reply.code(400).send(output);
+  return output;
+});
 
 server.post<{ Body: CreateRoomRequest }>("/api/rooms", async (request) => chat.createRoom(request.body ?? {}));
 

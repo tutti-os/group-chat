@@ -26,19 +26,20 @@ test("Tutti CLI handlers expose public conversation data only", async (t) => {
   assert.equal(list.status, 200);
   const conversationId = list.body.value.conversations[0].id;
 
-  const publicMessage = await postJson(server.baseUrl, `/api/conversations/${conversationId}/messages`, {
-    content: "public hello",
-    mentions: [],
-    visibility: "public",
-  });
-  assert.equal(publicMessage.status, 200);
-
   const publicArtifact = await postJson(server.baseUrl, `/api/conversations/${conversationId}/artifacts`, {
     filename: "public.txt",
     mimeType: "text/plain",
     dataBase64: "UHVibGljIGFydGlmYWN0Cg==",
   });
   assert.equal(publicArtifact.status, 200);
+
+  const publicMessage = await postJson(server.baseUrl, `/api/conversations/${conversationId}/messages`, {
+    artifactIds: [publicArtifact.body.artifact.id],
+    content: "public hello",
+    mentions: [],
+    visibility: "public",
+  });
+  assert.equal(publicMessage.status, 200);
 
   const whisperArtifact = await postJson(server.baseUrl, `/api/conversations/${conversationId}/artifacts`, {
     filename: "secret.txt",
@@ -79,6 +80,35 @@ test("Tutti CLI handlers expose public conversation data only", async (t) => {
     [publicArtifact.body.artifact.id],
   );
   assert.equal(artifacts.body.value.warnings[0].omittedWhisperArtifactCount, 1);
+
+  const references = await postJson(server.baseUrl, "/tutti/references/search", {
+    query: "public",
+    limit: 5,
+    kinds: ["file"],
+  });
+  assert.equal(references.status, 200);
+  assert.deepEqual(
+    references.body.references.map((reference) => reference.displayName),
+    ["public.txt"],
+  );
+  assert.equal(references.body.references[0].kind, "file");
+  assert.equal(references.body.references[0].location.type, "app-data-relative");
+  assert.match(references.body.references[0].location.path, /^rooms\/[^/]+\/uploads\/[^/]+\.txt$/);
+
+  const bodyOnlyMessage = await postJson(server.baseUrl, `/api/conversations/${conversationId}/messages`, {
+    content: "body-only-reference-search-token",
+    mentions: [],
+    visibility: "public",
+  });
+  assert.equal(bodyOnlyMessage.status, 200);
+
+  const bodyOnlyReferences = await postJson(server.baseUrl, "/tutti/references/search", {
+    query: "body-only-reference-search-token",
+    limit: 5,
+    kinds: ["file"],
+  });
+  assert.equal(bodyOnlyReferences.status, 200);
+  assert.deepEqual(bodyOnlyReferences.body.references, []);
 
   const hiddenArtifact = await postJson(server.baseUrl, "/tutti/cli/artifacts/get", {
     input: { "artifact-id": whisperArtifact.body.artifact.id },
