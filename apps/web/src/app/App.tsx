@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
-import { Bot, MessageCircle, WifiOff } from "lucide-react";
+import { Bot, Loader2, MessageCircle } from "lucide-react";
 import { enrichAgentRuns, isLocalUserMessage, resolveAgentRunVisibility, type AgentRun,
   type Conversation,
   type CreateIdentityRequest,
@@ -120,7 +120,7 @@ export function App() {
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [focusMessageRequest, setFocusMessageRequest] = useState<{ messageId: string; seq: number } | null>(null);
   const [scrollToBottomRequest, setScrollToBottomRequest] = useState<{ seq: number } | null>(null);
-  const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const lastSeqRef = useRef(0);
   const appShellRef = useRef<HTMLDivElement | null>(null);
   const profileButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -242,24 +242,74 @@ export function App() {
 
   useEffect(() => {
     if (!state.ready) return;
-    setConnectionStatus("connecting");
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}/api/ws`);
-    ws.addEventListener("open", () => {
-      setConnectionStatus("connected");
-      ws.send(JSON.stringify({ type: "hello", lastSeq: lastSeqRef.current }));
-    });
-    ws.addEventListener("message", (event) => {
-      const message = JSON.parse(event.data) as WsServerMessage;
-      if (message.type === "event" && message.event) {
-        handleStreamEvent(message.event);
-      } else if (message.type === "replay" && message.events) {
-        applyEvents(message.events);
+
+    let ws: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+    let reconnectAttempt = 0;
+    let disposed = false;
+    let hasConnected = false;
+
+    const clearReconnectTimer = () => {
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = null;
       }
-    });
-    ws.addEventListener("close", () => setConnectionStatus("disconnected"));
-    ws.addEventListener("error", () => setConnectionStatus("disconnected"));
-    return () => ws.close();
+    };
+
+    const scheduleReconnect = () => {
+      if (disposed) return;
+      clearReconnectTimer();
+      const delayMs = Math.min(1000 * 2 ** reconnectAttempt, 10_000);
+      reconnectAttempt += 1;
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, delayMs);
+    };
+
+    const connect = () => {
+      if (disposed) return;
+      clearReconnectTimer();
+
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      ws = new WebSocket(`${protocol}//${window.location.host}/api/ws`);
+
+      ws.addEventListener("open", () => {
+        reconnectAttempt = 0;
+        hasConnected = true;
+        setIsReconnecting(false);
+        ws?.send(JSON.stringify({ type: "hello", lastSeq: lastSeqRef.current }));
+      });
+
+      ws.addEventListener("message", (event) => {
+        const message = JSON.parse(event.data) as WsServerMessage;
+        if (message.type === "event" && message.event) {
+          handleStreamEvent(message.event);
+        } else if (message.type === "replay" && message.events) {
+          applyEvents(message.events);
+        }
+      });
+
+      ws.addEventListener("close", () => {
+        ws = null;
+        if (hasConnected) setIsReconnecting(true);
+        scheduleReconnect();
+      });
+
+      ws.addEventListener("error", () => {
+        ws?.close();
+      });
+    };
+
+    connect();
+
+    return () => {
+      disposed = true;
+      setIsReconnecting(false);
+      clearReconnectTimer();
+      ws?.close();
+      ws = null;
+    };
   }, [state.ready, handleStreamEvent, applyEvents]);
 
   const currentConversation = state.conversations.find((item) => item.id === currentConversationId) ?? null;
@@ -1122,7 +1172,7 @@ export function App() {
                     }));
                   }}
                 />
-                <ConnectionBanner status={connectionStatus} />
+                {isReconnecting ? <ReconnectingBanner /> : null}
                 <RoomAgentsDialog
                   open={membersPanelOpen}
                   startAdding={membersPanelStartAdding}
@@ -1385,13 +1435,11 @@ export function App() {
   );
 }
 
-function ConnectionBanner(props: { status: "connecting" | "connected" | "disconnected" }) {
-  if (props.status === "connected") return null;
-  const text = props.status === "connecting" ? "正在连接实时消息..." : "实时连接已断开，刷新页面后会重新连接。";
+function ReconnectingBanner() {
   return (
     <div className={"[position:absolute] [top:56px] [left:50%] [z-index:28] [display:inline-flex] [transform:translateX(-50%)] [align-items:center] [gap:6px] [border:1px_solid_var(--border)] [border-radius:999px] [padding:5px_10px] [color:var(--muted)] [background:#fffffff2] [box-shadow:var(--shadow-soft)] [font-size:12px] [font-weight:650]"}>
-      <WifiOff size={13} />
-      <span>{text}</span>
+      <Loader2 size={13} className={"animate-spin"} aria-hidden />
+      <span>自动重连中...</span>
     </div>
   );
 }

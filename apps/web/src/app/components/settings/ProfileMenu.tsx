@@ -135,9 +135,6 @@ export function ProfileMenu(props: {
               if (event.key === "Enter") save();
             }}
           />
-          <span className={"[display:inline-flex] [width:fit-content] [align-items:center] [height:20px] [border-radius:999px] [padding:0_8px] [color:var(--muted)] [background:#f4f4f5] [font-size:10px] [font-weight:650] [line-height:1]"}>
-            Local workspace
-          </span>
         </div>
       </div>
 
