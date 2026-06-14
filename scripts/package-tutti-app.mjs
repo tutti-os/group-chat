@@ -48,6 +48,9 @@ export function createManifest({ version }) {
       bootstrap: "bootstrap.sh",
       healthcheckPath: "/api/health",
     },
+    cli: {
+      manifest: "tutti.cli.json",
+    },
     window: {
       minimizeBehavior: "keep-mounted",
       minWidth: 960,
@@ -104,6 +107,8 @@ This package runs Group Chat as a Tutti workspace app.
 - \`server/server.js\`: bundled Fastify server.
 - \`dist/\`: built React/Vite frontend.
 - \`icon.svg\`: package icon.
+- \`tutti.cli.json\`: read-only Tutti CLI command manifest.
+- \`COMMANDS.md\`: command documentation.
 
 ## Runtime
 
@@ -112,8 +117,248 @@ Tutti starts \`bootstrap.sh\` with no arguments. The app binds to
 SQLite data, uploads, room workspaces, and agent workspaces under
 \`TUTTI_APP_DATA_DIR\` via \`GROUP_CHAT_HOME\`.
 
-The app intentionally does not expose a \`tutti.cli.json\` manifest in this
-phase. Keep the package focused on the GUI/local-agent IM experience.
+The app exposes read-only Tutti CLI commands under \`/tutti/cli/*\` so external
+agents can discover rooms and conversations without driving the UI.
+`;
+}
+
+export function createCliManifest() {
+  return {
+    schemaVersion: "tutti.app.cli.v1",
+    scope: "group-chat",
+    description: "Inspect Group Chat rooms and conversations.",
+    documentation: {
+      file: "COMMANDS.md",
+    },
+    commands: [
+      {
+        path: ["conversations", "list"],
+        summary: "List conversations",
+        description:
+          "List Group Chat conversations with room, participant, pin, and recent public activity metadata. Whisper message content is omitted from CLI output.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            limit: {
+              type: "integer",
+              description: "Maximum number of conversations to return. Defaults to 20, maximum 100.",
+            },
+            query: {
+              type: "string",
+              description:
+                "Case-insensitive text filter for conversation titles, room titles, and descriptions.",
+            },
+            pinned: {
+              type: "boolean",
+              description:
+                "When true, return only pinned conversations; when false, return only unpinned conversations.",
+            },
+          },
+        },
+        output: {
+          defaultMode: "table",
+          json: true,
+          table: {
+            columns: [
+              { key: "id", label: "Conversation ID" },
+              { key: "room", label: "Room" },
+              { key: "title", label: "Title" },
+              { key: "participants", label: "Participants" },
+              { key: "pinned", label: "Pinned" },
+              { key: "last-message-at", label: "Last message" },
+              { key: "updated-at", label: "Updated" },
+            ],
+          },
+        },
+        handler: {
+          kind: "http",
+          method: "POST",
+          path: "/tutti/cli/conversations/list",
+          timeoutMs: 30000,
+        },
+      },
+      {
+        path: ["conversations", "get"],
+        summary: "Get conversation details",
+        description:
+          "Get one conversation with room metadata, participants, recent public messages, and public artifact summaries. Whisper content is omitted and reported in warnings.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            "conversation-id": {
+              type: "string",
+              description: "Conversation id to inspect.",
+            },
+            "recent-message-limit": {
+              type: "integer",
+              description: "Maximum number of recent messages to include. Defaults to 20, maximum 100.",
+            },
+          },
+          required: ["conversation-id"],
+        },
+        output: {
+          defaultMode: "json",
+          json: true,
+        },
+        handler: {
+          kind: "http",
+          method: "POST",
+          path: "/tutti/cli/conversations/get",
+          timeoutMs: 30000,
+        },
+      },
+      {
+        path: ["artifacts", "list"],
+        summary: "List artifacts",
+        description:
+          "List public Group Chat artifacts with conversation, filename, MIME type, size, and local access metadata. Artifacts linked to whisper messages or runs are omitted.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            "conversation-id": {
+              type: "string",
+              description: "Optional conversation id to filter artifacts.",
+            },
+            limit: {
+              type: "integer",
+              description: "Maximum number of artifacts to return. Defaults to 20, maximum 100.",
+            },
+            query: {
+              type: "string",
+              description:
+                "Case-insensitive text filter for artifact id, filename, MIME type, and text preview.",
+            },
+            kind: {
+              type: "string",
+              description: "Optional artifact kind filter, such as upload, generated, preview, or run-output.",
+            },
+          },
+        },
+        output: {
+          defaultMode: "table",
+          json: true,
+          table: {
+            columns: [
+              { key: "id", label: "Artifact ID" },
+              { key: "conversation", label: "Conversation" },
+              { key: "filename", label: "Filename" },
+              { key: "kind", label: "Kind" },
+              { key: "mime-type", label: "MIME type" },
+              { key: "size-bytes", label: "Bytes" },
+              { key: "created-at", label: "Created" },
+            ],
+          },
+        },
+        handler: {
+          kind: "http",
+          method: "POST",
+          path: "/tutti/cli/artifacts/list",
+          timeoutMs: 30000,
+        },
+      },
+      {
+        path: ["artifacts", "get"],
+        summary: "Get artifact details",
+        description:
+          "Get one public artifact with local path, public URL, source message/run ids, and text preview. Artifacts linked to whisper messages or runs are not returned.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            "artifact-id": {
+              type: "string",
+              description: "Artifact id to inspect.",
+            },
+          },
+          required: ["artifact-id"],
+        },
+        output: {
+          defaultMode: "json",
+          json: true,
+        },
+        handler: {
+          kind: "http",
+          method: "POST",
+          path: "/tutti/cli/artifacts/get",
+          timeoutMs: 30000,
+        },
+      },
+    ],
+  };
+}
+
+export function renderCommandsDoc() {
+  return `# Group Chat CLI Commands
+
+Group Chat exposes read-only commands for agents and the Tutti CLI.
+
+CLI output includes public conversation data only. Whisper messages and artifacts linked to whisper messages or runs are omitted; JSON outputs include a \`warnings\` array describing this policy.
+
+## \`group-chat conversations list\`
+
+List conversations with room metadata, participant count, pin state, and recent public activity.
+
+Options:
+
+- \`--limit <number>\`: maximum number of conversations to return. Defaults to 20 and caps at 100.
+- \`--query <text>\`: filters conversation titles, room titles, and descriptions.
+- \`--pinned\`: returns only pinned conversations.
+
+Examples:
+
+\`\`\`sh
+tutti group-chat conversations list
+tutti group-chat conversations list --limit 10
+tutti group-chat conversations list --query planning --json
+tutti group-chat conversations list --pinned
+\`\`\`
+
+## \`group-chat conversations get\`
+
+Read one conversation with room metadata, participants, recent public messages, and public artifact summaries.
+
+Options:
+
+- \`--conversation-id <id>\`: conversation id to inspect.
+- \`--recent-message-limit <number>\`: maximum number of recent messages to include. Defaults to 20 and caps at 100.
+
+Examples:
+
+\`\`\`sh
+tutti group-chat conversations get --conversation-id abc123 --json
+\`\`\`
+
+## \`group-chat artifacts list\`
+
+List public artifacts with conversation, filename, MIME type, size, and creation time.
+
+Options:
+
+- \`--conversation-id <id>\`: filters artifacts to one conversation.
+- \`--limit <number>\`: maximum number of artifacts to return. Defaults to 20 and caps at 100.
+- \`--query <text>\`: filters artifact id, filename, MIME type, and text preview.
+- \`--kind <kind>\`: filters by artifact kind, such as \`upload\`, \`generated\`, \`preview\`, or \`run-output\`.
+
+Examples:
+
+\`\`\`sh
+tutti group-chat artifacts list
+tutti group-chat artifacts list --conversation-id abc123 --json
+tutti group-chat artifacts list --query report
+\`\`\`
+
+## \`group-chat artifacts get\`
+
+Read one public artifact with local path, public URL, source message/run ids, and text preview.
+
+Options:
+
+- \`--artifact-id <id>\`: artifact id to inspect.
+
+Examples:
+
+\`\`\`sh
+tutti group-chat artifacts get --artifact-id art123 --json
+\`\`\`
 `;
 }
 
@@ -166,6 +411,11 @@ async function writePackageFiles(manifest) {
     path.join(packageRoot, "tutti.app.json"),
     `${JSON.stringify(manifest, null, 2)}\n`,
   );
+  await writeFile(
+    path.join(packageRoot, "tutti.cli.json"),
+    `${JSON.stringify(createCliManifest(), null, 2)}\n`,
+  );
+  await writeFile(path.join(packageRoot, "COMMANDS.md"), renderCommandsDoc());
   for (const { file, metadata } of Object.values(MANIFEST_LOCALIZATIONS)) {
     const localePath = path.join(packageRoot, file);
     await mkdir(path.dirname(localePath), { recursive: true });
@@ -224,6 +474,8 @@ export async function assertNoSymlinks(root) {
 export async function validatePackageRoot(root) {
   const requiredFiles = [
     "tutti.app.json",
+    "tutti.cli.json",
+    "COMMANDS.md",
     "AGENTS.md",
     "bootstrap.sh",
     "icon.svg",
@@ -249,8 +501,15 @@ export async function validatePackageRoot(root) {
   if (manifest.runtime && "kind" in manifest.runtime) {
     throw new Error("Manifest runtime must not declare kind");
   }
-  if (manifest.cli) {
-    throw new Error("Group Chat GUI package must not include a Tutti CLI manifest");
+  if (manifest.cli?.manifest !== "tutti.cli.json") {
+    throw new Error("Manifest cli.manifest must be tutti.cli.json");
+  }
+  const cliManifest = JSON.parse(await readFile(path.join(root, "tutti.cli.json"), "utf8"));
+  if (cliManifest.schemaVersion !== "tutti.app.cli.v1") {
+    throw new Error("CLI manifest schemaVersion must be tutti.app.cli.v1");
+  }
+  if (cliManifest.scope !== "group-chat") {
+    throw new Error("CLI manifest scope must be group-chat");
   }
   if (!manifest.runtime?.bootstrap || !manifest.runtime?.healthcheckPath?.startsWith("/")) {
     throw new Error("Manifest runtime bootstrap and healthcheckPath are required");

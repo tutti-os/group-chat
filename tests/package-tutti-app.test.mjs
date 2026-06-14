@@ -6,10 +6,12 @@ import test from "node:test";
 
 import {
   assertNoSymlinks,
+  createCliManifest,
   createManifest,
   readSourceManifest,
   renderAgentsGuide,
   renderBootstrap,
+  renderCommandsDoc,
   renderIcon,
   validatePackageRoot,
 } from "../scripts/package-tutti-app.mjs";
@@ -32,6 +34,9 @@ test("createManifest returns the Tutti package manifest contract", () => {
     runtime: {
       bootstrap: "bootstrap.sh",
       healthcheckPath: "/api/health",
+    },
+    cli: {
+      manifest: "tutti.cli.json",
     },
     window: {
       minimizeBehavior: "keep-mounted",
@@ -60,6 +65,18 @@ test("root Tutti app manifest matches the generated package manifest", async () 
   assert.deepEqual(manifest, createManifest({ version: manifest.version }));
 });
 
+test("root Tutti CLI manifest matches the generated package CLI manifest", async () => {
+  const manifest = JSON.parse(await readFile("tutti.cli.json", "utf8"));
+
+  assert.deepEqual(manifest, createCliManifest());
+});
+
+test("root command documentation matches the generated package command documentation", async () => {
+  const commands = await readFile("COMMANDS.md", "utf8");
+
+  assert.equal(commands, renderCommandsDoc());
+});
+
 test("bootstrap maps Tutti runtime env into Group Chat env", () => {
   const bootstrap = renderBootstrap({ version: "9.8.7" });
 
@@ -79,6 +96,7 @@ test("package guide documents runtime ownership", () => {
   assert.match(guide, /TUTTI_APP_HOST:TUTTI_APP_PORT/);
   assert.match(guide, /TUTTI_APP_DATA_DIR/);
   assert.match(guide, /GROUP_CHAT_HOME/);
+  assert.match(guide, /tutti\.cli\.json/);
 });
 
 test("validatePackageRoot accepts the required Tutti package files", async () => {
@@ -87,6 +105,8 @@ test("validatePackageRoot accepts the required Tutti package files", async () =>
   await mkdir(path.join(root, "dist"), { recursive: true });
   await mkdir(path.join(root, "locales", "zh-CN"), { recursive: true });
   await writeFile(path.join(root, "tutti.app.json"), `${JSON.stringify(createManifest({ version: "1.2.3" }), null, 2)}\n`);
+  await writeFile(path.join(root, "tutti.cli.json"), `${JSON.stringify(createCliManifest(), null, 2)}\n`);
+  await writeFile(path.join(root, "COMMANDS.md"), renderCommandsDoc());
   await writeFile(path.join(root, "locales", "zh-CN", "manifest.json"), `${JSON.stringify({ name: "群聊" }, null, 2)}\n`);
   await writeFile(path.join(root, "AGENTS.md"), renderAgentsGuide());
   await writeFile(path.join(root, "bootstrap.sh"), renderBootstrap({ version: "1.2.3" }));
@@ -112,5 +132,6 @@ test("root Tutti manifest is valid JSON", async () => {
   assert.equal(manifest.schemaVersion, "tutti.app.manifest.v1");
   assert.equal(manifest.appId, "group-chat");
   assert.equal(manifest.name, "Group Chat");
+  assert.equal(manifest.cli.manifest, "tutti.cli.json");
   assert.equal(manifest.runtime.healthcheckPath, "/api/health");
 });
