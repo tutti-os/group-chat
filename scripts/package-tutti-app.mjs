@@ -287,6 +287,7 @@ export async function packageTuttiApp() {
     version,
   };
 
+  await run("pnpm", ["--filter", "@group-chat/shared", "build"]);
   await run("pnpm", ["--filter", "@group-chat/web", "build"]);
   await mkdir(buildRoot, { recursive: true });
   await writePackageFiles(manifest);
