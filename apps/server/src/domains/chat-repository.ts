@@ -819,6 +819,25 @@ export class ChatRepository {
     return this.getAgentRunEvent(id)!;
   }
 
+  updateAgentRunEvent(
+    eventId: string,
+    updates: Partial<Pick<AgentRunEvent, "content" | "status" | "metadata">>,
+  ): AgentRunEvent | null {
+    const current = this.getAgentRunEvent(eventId);
+    if (!current) return null;
+    const next = {
+      ...current,
+      ...updates,
+      content: updates.content ?? current.content,
+      status: updates.status ?? current.status,
+      metadata: updates.metadata === undefined ? current.metadata : updates.metadata,
+    };
+    getDb()
+      .prepare(`UPDATE agent_run_events SET content = ?, status = ?, metadata = ? WHERE id = ?`)
+      .run(next.content, next.status, next.metadata ? json(next.metadata) : null, eventId);
+    return this.getAgentRunEvent(eventId);
+  }
+
   getAgentRunEvent(eventId: string): AgentRunEvent | null {
     const row = getDb().prepare(`SELECT * FROM agent_run_events WHERE id = ?`).get(eventId) as any;
     return row ? rowToAgentRunEvent(row) : null;

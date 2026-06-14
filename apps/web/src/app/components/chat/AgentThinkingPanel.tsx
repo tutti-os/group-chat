@@ -101,8 +101,8 @@ export function AgentThinkingPanel(props: {
                 <span>
                   {section.streaming
                     ? "思考中"
-                    : section.kind === "thinking"
-                      ? "推理过程"
+                    : section.kind === "thinking" || section.kind === "reasoning"
+                      ? "思考过程"
                       : "推理块"}
                 </span>
               </div>

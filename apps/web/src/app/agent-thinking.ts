@@ -16,6 +16,22 @@ export function canViewMessageProcess(message: Message) {
   return message.role === "assistant" && message.status !== "deleted" && message.status !== "recalled";
 }
 
+function mergeReasoningBlocks(blocks: MessageBlock[]) {
+  const reasoningBlocks = blocks
+    .filter((block) => block.type === "reasoning" && block.content.trim())
+    .slice()
+    .sort((left, right) => {
+      if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder;
+      return left.createdAt.localeCompare(right.createdAt);
+    });
+  if (reasoningBlocks.length === 0) return null;
+  return {
+    id: reasoningBlocks.map((block) => block.id).join(":"),
+    content: reasoningBlocks.map((block) => block.content.trim()).filter(Boolean).join("\n\n"),
+    streaming: reasoningBlocks.some((block) => block.status === "streaming"),
+  };
+}
+
 export function collectMessageProcess(
   message: Message,
   blocks: MessageBlock[],
@@ -23,14 +39,13 @@ export function collectMessageProcess(
   agentRuns: AgentRun[],
 ): ProcessSection[] {
   const sections: ProcessSection[] = [];
-
-  for (const block of blocks) {
-    if (block.messageId !== message.id || block.type !== "reasoning") continue;
+  const mergedReasoning = mergeReasoningBlocks(blocks.filter((block) => block.messageId === message.id));
+  if (mergedReasoning) {
     sections.push({
       kind: "reasoning",
-      id: block.id,
-      content: block.content,
-      streaming: block.status === "streaming",
+      id: mergedReasoning.id,
+      content: mergedReasoning.content,
+      streaming: mergedReasoning.streaming,
     });
   }
 
@@ -47,9 +62,10 @@ export function collectMessageProcess(
 
   let thinkingBuffer = "";
   let thinkingStreaming = false;
+  const skipRunThinking = Boolean(mergedReasoning?.content.trim());
 
   const flushThinking = () => {
-    if (!thinkingBuffer && !thinkingStreaming) return;
+    if (skipRunThinking || (!thinkingBuffer && !thinkingStreaming)) return;
     sections.push({
       kind: "thinking",
       id: `thinking-${runId}-${sections.length}`,
@@ -62,8 +78,10 @@ export function collectMessageProcess(
 
   for (const event of runEvents) {
     if (event.type === "thinking_delta") {
-      thinkingBuffer += event.content;
-      thinkingStreaming = event.status === "streaming" || thinkingStreaming;
+      if (!skipRunThinking) {
+        thinkingBuffer += event.content;
+        thinkingStreaming = event.status === "streaming" || thinkingStreaming;
+      }
       continue;
     }
     flushThinking();

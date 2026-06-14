@@ -3,6 +3,7 @@ import {
   isMessageVisibleToParticipant,
   type AddParticipantRequest,
   type AgentRun,
+  type AgentRunEvent,
   type Conversation,
   type CreateIdentityRequest,
   type CreateRoomRequest,
@@ -833,6 +834,11 @@ export class ChatService {
     const runtimeEvents = {
       toolCalls: new Map<string, string>(),
     };
+    const thinkingState = {
+      runEventId: null as string | null,
+      reasoningBlockId: null as string | null,
+      content: "",
+    };
     this.events.emit({
       type: "run.started",
       roomId,
@@ -913,6 +919,57 @@ export class ChatService {
       emitBlockCreated(visibleReply.block);
       return { assistantMessage: visibleReply.message, block: visibleReply.block };
     };
+    const emitRunEventUpdated = (runEvent: AgentRunEvent | null) => {
+      if (!runEvent) return;
+      this.events.emit({
+        type: "run.event.created",
+        roomId,
+        conversationId,
+        runId: run.id,
+        payload: { event: runEvent },
+      });
+    };
+    const appendThinking = (text: string, finalize = false) => {
+      if (text) thinkingState.content += text;
+      if (!thinkingState.content && !thinkingState.runEventId && !thinkingState.reasoningBlockId) return;
+
+      const visible = ensureAssistantMessage();
+      const status = finalize ? "success" : "streaming";
+
+      if (thinkingState.runEventId) {
+        emitRunEventUpdated(
+          this.repo.updateAgentRunEvent(thinkingState.runEventId, {
+            content: thinkingState.content,
+            status,
+          }),
+        );
+      } else if (thinkingState.content) {
+        const runEvent = createRunEvent("thinking_delta", {
+          content: thinkingState.content,
+          status,
+        });
+        thinkingState.runEventId = runEvent.id;
+      }
+
+      if (thinkingState.reasoningBlockId) {
+        emitBlockUpdated(
+          this.repo.updateMessageBlock(thinkingState.reasoningBlockId, {
+            content: thinkingState.content,
+            status,
+          }),
+        );
+      } else if (thinkingState.content) {
+        const block = this.repo.createMessageBlock({
+          messageId: visible.assistantMessage.id,
+          type: "reasoning",
+          content: thinkingState.content,
+          status,
+          sortOrder: -1,
+        });
+        thinkingState.reasoningBlockId = block.id;
+        emitBlockCreated(block);
+      }
+    };
     const emitToken = (token: string) => {
       const visible = ensureAssistantMessage();
       content += token;
@@ -950,7 +1007,7 @@ export class ChatService {
         return;
       }
       if (event.type === "thinking_delta") {
-        createRunEvent("thinking_delta", { content: event.text, status: "streaming" });
+        appendThinking(event.text);
         return;
       }
       if (event.type === "tool_call") {
@@ -1086,6 +1143,7 @@ export class ChatService {
     }
 
     const finalBlock = this.repo.updateMessageBlock(visibleReply.block.id, { content, status: "success" });
+    appendThinking("", true);
     const finalMessage = this.repo.updateMessage(visibleReply.message.id, { content, status: "success" });
     const finalRun = this.repo.updateAgentRun(run.id, { status: "completed" });
     if (!finalRun) return null;

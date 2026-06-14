@@ -570,7 +570,7 @@ export function Composer(props: {
       ) : null}
       <div
         data-stop={props.activeRuns.length > 0 || undefined}
-        className={"[display:grid] [grid-template-columns:40px_minmax(0,_1fr)_40px] [gap:8px] [align-items:end] [border-radius:22px] [padding:8px] [background:#00000008] [&[data-stop=true]]:[grid-template-columns:40px_minmax(0,_1fr)_40px_40px] [&:focus-within]:[box-shadow:inset_0_0_0_1px_var(--border-strong)] max-[760px]:[grid-template-columns:34px_minmax(0,_1fr)_38px] max-[760px]:[&[data-stop=true]]:[grid-template-columns:34px_minmax(0,_1fr)_34px_38px]"}
+        className={"[display:grid] [grid-template-columns:40px_minmax(0,_1fr)_40px] [gap:8px] [align-items:end] [border:1px_solid_var(--border)] [border-radius:22px] [padding:8px] [background:#ffffff] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [&[data-stop=true]]:[grid-template-columns:40px_minmax(0,_1fr)_40px_40px] [&:focus-within]:[border-color:var(--border-strong)] [&:focus-within]:[box-shadow:0_0_0_3px_#00000008] max-[760px]:[grid-template-columns:34px_minmax(0,_1fr)_38px] max-[760px]:[&[data-stop=true]]:[grid-template-columns:34px_minmax(0,_1fr)_34px_38px]"}
         onClick={(event) => {
           if (event.target === event.currentTarget) editorRef.current?.focus();
         }}
