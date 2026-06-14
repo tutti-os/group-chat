@@ -264,6 +264,40 @@ export interface MentionTarget {
   mentionType: "participant" | "all";
 }
 
+export type AppReferenceKind = "file";
+
+export type AppFileReferenceLocationType = "app-data-relative" | "app-package-relative";
+
+export interface AppFileReferenceLocation {
+  type: AppFileReferenceLocationType;
+  path: string;
+}
+
+export interface AppReferenceSearchRequest {
+  query?: string;
+  limit?: number;
+  cursor?: string;
+  kinds?: AppReferenceKind[];
+}
+
+export type AppReference = AppFileReference;
+
+export interface AppFileReference {
+  kind: "file";
+  displayName?: string;
+  description?: string;
+  location: AppFileReferenceLocation;
+  sizeBytes?: number;
+  mtimeMs?: number;
+  mimeType?: string;
+  score?: number;
+}
+
+export interface AppReferenceSearchResponse {
+  references: AppReference[];
+  nextCursor?: string;
+}
+
 export type StreamEventType =
   | "room.created"
   | "room.deleted"
