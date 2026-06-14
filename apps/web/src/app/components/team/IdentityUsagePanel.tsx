@@ -21,7 +21,7 @@ export function IdentityUsagePanel(props: {
           <p className={"[margin:0] [color:var(--muted)] [font-size:12px] [line-height:1.55]"}>
             已加入 {roomCount} 个房间 · {cloneCount} 个分身员工。删除 Agent 会从房间移除，历史消息保留。
           </p>
-          <div className={"[display:grid] [gap:8px]"}>
+          <div className={"[display:grid] [grid-template-columns:repeat(3,_minmax(0,_1fr))] [gap:8px] max-[760px]:[grid-template-columns:1fr]"}>
             {props.usage.map((room) => (
               <UsageRoomSection
                 key={room.conversationId}
@@ -50,36 +50,37 @@ function UsageRoomSection(props: {
 }) {
   const { room } = props;
   const [expanded, setExpanded] = useState(false);
+  const openRoomTip = `前往「${room.title}」`;
 
   return (
     <section className={"[overflow:hidden] [border:1px_solid_var(--border)] [border-radius:14px] [background:#ffffff]"}>
-      <div className={"[display:flex] [align-items:center] [gap:0]"}>
-        {props.onOpenConversation ? (
-          <button
-            type="button"
-            className={"[display:flex] [min-width:0] [flex:1] [align-items:center] [gap:10px] [border:0] [padding:10px_12px] [color:var(--text)] [background:transparent] [text-align:left] [cursor:pointer] [&:hover]:[background:#00000005]"}
-            onClick={() => props.onOpenConversation?.(room.conversationId)}
-          >
-            <RoomAvatar title={room.title} avatar={room.roomAvatar} size={34} />
-            <span className={"[min-width:0] [flex:1] [overflow:hidden] [font-size:14px] [font-weight:650] [text-overflow:ellipsis] [white-space:nowrap]"}>
-              {room.title}
-            </span>
-          </button>
-        ) : (
-          <button
-            type="button"
-            className={"[display:flex] [min-width:0] [flex:1] [align-items:center] [gap:10px] [border:0] [padding:10px_12px] [color:var(--text)] [background:transparent] [text-align:left] [cursor:pointer] [&:hover]:[background:#00000005]"}
-            onClick={() => setExpanded((current) => !current)}
-          >
-            <RoomAvatar title={room.title} avatar={room.roomAvatar} size={34} />
-            <span className={"[min-width:0] [flex:1] [overflow:hidden] [font-size:14px] [font-weight:650] [text-overflow:ellipsis] [white-space:nowrap]"}>
-              {room.title}
-            </span>
-          </button>
-        )}
+      <div className={"[display:grid] [gap:8px] [padding:10px_12px]"}>
+        <div className={"[display:flex] [min-width:0] [align-items:center]"}>
+          {props.onOpenConversation ? (
+            <button
+              type="button"
+              className={"[display:inline-flex] [max-width:100%] [min-width:0] [align-items:center] [gap:10px] [border:0] [padding:0] [color:var(--text)] [background:transparent] [text-align:left] [cursor:pointer] [&:hover]:[color:#2563eb] [&:hover_span]:[text-decoration:underline] [&:focus-visible]:[outline:none] [&:focus-visible]:[box-shadow:0_0_0_3px_#2563eb22] [&:focus-visible]:[border-radius:8px]"}
+              title={openRoomTip}
+              aria-label={openRoomTip}
+              onClick={() => props.onOpenConversation?.(room.conversationId)}
+            >
+              <RoomAvatar title={room.title} avatar={room.roomAvatar} size={34} />
+              <span className={"[min-width:0] [overflow:hidden] [font-size:14px] [font-weight:650] [text-overflow:ellipsis] [white-space:nowrap]"}>
+                {room.title}
+              </span>
+            </button>
+          ) : (
+            <div className={"[display:inline-flex] [max-width:100%] [min-width:0] [align-items:center] [gap:10px]"}>
+              <RoomAvatar title={room.title} avatar={room.roomAvatar} size={34} />
+              <span className={"[min-width:0] [overflow:hidden] [font-size:14px] [font-weight:650] [text-overflow:ellipsis] [white-space:nowrap]"}>
+                {room.title}
+              </span>
+            </div>
+          )}
+        </div>
         <button
           type="button"
-          className={"[display:inline-flex] [flex-shrink:0] [align-items:center] [gap:4px] [border:0] [padding:10px_12px_10px_4px] [color:var(--muted)] [background:transparent] [font-size:11px] [font-weight:650] [white-space:nowrap] [cursor:pointer] [&:hover]:[color:var(--text)] [&:focus-visible]:[outline:none]"}
+          className={"[display:inline-flex] [width:100%] [align-items:center] [justify-content:space-between] [gap:4px] [border:0] [border-top:1px_solid_var(--border)] [padding:8px_0_0] [color:var(--muted)] [background:transparent] [font-size:11px] [font-weight:650] [white-space:nowrap] [cursor:pointer] [&:hover]:[color:var(--text)] [&:focus-visible]:[outline:none]"}
           aria-expanded={expanded}
           aria-label={`${expanded ? "收起" : "展开"} ${room.title} 的分身员工列表`}
           onClick={() => setExpanded((current) => !current)}
@@ -92,7 +93,7 @@ function UsageRoomSection(props: {
         </button>
       </div>
       {expanded ? (
-      <ul className={"[display:grid] [gap:2px] [margin:0] [margin-left:10px] [padding:4px_10px_8px_12px] [border-left:2px_solid_#eef2f6] [border-top:1px_solid_var(--border)] [list-style:none]"}>
+      <ul className={"[display:grid] [gap:2px] [margin:0] [padding:4px_12px_10px] [border-top:1px_solid_var(--border)] [list-style:none]"}>
         {room.clones.map((clone) => {
           const cloneAvatar = resolveAgentAvatar({
             avatar: clone.avatar ?? props.identityIcon,

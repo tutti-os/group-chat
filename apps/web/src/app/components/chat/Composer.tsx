@@ -60,6 +60,7 @@ export function Composer(props: {
   const previewUrlsRef = useRef<Set<string>>(new Set());
   const mentionSelectionRef = useRef<Range | null>(null);
   const mentionQueryRangeRef = useRef<Range | null>(null);
+  const composerCaretOffsetRef = useRef<number | null>(null);
   const mentionableParticipants = props.participants.filter(
     (participant) => participant.kind === "ai" && participant.status !== "removed",
   );
@@ -157,15 +158,17 @@ export function Composer(props: {
     const range = selection.getRangeAt(0);
     if (editor.contains(range.startContainer)) {
       mentionSelectionRef.current = range.cloneRange();
+      composerCaretOffsetRef.current = caretTextOffset(editor);
     }
   };
 
+  const handleEditorBlur = () => {
+    saveMentionSelection();
+    syncEditorText();
+  };
+
   const restoreMentionSelection = (editor: HTMLDivElement) => {
-    const saved = mentionSelectionRef.current;
-    const selection = window.getSelection();
-    if (!saved || !editor.contains(saved.startContainer) || !selection) return;
-    selection.removeAllRanges();
-    selection.addRange(saved);
+    restoreComposerCaret(editor, mentionSelectionRef.current, composerCaretOffsetRef.current);
   };
 
   const readMentionQueryFromRange = (range: Range | null) => {
@@ -218,6 +221,7 @@ export function Composer(props: {
     syncMentionedIds(nextText);
     if (editor) captureActiveMentionQueryRange(editor);
     updateMentionQuery(nextText, cursor);
+    if (editor) composerCaretOffsetRef.current = cursor;
     resizeComposerEditor(editor);
   };
 
@@ -256,6 +260,7 @@ export function Composer(props: {
     setMentionQuery(null);
     mentionSelectionRef.current = null;
     mentionQueryRangeRef.current = null;
+    resizeComposerEditor(editor);
     return true;
   };
 
@@ -265,28 +270,47 @@ export function Composer(props: {
 
   const insertMentionAtCursor = (participant: Participant): boolean => {
     setMentionQuery(null);
-    const currentEditor = editorRef.current;
-    if (!currentEditor) return false;
+    const editor = editorRef.current;
+    if (!editor) return false;
+
+    editor.focus({ preventScroll: true });
+    restoreComposerCaret(editor, mentionSelectionRef.current, composerCaretOffsetRef.current);
 
     suppressEditorSyncRef.current = true;
     let trailingSpace: Text | null = null;
     try {
-      trailingSpace = appendMentionChipToEditor(currentEditor, participant.displayName, participant.id);
-      normalizeEditorAfterMentionInsert(currentEditor);
+      let queryRange = mentionQueryRangeRef.current;
+      if (
+        queryRange &&
+        (!editor.contains(queryRange.startContainer) || !editor.contains(queryRange.endContainer))
+      ) {
+        queryRange = null;
+      }
+      if (!queryRange) {
+        queryRange = findActiveMentionQueryRange(editor);
+      }
+      if (queryRange && !rangeCrossesMentionChip(queryRange)) {
+        trailingSpace = replaceMentionQueryRange(queryRange.cloneRange(), participant.displayName, participant.id);
+      } else {
+        trailingSpace = insertMentionChipAtCaret(editor, participant.displayName, participant.id);
+      }
+      normalizeEditorAfterMentionInsert(editor);
     } finally {
       suppressEditorSyncRef.current = false;
     }
 
-    setText(editorText(currentEditor));
-    syncMentionedIdsFromEditor(currentEditor);
+    setText(editorText(editor));
+    syncMentionedIdsFromEditor(editor);
     setMentionQuery(null);
     mentionQueryRangeRef.current = null;
 
     if (trailingSpace) {
-      focusAfterTrailingSpace(trailingSpace, currentEditor);
+      focusAfterTrailingSpace(trailingSpace, editor);
     } else {
-      placeCaretAtEditorEnd(currentEditor, { preventScroll: true });
+      placeCaretAtEditorEnd(editor, { preventScroll: true });
     }
+    composerCaretOffsetRef.current = caretTextOffset(editor);
+    resizeComposerEditor(editor);
     return true;
   };
 
@@ -309,6 +333,8 @@ export function Composer(props: {
   const insertWhisperMention = (participant: Participant) => {
     const editor = editorRef.current;
     if (!editor) return;
+    editor.focus({ preventScroll: true });
+    restoreComposerCaret(editor, mentionSelectionRef.current, composerCaretOffsetRef.current);
     captureActiveMentionQueryRange(editor);
 
     suppressEditorSyncRef.current = true;
@@ -328,7 +354,7 @@ export function Composer(props: {
       if (queryRange && !rangeCrossesMentionChip(queryRange)) {
         trailingSpace = replaceMentionQueryRange(queryRange.cloneRange(), participant.displayName, participant.id);
       } else {
-        trailingSpace = appendMentionChipToEditor(editor, participant.displayName, participant.id);
+        trailingSpace = insertMentionChipAtCaret(editor, participant.displayName, participant.id);
       }
       trailingSpace = attachWhisperChipBeforeTrailingSpace(editor, trailingSpace);
       normalizeEditorAfterMentionInsert(editor);
@@ -612,7 +638,7 @@ export function Composer(props: {
               onClick={syncEditorText}
               onPaste={pasteFiles}
               onKeyUp={syncEditorText}
-              onBlur={syncEditorText}
+              onBlur={handleEditorBlur}
               onKeyDown={(event) => {
                 if ((event.key === "Backspace" || event.key === "Delete") && deleteAdjacentMentionChip(editorRef.current, event.key)) {
                   event.preventDefault();
@@ -791,8 +817,18 @@ function editorText(editor: HTMLDivElement | null) {
 const COMPOSER_EDITOR_MIN_HEIGHT = 28;
 const COMPOSER_EDITOR_MAX_HEIGHT = 168;
 
+function editorHasExplicitLineBreak(editor: HTMLDivElement) {
+  if (editorText(editor).includes("\n")) return true;
+  return editor.querySelector("br") !== null;
+}
+
 function resizeComposerEditor(editor: HTMLDivElement | null) {
   if (!editor) return;
+  if (!editorHasExplicitLineBreak(editor)) {
+    editor.style.height = `${COMPOSER_EDITOR_MIN_HEIGHT}px`;
+    editor.style.overflowY = "hidden";
+    return;
+  }
   editor.style.height = "0px";
   const scrollHeight = editor.scrollHeight;
   const nextHeight = Math.min(
@@ -1016,6 +1052,83 @@ function removeTrailingPartialMentionQuery(editor: HTMLDivElement) {
   const range = findActiveMentionQueryRange(editor);
   if (!range) return;
   range.deleteContents();
+}
+
+function restoreComposerCaret(editor: HTMLDivElement, savedRange: Range | null, savedOffset: number | null) {
+  const selection = window.getSelection();
+  if (!selection) return false;
+  if (savedRange && editor.contains(savedRange.startContainer)) {
+    selection.removeAllRanges();
+    selection.addRange(savedRange);
+    return true;
+  }
+  if (savedOffset !== null) {
+    const range = textRange(editor, savedOffset, savedOffset);
+    if (range) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return true;
+    }
+  }
+  return false;
+}
+
+function needsLeadingSpaceBeforeCaret(range: Range, editor: HTMLDivElement): boolean {
+  if (!range.collapsed) {
+    return needsLeadingSpaceBeforeMentionRange(range);
+  }
+  const { startContainer, startOffset } = range;
+  if (startContainer.nodeType === Node.TEXT_NODE) {
+    if (startOffset > 0) {
+      return /\S/.test((startContainer.textContent ?? "")[startOffset - 1] ?? "");
+    }
+    let previous: Node | null = startContainer.previousSibling;
+    while (previous) {
+      if (isMentionChip(previous)) return true;
+      if (previous.nodeType === Node.TEXT_NODE) {
+        const value = previous.textContent ?? "";
+        return value.length > 0 && !/\s$/.test(value);
+      }
+      previous = previous.previousSibling;
+    }
+  }
+  if (startContainer === editor && startOffset > 0) {
+    const previous = editor.childNodes.item(startOffset - 1);
+    if (previous && isMentionChip(previous)) return true;
+    if (previous?.nodeType === Node.TEXT_NODE) {
+      const value = previous.textContent ?? "";
+      return value.length > 0 && !/\s$/.test(value);
+    }
+  }
+  return false;
+}
+
+function insertMentionChipAtCaret(editor: HTMLDivElement, label: string, mentionId: string): Text | null {
+  removeTrailingPartialMentionQuery(editor);
+  removeOrphanAtTextNodes(editor);
+
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) {
+    return appendMentionChipToEditor(editor, label, mentionId);
+  }
+
+  const range = selection.getRangeAt(0);
+  if (!editor.contains(range.startContainer)) {
+    return appendMentionChipToEditor(editor, label, mentionId);
+  }
+
+  if (!range.collapsed) {
+    range.deleteContents();
+  }
+
+  const needsLeadingSpace = needsLeadingSpaceBeforeCaret(range, editor);
+  const trailingSpace = document.createTextNode(" ");
+  const fragment = document.createDocumentFragment();
+  if (needsLeadingSpace) fragment.append(document.createTextNode(" "));
+  fragment.append(createMentionChip(label, mentionId));
+  fragment.append(trailingSpace);
+  range.insertNode(fragment);
+  return trailingSpace;
 }
 
 function appendMentionChipToEditor(editor: HTMLDivElement, label: string, mentionId: string): Text | null {

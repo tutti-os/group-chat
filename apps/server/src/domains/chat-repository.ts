@@ -95,6 +95,36 @@ export class ChatRepository {
     };
   }
 
+  listHiddenMessageIds(): Set<string> {
+    const rows = getDb().prepare(`SELECT message_id FROM hidden_messages`).all() as Array<{ message_id: string }>;
+    return new Set(rows.map((row) => row.message_id));
+  }
+
+  hideMessageForLocalUser(messageId: string, conversationId: string): boolean {
+    const now = new Date().toISOString();
+    const result = getDb()
+      .prepare(
+        `INSERT OR IGNORE INTO hidden_messages (message_id, conversation_id, hidden_at) VALUES (?, ?, ?)`,
+      )
+      .run(messageId, conversationId, now);
+    return result.changes > 0;
+  }
+
+  filterHiddenFromSnapshot(snapshot: ChatSnapshot): ChatSnapshot {
+    const hiddenIds = this.listHiddenMessageIds();
+    if (hiddenIds.size === 0) return snapshot;
+    const messages = snapshot.messages.filter((message) => !hiddenIds.has(message.id));
+    const visibleMessageIds = new Set(messages.map((message) => message.id));
+    return {
+      ...snapshot,
+      messages,
+      messageBlocks: snapshot.messageBlocks.filter((block) => visibleMessageIds.has(block.messageId)),
+      artifacts: snapshot.artifacts.filter(
+        (artifact) => !artifact.messageId || visibleMessageIds.has(artifact.messageId),
+      ),
+    };
+  }
+
   createRoom(input: CreateRoomRequest = {}) {
     const now = new Date().toISOString();
     const roomId = nanoid();
@@ -762,6 +792,17 @@ export class ChatRepository {
     const rows = getDb()
       .prepare(`SELECT * FROM agent_runs WHERE status IN ('accepted', 'running') ORDER BY created_at ASC`)
       .all() as any[];
+    return rows.map(rowToAgentRun);
+  }
+
+  listActiveAgentRunsForTriggerMessage(triggerMessageId: string): AgentRun[] {
+    const rows = getDb()
+      .prepare(
+        `SELECT * FROM agent_runs
+         WHERE trigger_message_id = ? AND status IN ('accepted', 'running')
+         ORDER BY created_at ASC`,
+      )
+      .all(triggerMessageId) as any[];
     return rows.map(rowToAgentRun);
   }
 

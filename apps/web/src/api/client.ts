@@ -16,6 +16,7 @@ import type {
   UpdateConversationPinRequest,
   UpdateConversationRulesRequest,
   UpdateIdentityRequest,
+  HideMessageResponse,
   UpdateMessageRequest,
   UpdateParticipantRequest,
   UpdateRoomRequest,
@@ -72,7 +73,7 @@ export async function updateMessage(messageId: string, input: UpdateMessageReque
   });
 }
 
-export async function deleteMessage(messageId: string): Promise<SendMessageResponse> {
+export async function deleteMessage(messageId: string): Promise<HideMessageResponse> {
   return fetchJson(`/api/messages/${messageId}`, {
     method: "DELETE",
   });

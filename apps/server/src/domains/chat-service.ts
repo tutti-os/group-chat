@@ -54,7 +54,7 @@ export class ChatService {
     this.repo.ensureSeedData();
     this.materializeExistingWorkspaces();
     this.recoverReplyQueueOnce();
-    return this.repo.snapshot();
+    return this.repo.filterHiddenFromSnapshot(this.repo.snapshot());
   }
 
   async listLocalAgentProviders() {
@@ -281,6 +281,11 @@ export class ChatService {
     return this.finalizeRunCancellation(runId, "Cancelled by user");
   }
 
+  private async cancelRunsForTriggerMessage(triggerMessageId: string) {
+    const runs = this.repo.listActiveAgentRunsForTriggerMessage(triggerMessageId);
+    await Promise.all(runs.map((run) => this.cancelRun(run.id)));
+  }
+
   setParticipantMuted(participantId: string, muted: boolean) {
     const participant = this.repo.updateParticipantStatus(participantId, muted ? "muted" : "active");
     if (participant) {
@@ -470,16 +475,20 @@ export class ChatService {
     return { taskId, cancelled: true };
   }
 
-  updateMessage(messageId: string, input: UpdateMessageRequest) {
+  async updateMessage(messageId: string, input: UpdateMessageRequest) {
     const current = this.repo.getMessage(messageId);
     if (!current) return null;
     const conversation = this.repo.getConversation(current.conversationId);
     if (!conversation) return null;
-    if (input.status === "deleted" || input.status === "recalled") {
+    if (input.status === "recalled") {
+      if (current.role !== "user") {
+        throw new Error("Only your own messages can be recalled");
+      }
       const result = this.repo.markMessageStatus(messageId, input.status);
       if (!result?.message) return null;
-      if (input.status === "recalled") this.repo.deletePendingRepliesForMessage(messageId);
-      this.repo.touchConversation(conversation.id, input.status === "recalled" ? "消息已撤回" : "消息已删除");
+      this.repo.deletePendingRepliesForMessage(messageId);
+      await this.cancelRunsForTriggerMessage(messageId);
+      this.repo.touchConversation(conversation.id, "消息已撤回");
       this.events.emit({
         type: "message.updated",
         roomId: conversation.roomId,
@@ -523,6 +532,21 @@ export class ChatService {
       mentionScoped: isParticipantMentionScoped(result.message.mentions),
     });
     return { message: result.message, blocks: result.block ? [result.block] : [], targets };
+  }
+
+  hideMessageForLocalUser(messageId: string) {
+    const current = this.repo.getMessage(messageId);
+    if (!current) return null;
+    const conversation = this.repo.getConversation(current.conversationId);
+    if (!conversation) return null;
+    this.repo.hideMessageForLocalUser(messageId, current.conversationId);
+    this.events.emit({
+      type: "message.hidden",
+      roomId: conversation.roomId,
+      conversationId: conversation.id,
+      payload: { messageId },
+    });
+    return { messageId, hidden: true as const };
   }
 
   private normalizeMentions(conversationId: string, mentions: NonNullable<SendMessageRequest["mentions"]>) {
@@ -740,7 +764,9 @@ export class ChatService {
     try {
       let nextMessage: Message | null = userMessage;
       while (nextMessage) {
-        const generated = await this.generateForParticipant(roomId, conversationId, nextMessage, participant);
+        const latest = this.repo.getMessage(nextMessage.id);
+        if (!latest || latest.status === "recalled") break;
+        const generated = await this.generateForParticipant(roomId, conversationId, latest, participant);
         if (nextMessage.id === userMessage.id) requestedReply = generated;
         const pending = this.repo.consumePendingReply(conversationId, participant.id);
         if (!pending) {
@@ -781,6 +807,8 @@ export class ChatService {
     userMessage: Message,
     participant: Participant,
   ): Promise<Message | null> {
+    const latestUserMessage = this.repo.getMessage(userMessage.id);
+    if (!latestUserMessage || latestUserMessage.status === "recalled") return null;
     const conversation = this.repo.getConversation(conversationId);
     if (!conversation) return null;
     const runtimeProfile = participant.runtimeProfileId ? this.repo.getRuntimeProfile(participant.runtimeProfileId) : null;
@@ -795,7 +823,7 @@ export class ChatService {
       participant,
       identity,
       runtimeProfile,
-      userMessage,
+      userMessage: latestUserMessage,
       recentMessages,
       attachments,
     };
@@ -805,11 +833,11 @@ export class ChatService {
       conversationId,
       participantId: participant.id,
       assistantMessageId: null,
-      triggerMessageId: userMessage.id,
+      triggerMessageId: latestUserMessage.id,
       runtime: runDescriptor.runtime,
       provider: runDescriptor.provider,
       model: runDescriptor.model,
-      visibility: userMessage.visibility,
+      visibility: latestUserMessage.visibility,
     });
     this.events.emit({
       type: "run.accepted",
