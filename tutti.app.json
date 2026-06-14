@@ -12,6 +12,9 @@
     "bootstrap": "bootstrap.sh",
     "healthcheckPath": "/api/health"
   },
+  "cli": {
+    "manifest": "tutti.cli.json"
+  },
   "window": {
     "minimizeBehavior": "keep-mounted",
     "minWidth": 960,

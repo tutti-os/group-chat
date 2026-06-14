@@ -26,6 +26,15 @@ import { AgentToolGateway } from "./domains/agent-tool-gateway.js";
 import { AgentToolTokenStore, AgentToolUnauthorizedError } from "./domains/agent-tool-tokens.js";
 import { ChatRepository } from "./domains/chat-repository.js";
 import { ChatService } from "./domains/chat-service.js";
+import {
+  getArtifactCliOutput,
+  getConversationCliOutput,
+  isCliError,
+  listArtifactsCliOutput,
+  listConversationsCliOutput,
+  type CliCommandError,
+  type CliCommandOutput,
+} from "./domains/tutti-cli.js";
 import { EventHub } from "./ws/event-hub.js";
 
 const webDist = process.env.GROUP_CHAT_WEB_DIST
@@ -58,6 +67,22 @@ server.get("/api/health", async () => ({
 server.get("/api/bootstrap", async () => chat.bootstrap());
 
 server.get("/api/local-agent/providers", async () => chat.listLocalAgentProviders());
+
+server.post<{ Body: unknown }>("/tutti/cli/conversations/list", async (request, reply) =>
+  sendCliOutput(reply, listConversationsCliOutput(chat.bootstrap(), normalizeCliEnvelope(request.body))),
+);
+
+server.post<{ Body: unknown }>("/tutti/cli/conversations/get", async (request, reply) =>
+  sendCliOutput(reply, getConversationCliOutput(chat.bootstrap(), normalizeCliEnvelope(request.body))),
+);
+
+server.post<{ Body: unknown }>("/tutti/cli/artifacts/list", async (request, reply) =>
+  sendCliOutput(reply, listArtifactsCliOutput(chat.bootstrap(), normalizeCliEnvelope(request.body))),
+);
+
+server.post<{ Body: unknown }>("/tutti/cli/artifacts/get", async (request, reply) =>
+  sendCliOutput(reply, getArtifactCliOutput(chat.bootstrap(), normalizeCliEnvelope(request.body))),
+);
 
 server.post<{ Body: CreateRoomRequest }>("/api/rooms", async (request) => chat.createRoom(request.body ?? {}));
 
@@ -349,6 +374,8 @@ server.get("/api/ws", { websocket: true }, (socket) => {
 server.setNotFoundHandler((request, reply) => {
   if (
     request.raw.url?.startsWith("/api/") ||
+    request.raw.url?.startsWith("/tutti/cli/") ||
+    request.raw.url?.startsWith("/nextop/cli/") ||
     request.raw.url?.startsWith("/local-assets/")
   ) {
     return reply.code(404).send({ error: "Not found" });
@@ -379,6 +406,21 @@ function readAgentToolCredential(request: { headers: Record<string, string | str
   const headerToken = Array.isArray(header) ? header[0] : header;
   const query = request.query as { toolToken?: string } | undefined;
   return { token: headerToken ?? query?.toolToken ?? null };
+}
+
+function normalizeCliEnvelope(value: unknown) {
+  if (value === undefined) return {};
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : { input: null };
+}
+
+function sendCliOutput(
+  reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } },
+  output: CliCommandOutput | CliCommandError,
+) {
+  if (isCliError(output)) {
+    return reply.code(output.error.code === "not_found" ? 404 : 400).send(output);
+  }
+  return output;
 }
 
 function openPathWithSystemApp(path: string) {
