@@ -29,7 +29,7 @@
 
 - 保存全局设置、skills、provider/runtime profile。
 - 作为本地数据和资源的顶层归属。
-- 为 Nextop CLI 暴露 workspace app context。
+- 为 Tutti CLI 暴露 workspace app context。
 
 不负责：
 

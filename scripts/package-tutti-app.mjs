@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const rootDir = path.resolve(path.dirname(scriptPath), "..");
-const buildRoot = path.join(rootDir, "build", "nextop-app");
+const buildRoot = path.join(rootDir, "build", "tutti-app");
 const packageRoot = path.join(buildRoot, "package");
 
 const APP_ID = "group-chat";
@@ -35,7 +35,7 @@ const MANIFEST_LOCALIZATIONS = {
 
 export function createManifest({ version }) {
   return {
-    schemaVersion: "nextop.app.manifest.v1",
+    schemaVersion: "tutti.app.manifest.v1",
     appId: APP_ID,
     version,
     name: APP_NAME,
@@ -61,7 +61,7 @@ export function createManifest({ version }) {
       })),
     },
     author: {
-      name: "Nextop",
+      name: "Tutti",
     },
     tags: ["local-first", "agent", "chat", "team"],
   };
@@ -72,20 +72,20 @@ export function renderBootstrap({ version = "0.0.0" } = {}) {
 set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-package_dir="\${NEXTOP_APP_PACKAGE_DIR:-$script_dir}"
+package_dir="\${TUTTI_APP_PACKAGE_DIR:-$script_dir}"
 
-export HOST="\${NEXTOP_APP_HOST:-127.0.0.1}"
-export PORT="\${NEXTOP_APP_PORT:-8788}"
+export HOST="\${TUTTI_APP_HOST:-127.0.0.1}"
+export PORT="\${TUTTI_APP_PORT:-8788}"
 export GROUP_CHAT_APP_VERSION="${version}"
 export GROUP_CHAT_WEB_DIST="$package_dir/dist"
-export GROUP_CHAT_HOME="\${NEXTOP_APP_DATA_DIR:-$package_dir/.data}"
-export GROUP_CHAT_WORKSPACE_ROOT="\${NEXTOP_WORKSPACE_ROOT:-$GROUP_CHAT_HOME}"
+export GROUP_CHAT_HOME="\${TUTTI_APP_DATA_DIR:-$package_dir/.data}"
+export GROUP_CHAT_WORKSPACE_ROOT="\${TUTTI_WORKSPACE_ROOT:-$GROUP_CHAT_HOME}"
 
-base_url="\${NEXTOP_APP_BASE_URL:-http://$HOST:$PORT}"
+base_url="\${TUTTI_APP_BASE_URL:-http://$HOST:$PORT}"
 export GROUP_CHAT_SERVER_URL="$base_url"
 
-node_bin="\${NEXTOP_APP_NODE:-node}"
-runtime_dir="\${NEXTOP_APP_RUNTIME_DIR:-$GROUP_CHAT_HOME/.runtime}"
+node_bin="\${TUTTI_APP_NODE:-node}"
+runtime_dir="\${TUTTI_APP_RUNTIME_DIR:-$GROUP_CHAT_HOME/.runtime}"
 mkdir -p "$GROUP_CHAT_HOME" "$runtime_dir"
 
 exec "$node_bin" "$package_dir/server/server.js"
@@ -93,26 +93,26 @@ exec "$node_bin" "$package_dir/server/server.js"
 }
 
 export function renderAgentsGuide() {
-  return `# Group Chat Nextop Package
+  return `# Group Chat Tutti Package
 
-This package runs Group Chat as a Nextop workspace app.
+This package runs Group Chat as a Tutti workspace app.
 
 ## Files
 
-- \`nextop.app.json\`: Nextop app manifest.
-- \`bootstrap.sh\`: maps \`NEXTOP_APP_*\` runtime variables into Group Chat env and starts the server.
+- \`tutti.app.json\`: Tutti app manifest.
+- \`bootstrap.sh\`: maps \`TUTTI_APP_*\` runtime variables into Group Chat env and starts the server.
 - \`server/server.js\`: bundled Fastify server.
 - \`dist/\`: built React/Vite frontend.
 - \`icon.svg\`: package icon.
 
 ## Runtime
 
-Nextop starts \`bootstrap.sh\` with no arguments. The app binds to
-\`NEXTOP_APP_HOST:NEXTOP_APP_PORT\`, serves \`dist/\`, and stores durable
+Tutti starts \`bootstrap.sh\` with no arguments. The app binds to
+\`TUTTI_APP_HOST:TUTTI_APP_PORT\`, serves \`dist/\`, and stores durable
 SQLite data, uploads, room workspaces, and agent workspaces under
-\`NEXTOP_APP_DATA_DIR\` via \`GROUP_CHAT_HOME\`.
+\`TUTTI_APP_DATA_DIR\` via \`GROUP_CHAT_HOME\`.
 
-The app intentionally does not expose a \`nextop.cli.json\` manifest in this
+The app intentionally does not expose a \`tutti.cli.json\` manifest in this
 phase. Keep the package focused on the GUI/local-agent IM experience.
 `;
 }
@@ -135,7 +135,7 @@ export async function readRootPackage() {
 }
 
 export async function readSourceManifest() {
-  const data = await readFile(path.join(rootDir, "nextop.app.json"), "utf8");
+  const data = await readFile(path.join(rootDir, "tutti.app.json"), "utf8");
   return JSON.parse(data);
 }
 
@@ -163,7 +163,7 @@ async function writePackageFiles(manifest) {
   await mkdir(path.join(packageRoot, "server"), { recursive: true });
 
   await writeFile(
-    path.join(packageRoot, "nextop.app.json"),
+    path.join(packageRoot, "tutti.app.json"),
     `${JSON.stringify(manifest, null, 2)}\n`,
   );
   for (const { file, metadata } of Object.values(MANIFEST_LOCALIZATIONS)) {
@@ -189,7 +189,7 @@ async function bundleServer() {
     "--platform=node",
     "--format=esm",
     "--target=node22",
-    "--outfile=build/nextop-app/package/server/server.js",
+    "--outfile=build/tutti-app/package/server/server.js",
     "--banner:js=import { createRequire as __groupChatCreateRequire } from 'node:module'; const require = __groupChatCreateRequire(import.meta.url);",
   ]);
 }
@@ -223,7 +223,7 @@ export async function assertNoSymlinks(root) {
 
 export async function validatePackageRoot(root) {
   const requiredFiles = [
-    "nextop.app.json",
+    "tutti.app.json",
     "AGENTS.md",
     "bootstrap.sh",
     "icon.svg",
@@ -239,9 +239,9 @@ export async function validatePackageRoot(root) {
     }
   }
 
-  const manifest = JSON.parse(await readFile(path.join(root, "nextop.app.json"), "utf8"));
-  if (manifest.schemaVersion !== "nextop.app.manifest.v1") {
-    throw new Error("Manifest schemaVersion must be nextop.app.manifest.v1");
+  const manifest = JSON.parse(await readFile(path.join(root, "tutti.app.json"), "utf8"));
+  if (manifest.schemaVersion !== "tutti.app.manifest.v1") {
+    throw new Error("Manifest schemaVersion must be tutti.app.manifest.v1");
   }
   if (manifest.appId !== APP_ID) {
     throw new Error(`Manifest appId must be ${APP_ID}`);
@@ -250,7 +250,7 @@ export async function validatePackageRoot(root) {
     throw new Error("Manifest runtime must not declare kind");
   }
   if (manifest.cli) {
-    throw new Error("Group Chat GUI package must not include a Nextop CLI manifest");
+    throw new Error("Group Chat GUI package must not include a Tutti CLI manifest");
   }
   if (!manifest.runtime?.bootstrap || !manifest.runtime?.healthcheckPath?.startsWith("/")) {
     throw new Error("Manifest runtime bootstrap and healthcheckPath are required");
@@ -274,11 +274,11 @@ export async function validatePackageRoot(root) {
   await assertNoSymlinks(root);
 }
 
-export async function packageNextopApp() {
+export async function packageTuttiApp() {
   const rootPackage = await readRootPackage();
   const sourceManifest = await readSourceManifest();
   const version =
-    process.env.GROUP_CHAT_NEXTOP_APP_VERSION?.trim() ||
+    process.env.GROUP_CHAT_TUTTI_APP_VERSION?.trim() ||
     sourceManifest.version ||
     rootPackage.version ||
     "0.0.0";
@@ -307,7 +307,7 @@ export async function packageNextopApp() {
 }
 
 if (process.argv[1] === scriptPath) {
-  packageNextopApp().catch((error) => {
+  packageTuttiApp().catch((error) => {
     console.error(error instanceof Error ? error.stack ?? error.message : error);
     process.exitCode = 1;
   });

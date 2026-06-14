@@ -1,6 +1,6 @@
 # 底层与 Infra 模块
 
-本文定义 `group-chat` 的底层模块边界。底层能力必须对齐 `docs/ai-media-canvas-foundation-reference.md`：本地 server、SQLite、durable run/message/event store、WebSocket replay、agent runtime 抽象、run-scoped tool gateway、workspace skills。Nextop CLI gateway 是后续阶段预留入口，本期不实现。
+本文定义 `group-chat` 的底层模块边界。底层能力必须对齐 `docs/ai-media-canvas-foundation-reference.md`：本地 server、SQLite、durable run/message/event store、WebSocket replay、agent runtime 抽象、run-scoped tool gateway、workspace skills。Tutti CLI gateway 是后续阶段预留入口，本期不实现。
 
 ## 模块总览
 
@@ -15,7 +15,7 @@ Web UI
       -> Local Asset Store
       -> Tool Gateway
       -> Runtime Providers
-Future Nextop CLI
+Future Tutti CLI
   -> deferred external routes
     -> same Application Use Cases
 ```
@@ -249,7 +249,7 @@ resume?(resumeToken)
 - 客户端通过 subscribe/unsubscribe 声明关注范围。
 - active run 数量只影响 event 数量，不影响 WebSocket 数量。
 
-## Deferred Nextop CLI Gateway
+## Deferred Tutti CLI Gateway
 
 状态：本期暂缓。当前阶段只推进 GUI 场景和本地 agent 群聊体验。
 
@@ -266,7 +266,7 @@ resume?(resumeToken)
 
 当前阶段：
 
-- 本期暂缓 Nextop CLI 接入。
+- 本期暂缓 Tutti CLI 接入。
 - 当前优先 GUI 场景；CLI gateway 后续再按同一批 service/use-case 补齐，避免复制业务逻辑。
 
 ## P0 建议

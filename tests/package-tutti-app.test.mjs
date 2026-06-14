@@ -12,15 +12,15 @@ import {
   renderBootstrap,
   renderIcon,
   validatePackageRoot,
-} from "../scripts/package-nextop-app.mjs";
+} from "../scripts/package-tutti-app.mjs";
 
 async function makeTempPackageRoot() {
-  return mkdtemp(path.join(os.tmpdir(), "group-chat-nextop-package-test-"));
+  return mkdtemp(path.join(os.tmpdir(), "group-chat-tutti-package-test-"));
 }
 
-test("createManifest returns the Nextop package manifest contract", () => {
+test("createManifest returns the Tutti package manifest contract", () => {
   assert.deepEqual(createManifest({ version: "1.2.3" }), {
-    schemaVersion: "nextop.app.manifest.v1",
+    schemaVersion: "tutti.app.manifest.v1",
     appId: "group-chat",
     version: "1.2.3",
     name: "Group Chat",
@@ -48,45 +48,45 @@ test("createManifest returns the Nextop package manifest contract", () => {
       ],
     },
     author: {
-      name: "Nextop",
+      name: "Tutti",
     },
     tags: ["local-first", "agent", "chat", "team"],
   });
 });
 
-test("root Nextop app manifest matches the generated package manifest", async () => {
+test("root Tutti app manifest matches the generated package manifest", async () => {
   const manifest = await readSourceManifest();
 
   assert.deepEqual(manifest, createManifest({ version: manifest.version }));
 });
 
-test("bootstrap maps Nextop runtime env into Group Chat env", () => {
+test("bootstrap maps Tutti runtime env into Group Chat env", () => {
   const bootstrap = renderBootstrap({ version: "9.8.7" });
 
-  assert.match(bootstrap, /package_dir="\$\{NEXTOP_APP_PACKAGE_DIR:-\$script_dir\}"/);
-  assert.match(bootstrap, /export HOST="\$\{NEXTOP_APP_HOST:-127\.0\.0\.1\}"/);
-  assert.match(bootstrap, /export PORT="\$\{NEXTOP_APP_PORT:-8788\}"/);
+  assert.match(bootstrap, /package_dir="\$\{TUTTI_APP_PACKAGE_DIR:-\$script_dir\}"/);
+  assert.match(bootstrap, /export HOST="\$\{TUTTI_APP_HOST:-127\.0\.0\.1\}"/);
+  assert.match(bootstrap, /export PORT="\$\{TUTTI_APP_PORT:-8788\}"/);
   assert.match(bootstrap, /export GROUP_CHAT_APP_VERSION="9\.8\.7"/);
-  assert.match(bootstrap, /export GROUP_CHAT_HOME="\$\{NEXTOP_APP_DATA_DIR:-\$package_dir\/\.data\}"/);
-  assert.match(bootstrap, /export GROUP_CHAT_WORKSPACE_ROOT="\$\{NEXTOP_WORKSPACE_ROOT:-\$GROUP_CHAT_HOME\}"/);
-  assert.match(bootstrap, /node_bin="\$\{NEXTOP_APP_NODE:-node\}"/);
+  assert.match(bootstrap, /export GROUP_CHAT_HOME="\$\{TUTTI_APP_DATA_DIR:-\$package_dir\/\.data\}"/);
+  assert.match(bootstrap, /export GROUP_CHAT_WORKSPACE_ROOT="\$\{TUTTI_WORKSPACE_ROOT:-\$GROUP_CHAT_HOME\}"/);
+  assert.match(bootstrap, /node_bin="\$\{TUTTI_APP_NODE:-node\}"/);
   assert.match(bootstrap, /exec "\$node_bin" "\$package_dir\/server\/server\.js"/);
 });
 
 test("package guide documents runtime ownership", () => {
   const guide = renderAgentsGuide();
 
-  assert.match(guide, /NEXTOP_APP_HOST:NEXTOP_APP_PORT/);
-  assert.match(guide, /NEXTOP_APP_DATA_DIR/);
+  assert.match(guide, /TUTTI_APP_HOST:TUTTI_APP_PORT/);
+  assert.match(guide, /TUTTI_APP_DATA_DIR/);
   assert.match(guide, /GROUP_CHAT_HOME/);
 });
 
-test("validatePackageRoot accepts the required Nextop package files", async () => {
+test("validatePackageRoot accepts the required Tutti package files", async () => {
   const root = await makeTempPackageRoot();
   await mkdir(path.join(root, "server"), { recursive: true });
   await mkdir(path.join(root, "dist"), { recursive: true });
   await mkdir(path.join(root, "locales", "zh-CN"), { recursive: true });
-  await writeFile(path.join(root, "nextop.app.json"), `${JSON.stringify(createManifest({ version: "1.2.3" }), null, 2)}\n`);
+  await writeFile(path.join(root, "tutti.app.json"), `${JSON.stringify(createManifest({ version: "1.2.3" }), null, 2)}\n`);
   await writeFile(path.join(root, "locales", "zh-CN", "manifest.json"), `${JSON.stringify({ name: "群聊" }, null, 2)}\n`);
   await writeFile(path.join(root, "AGENTS.md"), renderAgentsGuide());
   await writeFile(path.join(root, "bootstrap.sh"), renderBootstrap({ version: "1.2.3" }));
@@ -106,10 +106,10 @@ test("assertNoSymlinks rejects symlinks", async () => {
   await assert.rejects(() => assertNoSymlinks(root), /Package contains symlink/);
 });
 
-test("root Nextop manifest is valid JSON", async () => {
-  const manifest = JSON.parse(await readFile("nextop.app.json", "utf8"));
+test("root Tutti manifest is valid JSON", async () => {
+  const manifest = JSON.parse(await readFile("tutti.app.json", "utf8"));
 
-  assert.equal(manifest.schemaVersion, "nextop.app.manifest.v1");
+  assert.equal(manifest.schemaVersion, "tutti.app.manifest.v1");
   assert.equal(manifest.appId, "group-chat");
   assert.equal(manifest.name, "Group Chat");
   assert.equal(manifest.runtime.healthcheckPath, "/api/health");

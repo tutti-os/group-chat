@@ -12,7 +12,7 @@ import {
   type LocalAgentProviderPlugin,
   type RawAgentEvent,
   type RawAgentStream,
-} from "@nextop-os/agent-acp-kit";
+} from "@tutti-os/agent-acp-kit";
 import type { LocalAgentProviderStatus } from "@group-chat/shared";
 import { buildEffectiveRoleDescription } from "../domains/agent-instructions.js";
 import { participantWorkspaceRoot } from "../local/paths.js";
@@ -59,7 +59,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
     if (!registered) {
       return {
         available: false,
-        reason: `local-agent provider is not registered in @nextop-os/agent-acp-kit: ${provider}`,
+        reason: `local-agent provider is not registered in @tutti-os/agent-acp-kit: ${provider}`,
       };
     }
     const detection = (await this.localAgentRuntime.detect()).find((item) => item.provider === provider);

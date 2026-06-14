@@ -149,7 +149,7 @@ export function SettingsDialog(props: {
               <div data-slot="message-meta" className={"[&_span]:[color:var(--muted)] [&_span]:[font-size:12px] [display:flex] [min-height:58px] [align-items:center] [justify-content:space-between] [gap:18px] [border-bottom:1px_solid_var(--border)] [padding:12px_0] [&_strong]:[display:block] [&_strong]:[color:var(--text)] [&_strong]:[font-size:14px] [&_strong]:[font-weight:650] [&_div_span]:[display:block] [&_div_span]:[margin-top:4px]"}>
                 <div>
                   <strong>界面语言</strong>
-                  <span>跟随 Nextop / 浏览器环境</span>
+                  <span>跟随 Tutti / 浏览器环境</span>
                 </div>
                 <span>自动</span>
               </div>
@@ -208,7 +208,7 @@ export function SettingsDialog(props: {
               <div data-slot="message-meta" className={"[&_span]:[color:var(--muted)] [&_span]:[font-size:12px] [display:flex] [min-height:58px] [align-items:center] [justify-content:space-between] [gap:18px] [border-bottom:1px_solid_var(--border)] [padding:12px_0] [&_strong]:[display:block] [&_strong]:[color:var(--text)] [&_strong]:[font-size:14px] [&_strong]:[font-weight:650] [&_div_span]:[display:block] [&_div_span]:[margin-top:4px]"}>
                 <div>
                   <strong>Group Chat</strong>
-                  <span>Nextop 本地 Agent 群聊应用</span>
+                  <span>Tutti 本地 Agent 群聊应用</span>
                 </div>
                 <span>0.1.0</span>
               </div>

@@ -13,7 +13,7 @@
 - local agent 通过受控 MCP/tool gateway 使用应用能力。
 - workspace skills 的数据来源、注入和 materialize 方式。
 - durable run/message/event store，用于断线恢复、审计、CLI 轮询。
-- Nextop CLI manifest / `/nextop/cli/*` 作为外部 agent 接入面。
+- Tutti CLI manifest / `/tutti/cli/*` 作为外部 agent 接入面。
 
 不需要参考的部分：
 
@@ -29,7 +29,7 @@
 
 - `apps/web` 构建为静态产物。
 - `apps/server` 用 Fastify 托管静态前端。
-- 同一个 server 提供 `/api/*`、`/api/ws`、`/local-assets/*`、`/nextop/cli/*`。
+- 同一个 server 提供 `/api/*`、`/api/ws`、`/local-assets/*`、`/tutti/cli/*`。
 - SQLite 作为本地持久化。
 - 本地文件目录保存资源和 agent 运行产物。
 - agent runtime 在 server 进程中被统一调度。
@@ -51,7 +51,7 @@
 `ai-media-canvas` 中的运行时类型大致是：
 
 - `server-deepagent`：服务端直接拥有 agent loop，使用 deepagents/LangChain 工具。
-- `local-agent`：服务端启动用户本机 CLI agent，通过 `@nextop-os/agent-acp-kit` 适配 Codex、Claude 等 provider。
+- `local-agent`：服务端启动用户本机 CLI agent，通过 `@tutti-os/agent-acp-kit` 适配 Codex、Claude 等 provider。
 
 新应用应保留这类抽象，即使 P0 只实现一个 runtime，也不要把上层产品逻辑写死在某个 CLI 或 SDK 上。
 
@@ -148,7 +148,7 @@ tool gateway 是 local agent 与应用内部能力之间的权限边界。
 参考仓库有两个 agent 接入面：
 
 - Web UI 使用 `/api/ws`，实时收发 command/event。
-- 外部 agent/Nextop CLI 使用 `/nextop/cli/*`，通过 HTTP POST 调用。
+- 外部 agent/Tutti CLI 使用 `/tutti/cli/*`，通过 HTTP POST 调用。
 
 WebSocket 适合：
 
@@ -164,8 +164,8 @@ CLI 适合：
 
 新应用如果要支持外部 agent，应生成：
 
-- `nextop.app.json`
-- `nextop.cli.json`
+- `tutti.app.json`
+- `tutti.cli.json`
 - `COMMANDS.md`
 
 CLI manifest 中每个命令的 summary、description、required input 要足够自解释，因为 agent discovery 依赖这些字段，而不是完整阅读 `COMMANDS.md`。
@@ -235,7 +235,7 @@ deepagents backend 的参考形态：
 - `/Users/niuma/code/ai-media-canvas/apps/server/src/agent/workspace-skills.ts`
 - `/Users/niuma/code/ai-media-canvas/apps/server/src/local/store.ts`
 - `/Users/niuma/code/ai-media-canvas/apps/server/src/ws/handler.ts`
-- `/Users/niuma/code/ai-media-canvas/apps/server/src/http/nextop-cli.ts`
-- `/Users/niuma/code/ai-media-canvas/scripts/package-nextop-app.mjs`
+- `/Users/niuma/code/ai-media-canvas/apps/server/src/http/tutti-cli.ts`
+- `/Users/niuma/code/ai-media-canvas/scripts/package-tutti-app.mjs`
 - `/Users/niuma/code/ai-media-canvas/packages/shared/src/events.ts`
 - `/Users/niuma/code/ai-media-canvas/packages/shared/src/contracts.ts`

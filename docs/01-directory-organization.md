@@ -11,7 +11,7 @@
 
 - 上层聊天业务不绑定具体 agent runtime。
 - Web UI、server、shared contract 边界清晰。
-- WebSocket、HTTP API 复用同一批 server service/use-case；Nextop CLI 后续接入时也必须复用同一边界。
+- WebSocket、HTTP API 复用同一批 server service/use-case；Tutti CLI 后续接入时也必须复用同一边界。
 
 ## 顶层目录
 
@@ -37,7 +37,7 @@ group-chat/
 - `apps/server`：Fastify 本地服务。托管静态前端，并提供 HTTP API、WebSocket、SQLite、本地资源、agent runtime、tool gateway。
 - `packages/shared`：跨 web/server 共享的稳定 contract、event schema、领域类型、zod schema、客户端 DTO。
 - `docs`：架构共识、产品规则、运行协议、后续 ADR。
-- `scripts`：本地开发、打包、生成 Nextop app manifest、数据库维护脚本。
+- `scripts`：本地开发、打包、生成 Tutti app manifest、数据库维护脚本。
 
 ## apps/server
 
@@ -49,7 +49,7 @@ apps/server/src/
   config/
   http/
     routes/
-    nextop-cli.ts
+    tutti-cli.ts
     static.ts
   ws/
     handler.ts
@@ -207,7 +207,7 @@ packages/shared/src/
 ## 待确认
 
 - 包管理器默认建议 `pnpm`，是否有现有偏好。
-- Nextop CLI 后续接入的 manifest 和命令文档格式。
+- Tutti CLI 后续接入的 manifest 和命令文档格式。
 - P0 是否只做桌面宽屏布局，移动端作为 P1。
 
 ## 已确认

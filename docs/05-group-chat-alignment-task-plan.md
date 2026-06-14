@@ -9,8 +9,8 @@
 - 聊天业务不绑定具体 agent runtime。Codex、Claude、本地 demo 都应经过统一 runtime provider / run orchestrator。
 - UI 文本里的 `@name` 只是展示层，服务端事实源必须是 participant id。
 - 文件引用必须是结构化 artifact/content block，agent 输入只注入 metadata 和读取方式，不把大文件直接塞进 prompt。
-- ACP 本地 agent 接入必须使用本项目选定的 `@nextop-os/agent-acp-kit` 方案；如果 kit 能力不足，要先停下来说明缺口，不自行绕开成另一套 ACP 实现。
-- 当前阶段聚焦用户最初列出的 IM 核心功能：本地 agent、房间增删、房间成员增删、群聊/@、文件引用、本地工作区、agent 个性和回复策略；不扩张到 Nextop CLI 或更完整的 group-chat 产品面。
+- ACP 本地 agent 接入必须使用本项目选定的 `@tutti-os/agent-acp-kit` 方案；如果 kit 能力不足，要先停下来说明缺口，不自行绕开成另一套 ACP 实现。
+- 当前阶段聚焦用户最初列出的 IM 核心功能：本地 agent、房间增删、房间成员增删、群聊/@、文件引用、本地工作区、agent 个性和回复策略；不扩张到 Tutti CLI 或更完整的 group-chat 产品面。
 - 技术方案需要重度参考 group-chat 已验证的设计，但代码组织、模块边界和命名可以按 `group-chat` 现有分层来实现，不要求照搬 group-chat 写法。
 
 ## Group Chat 中可借鉴的解法
@@ -202,7 +202,7 @@ Group Chat 把附件作为 content blocks 注入，并在 agent prompt 中渲染
   - stdin 包含 workspaceRoot、conversation、participant、identity、runtimeProfile、message turn、attachments、workspaceFiles、tool gateway URLs 和 artifact URL template。
   - stdout 兼容普通文本和 JSONL 事件：`text_delta`、`final_text`、`no_reply`、`error`。
   - `no_reply` 会映射到 Group Chat 风格 `[NO_REPLY]`，由 ChatService 走统一取消投影。
-- 已完成：按 `ai-media-canvas` 方案接入 `@nextop-os/agent-acp-kit`。
+- 已完成：按 `ai-media-canvas` 方案接入 `@tutti-os/agent-acp-kit`。
   - 无自定义 stdin 命令时，`local-agent:codex` / `local-agent:claude` / kit catalog 内 provider 走 `createLocalAgentRuntime`。
   - kit 负责 provider detect、Codex/Claude/ACP preset、process supervisor、JSONL/ACP/plain transport、MCP config delivery、provider-native resume metadata 和 normalized `AgentEvent`。
   - host 仍负责 IM 语义：run/message 投影、participant workspace、prompt envelope、tool token、tool gateway、`[NO_REPLY]` 取消投影。
@@ -295,11 +295,11 @@ Group Chat 把附件作为 content blocks 注入，并在 agent prompt 中渲染
 ## 当前代码差距
 
 - `ReplyPolicy`、participant listen mode、`[NO_REPLY]` 取消投影、trigger coalescing、持久化 reply queue、启动恢复、agent-to-agent follow-up rounds、speaking order 执行语义已存在。
-- `RuntimeProfile` 已 seed `local-agent:codex` / `local-agent:claude`，local-agent provider 已支持本地命令桥、稳定 stdin/stdout 协议和按 `ai-media-canvas` 方案接入的 `@nextop-os/agent-acp-kit`。
+- `RuntimeProfile` 已 seed `local-agent:codex` / `local-agent:claude`，local-agent provider 已支持本地命令桥、稳定 stdin/stdout 协议和按 `ai-media-canvas` 方案接入的 `@tutti-os/agent-acp-kit`。
 - 已有 agent workspace 文件、成功回复后的 raw memory 写入、确定性 memory 提炼/压缩和 `DISTILLED_CONTEXT.md` 注入；后续可继续接入 LLM distill，把启发式摘要升级为模型摘要。
 - 已有 structured attachment prompt context、Room files shelf、本地 agent tool gateway、run-scoped tool token、stdio MCP tool wrapping、local-agent 命令桥、JSONL 输出事件、kit-driven Codex/Claude/ACP provider、ACP prompt envelope、workspace-local provider resume metadata、provider detection UI、Settings Runtime 页、thinking/tool event block 展示和真实 Codex/Claude CLI smoke 回归入口。
 - 已有 GUI 房间设置编辑、ConversationSidebar 房间搜索、添加成员时配置关键属性、Composer 回复目标预览、selected 模式手动选择 responders、conversation collaboration rules 首版、规则模板、审计历史、participant room-specific instructions 和 GUI Run Inspector。
-- `Nextop CLI gateway` 本期暂缓；当前阶段优先 GUI 场景和本地 agent 群聊体验。
+- `Tutti CLI gateway` 本期暂缓；当前阶段优先 GUI 场景和本地 agent 群聊体验。
 
 ## 回归入口
 

@@ -8,7 +8,7 @@
     "dev:web": "pnpm --filter @group-chat/web dev",
     "dev:server": "pnpm --filter @group-chat/server dev",
     "build": "pnpm -r build",
-    "package:nextop": "node scripts/package-nextop-app.mjs",
+    "package:tutti": "node scripts/package-tutti-app.mjs",
     "check": "pnpm -r check",
     "test:package": "node --test tests/*.test.mjs",
     "test": "pnpm test:package",
