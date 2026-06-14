@@ -233,6 +233,7 @@ function migrate(database: DatabaseSync) {
       source_message_ids TEXT NOT NULL DEFAULT '[]',
       participant_id TEXT NOT NULL,
       participant_name TEXT NOT NULL,
+      requester_participant_id TEXT,
       source_preview TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL,
       content TEXT NOT NULL DEFAULT '',
@@ -244,14 +245,18 @@ function migrate(database: DatabaseSync) {
     CREATE INDEX IF NOT EXISTS idx_private_tasks_conversation ON private_tasks(conversation_id, updated_at DESC);
 
     CREATE TABLE IF NOT EXISTS hidden_messages (
-      message_id TEXT PRIMARY KEY,
+      message_id TEXT NOT NULL,
       conversation_id TEXT NOT NULL,
+      user_participant_id TEXT NOT NULL DEFAULT 'local-user',
       hidden_at TEXT NOT NULL,
+      PRIMARY KEY (message_id, user_participant_id),
       FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_hidden_messages_conversation ON hidden_messages(conversation_id);
+    CREATE INDEX IF NOT EXISTS idx_hidden_messages_user ON hidden_messages(user_participant_id);
   `);
 
+  migrateHiddenMessagesPerUser(database);
   ensureColumn(database, "messages", "mentions", "TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(database, "messages", "visibility", "TEXT NOT NULL DEFAULT 'public'");
   ensureColumn(database, "agent_runs", "visibility", "TEXT NOT NULL DEFAULT 'public'");
@@ -263,12 +268,36 @@ function migrate(database: DatabaseSync) {
   ensureColumn(database, "rooms", "avatar", "TEXT");
   ensureColumn(database, "identities", "default_listen_mode", "TEXT NOT NULL DEFAULT 'passive'");
   ensureColumn(database, "identities", "default_reasoning_effort", "TEXT");
+  ensureColumn(database, "private_tasks", "requester_participant_id", "TEXT");
 }
 
 function ensureColumn(database: DatabaseSync, table: string, column: string, definition: string) {
   const rows = database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
   if (rows.some((row) => row.name === column)) return;
   database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
+function migrateHiddenMessagesPerUser(database: DatabaseSync) {
+  const rows = database.prepare(`PRAGMA table_info(hidden_messages)`).all() as Array<{ name: string }>;
+  const hasUserParticipantId = rows.some((row) => row.name === "user_participant_id");
+  if (hasUserParticipantId) return;
+
+  database.exec(`
+    ALTER TABLE hidden_messages RENAME TO hidden_messages_legacy;
+    CREATE TABLE hidden_messages (
+      message_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      user_participant_id TEXT NOT NULL DEFAULT 'local-user',
+      hidden_at TEXT NOT NULL,
+      PRIMARY KEY (message_id, user_participant_id),
+      FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+    );
+    INSERT OR IGNORE INTO hidden_messages (message_id, conversation_id, user_participant_id, hidden_at)
+      SELECT message_id, conversation_id, 'local-user', hidden_at FROM hidden_messages_legacy;
+    DROP TABLE hidden_messages_legacy;
+    CREATE INDEX IF NOT EXISTS idx_hidden_messages_conversation ON hidden_messages(conversation_id);
+    CREATE INDEX IF NOT EXISTS idx_hidden_messages_user ON hidden_messages(user_participant_id);
+  `);
 }
 
 export function json<T>(value: T) {

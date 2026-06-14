@@ -34,6 +34,7 @@ export function createOptimisticBackgroundTask(input: {
     sourceMessageId: primaryMessage.id,
     participantId: input.targetParticipant.id,
     participantName: input.targetParticipant.displayName,
+    requesterParticipantId: null,
     sourcePreview: input.sourcePreview,
     status: "running",
     content: "",

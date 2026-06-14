@@ -65,7 +65,7 @@ server.get("/api/health", async () => ({
   app: "group-chat",
 }));
 
-server.get("/api/bootstrap", async () => chat.bootstrap());
+server.get("/api/bootstrap", async (request) => chat.bootstrap(readUserId(request)));
 
 server.get("/api/local-agent/providers", async () => chat.listLocalAgentProviders());
 
@@ -136,7 +136,7 @@ server.post<{ Params: { conversationId: string }; Body: PrivateTaskRequest }>(
   "/api/conversations/:conversationId/private-tasks",
   async (request, reply) => {
     try {
-      return chat.runPrivateTask(request.params.conversationId, request.body ?? {});
+      return chat.runPrivateTask(request.params.conversationId, request.body ?? {}, readUserId(request));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to start private task";
       return reply.code(400).send({ error: message });
@@ -149,7 +149,7 @@ server.post<{ Params: { taskId: string } }>("/api/private-tasks/:taskId/cancel",
 );
 
 server.get<{ Params: { taskId: string } }>("/api/private-tasks/:taskId", async (request, reply) => {
-  const task = chat.getPrivateTask(request.params.taskId);
+  const task = chat.getPrivateTask(request.params.taskId, readUserId(request));
   if (!task) return reply.code(404).send({ error: "Private task not found" });
   return { task };
 });
@@ -157,20 +157,20 @@ server.get<{ Params: { taskId: string } }>("/api/private-tasks/:taskId", async (
 server.get<{ Params: { conversationId: string } }>(
   "/api/conversations/:conversationId/private-tasks",
   async (request) => ({
-    tasks: chat.listPrivateTasksForConversation(request.params.conversationId),
+    tasks: chat.listPrivateTasksForConversation(request.params.conversationId, readUserId(request)),
   }),
 );
 
 server.post<{ Params: { conversationId: string }; Body: SendMessageRequest }>(
   "/api/conversations/:conversationId/messages",
-  async (request) => chat.sendMessage(request.params.conversationId, request.body),
+  async (request) => chat.sendMessage(request.params.conversationId, request.body, readUserId(request)),
 );
 
 server.patch<{ Params: { messageId: string }; Body: UpdateMessageRequest }>(
   "/api/messages/:messageId",
   async (request, reply) => {
     try {
-      const result = await chat.updateMessage(request.params.messageId, request.body);
+      const result = await chat.updateMessage(request.params.messageId, request.body, readUserId(request));
       if (!result) return reply.code(404).send({ error: "Message not found" });
       return result;
     } catch (error) {
@@ -182,7 +182,7 @@ server.patch<{ Params: { messageId: string }; Body: UpdateMessageRequest }>(
 
 server.delete<{ Params: { messageId: string } }>("/api/messages/:messageId", async (request, reply) => {
   try {
-    const result = chat.hideMessageForLocalUser(request.params.messageId);
+    const result = chat.hideMessageForLocalUser(request.params.messageId, readUserId(request));
     if (!result) return reply.code(404).send({ error: "Message not found" });
     return result;
   } catch (error) {
@@ -192,9 +192,14 @@ server.delete<{ Params: { messageId: string } }>("/api/messages/:messageId", asy
 });
 
 server.post<{ Params: { runId: string } }>("/api/runs/:runId/cancel", async (request, reply) => {
-  const result = await chat.cancelRun(request.params.runId);
-  if (!result) return reply.code(404).send({ error: "Run not found" });
-  return result;
+  try {
+    const result = await chat.cancelRun(request.params.runId, readUserId(request));
+    if (!result) return reply.code(404).send({ error: "Run not found" });
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to cancel run";
+    return reply.code(403).send({ error: message });
+  }
 });
 
 server.patch<{ Params: { conversationId: string }; Body: UpdateConversationRulesRequest }>(
@@ -357,8 +362,11 @@ server.post<{ Params: { artifactId: string } }>("/api/artifacts/:artifactId/open
   }
 });
 
-server.get("/api/ws", { websocket: true }, (socket) => {
-  const dispose = events.addClient(socket);
+server.get("/api/ws", { websocket: true }, (socket, request) => {
+  const userId = readUserId(request);
+  const dispose = events.addClient(socket, {
+    shouldSend: (event) => chat.isEventVisibleToUser(event, userId),
+  });
   const hello: WsServerMessage = { type: "hello", lastSeq: events.lastSeq() };
   socket.send(JSON.stringify(hello));
 
@@ -370,7 +378,7 @@ server.get("/api/ws", { websocket: true }, (socket) => {
       return;
     }
     if (message.type === "hello" && typeof message.lastSeq === "number") {
-      const replay = events.replaySince(message.lastSeq);
+      const replay = events.replaySince(message.lastSeq).filter((event) => chat.isEventVisibleToUser(event, userId));
       const response: WsServerMessage = {
         type: "replay",
         events: replay,
@@ -418,6 +426,15 @@ function readAgentToolCredential(request: { headers: Record<string, string | str
   const headerToken = Array.isArray(header) ? header[0] : header;
   const query = request.query as { toolToken?: string } | undefined;
   return { token: headerToken ?? query?.toolToken ?? null };
+}
+
+function readUserId(request: { headers: Record<string, string | string[] | undefined>; query?: unknown }) {
+  const header = request.headers["x-group-chat-user-id"];
+  const headerValue = Array.isArray(header) ? header[0] : header;
+  const query = request.query as { userId?: string } | undefined;
+  const raw = headerValue ?? query?.userId ?? null;
+  const trimmed = raw?.trim();
+  return trimmed || null;
 }
 
 function normalizeCliEnvelope(value: unknown) {

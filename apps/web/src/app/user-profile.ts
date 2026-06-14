@@ -42,6 +42,7 @@ export const DEFAULT_USER_PROFILE: LocalUserProfile = {
 };
 
 const STORAGE_KEY = "group-chat:user-profile";
+const USER_ID_STORAGE_KEY = "group-chat:user-id";
 
 const LEGACY_PRESET_MAP: Record<string, AvatarPresetId> = {
   "gradient-orange": "saiyan-01",
@@ -86,6 +87,22 @@ export function loadUserProfile(): LocalUserProfile {
 export function saveUserProfile(profile: LocalUserProfile): void {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
+}
+
+export function loadLocalUserId(): string {
+  if (typeof window === "undefined") return "";
+  const urlUserId = new URLSearchParams(window.location.search).get("userId")?.trim();
+  if (urlUserId) {
+    window.localStorage.setItem(USER_ID_STORAGE_KEY, urlUserId);
+    return urlUserId;
+  }
+  const stored = window.localStorage.getItem(USER_ID_STORAGE_KEY)?.trim();
+  if (stored) return stored;
+  const generated = typeof window.crypto?.randomUUID === "function"
+    ? `user-${window.crypto.randomUUID()}`
+    : `user-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  window.localStorage.setItem(USER_ID_STORAGE_KEY, generated);
+  return generated;
 }
 
 export function resolveUserProfileAvatar(profile: Pick<LocalUserProfile, "avatarPreset" | "customAvatarUrl">) {

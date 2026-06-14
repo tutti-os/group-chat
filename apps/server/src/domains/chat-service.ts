@@ -16,6 +16,7 @@ import {
   type PrivateTaskType,
   type SendMessageRequest,
   type SpeakingOrder,
+  type StreamEvent,
   type UpdateConversationRulesRequest,
   type UpdateConversationPolicyRequest,
   type UpdateIdentityRequest,
@@ -50,11 +51,11 @@ export class ChatService {
     private readonly toolTokens: AgentToolTokenStore,
   ) {}
 
-  bootstrap() {
+  bootstrap(userParticipantId: string | null = null) {
     this.repo.ensureSeedData();
     this.materializeExistingWorkspaces();
     this.recoverReplyQueueOnce();
-    return this.repo.filterHiddenFromSnapshot(this.repo.snapshot());
+    return this.repo.filterSnapshotForUser(this.repo.snapshot(), userParticipantId);
   }
 
   async listLocalAgentProviders() {
@@ -267,9 +268,15 @@ export class ChatService {
     return artifact;
   }
 
-  async cancelRun(runId: string) {
+  async cancelRun(runId: string, userParticipantId: string | null = null) {
     const run = this.repo.getAgentRun(runId);
     if (!run) return null;
+    if (userParticipantId && run.triggerMessageId) {
+      const triggerMessage = this.repo.getMessage(run.triggerMessageId);
+      if (triggerMessage?.senderParticipantId && triggerMessage.senderParticipantId !== userParticipantId) {
+        throw new Error("Only the user who triggered this run can cancel it");
+      }
+    }
     if (!["accepted", "running"].includes(run.status)) {
       return { run };
     }
@@ -329,16 +336,23 @@ export class ChatService {
     return participant;
   }
 
-  sendMessage(conversationId: string, input: SendMessageRequest) {
+  sendMessage(conversationId: string, input: SendMessageRequest, userParticipantId: string | null = null) {
     const conversation = this.repo.getConversation(conversationId);
     if (!conversation) throw new Error("Conversation not found");
     const content = input.content.trim();
     if (!content && !input.artifactIds?.length) throw new Error("Message content is required");
+    const senderParticipant = userParticipantId ? this.repo.getParticipant(userParticipantId) : null;
+    const senderIsInConversation =
+      senderParticipant?.conversationId === conversationId
+      && senderParticipant.kind === "human"
+      && senderParticipant.status !== "removed";
+    const senderParticipantId = senderIsInConversation ? senderParticipant.id : userParticipantId?.trim() || null;
 
     const message = this.repo.createMessage({
       conversationId,
       role: "user",
-      senderName: normalizeUserSenderName(input.senderName),
+      senderParticipantId,
+      senderName: senderIsInConversation ? senderParticipant.displayName : normalizeUserSenderName(input.senderName),
       content,
       mentions: this.normalizeMentions(conversationId, input.mentions ?? []),
       visibility: input.visibility === "whisper" ? "whisper" : "public",
@@ -393,7 +407,7 @@ export class ChatService {
       });
     }
 
-    const mentions = input.mentions ?? [];
+    const mentions = message.mentions;
     const targets = this.resolveTargets(conversation, mentions, content);
     void this.generateReplies(conversation.roomId, conversationId, message, targets, {
       currentRound: 1,
@@ -407,7 +421,7 @@ export class ChatService {
     return { message, blocks, artifacts, targets };
   }
 
-  runPrivateTask(conversationId: string, input: PrivateTaskRequest) {
+  runPrivateTask(conversationId: string, input: PrivateTaskRequest, userParticipantId: string | null = null) {
     const conversation = this.repo.getConversation(conversationId);
     if (!conversation) throw new Error("Conversation not found");
     const participant = this.repo.getParticipant(input.participantId);
@@ -423,8 +437,10 @@ export class ChatService {
       id: sourceMessage?.id ?? `private-user-${taskId}`,
       conversationId,
       role: "user",
-      senderParticipantId: null,
-      senderName: "You",
+      senderParticipantId: userParticipantId,
+      senderName: userParticipantId
+        ? this.repo.getParticipant(userParticipantId)?.displayName ?? "You"
+        : "You",
       content: prompt,
       mentions: [{
         participantId: participant.id,
@@ -448,6 +464,7 @@ export class ChatService {
       participant,
       userMessage: syntheticUserMessage,
       taskType: input.taskType ?? "summary",
+      requesterParticipantId: userParticipantId,
       sourceMessageId: sourceMessage?.id ?? null,
       sourceMessageIds: input.sourceMessageIds?.length
         ? input.sourceMessageIds
@@ -460,12 +477,15 @@ export class ChatService {
     return { taskId };
   }
 
-  getPrivateTask(taskId: string) {
-    return this.repo.getPrivateTask(taskId);
+  getPrivateTask(taskId: string, userParticipantId: string | null = null) {
+    const task = this.repo.getPrivateTask(taskId);
+    if (!task) return null;
+    if (userParticipantId && task.requesterParticipantId && task.requesterParticipantId !== userParticipantId) return null;
+    return task;
   }
 
-  listPrivateTasksForConversation(conversationId: string) {
-    return this.repo.listPrivateTasksForConversation(conversationId);
+  listPrivateTasksForConversation(conversationId: string, userParticipantId: string | null = null) {
+    return this.repo.listPrivateTasksForConversation(conversationId, userParticipantId);
   }
 
   cancelPrivateTask(taskId: string) {
@@ -475,11 +495,14 @@ export class ChatService {
     return { taskId, cancelled: true };
   }
 
-  async updateMessage(messageId: string, input: UpdateMessageRequest) {
+  async updateMessage(messageId: string, input: UpdateMessageRequest, userParticipantId: string | null = null) {
     const current = this.repo.getMessage(messageId);
     if (!current) return null;
     const conversation = this.repo.getConversation(current.conversationId);
     if (!conversation) return null;
+    if (userParticipantId && current.senderParticipantId && current.senderParticipantId !== userParticipantId) {
+      throw new Error("Only your own messages can be edited");
+    }
     if (input.status === "recalled") {
       if (current.role !== "user") {
         throw new Error("Only your own messages can be recalled");
@@ -534,19 +557,43 @@ export class ChatService {
     return { message: result.message, blocks: result.block ? [result.block] : [], targets };
   }
 
-  hideMessageForLocalUser(messageId: string) {
+  hideMessageForLocalUser(messageId: string, userParticipantId: string | null = null) {
     const current = this.repo.getMessage(messageId);
     if (!current) return null;
     const conversation = this.repo.getConversation(current.conversationId);
     if (!conversation) return null;
-    this.repo.hideMessageForLocalUser(messageId, current.conversationId);
+    this.repo.hideMessageForLocalUser(messageId, current.conversationId, userParticipantId);
     this.events.emit({
       type: "message.hidden",
       roomId: conversation.roomId,
       conversationId: conversation.id,
-      payload: { messageId },
+      payload: { messageId, hiddenForParticipantId: userParticipantId?.trim() || "local-user" },
     });
     return { messageId, hidden: true as const };
+  }
+
+  isEventVisibleToUser(event: StreamEvent, userParticipantId: string | null) {
+    if (!userParticipantId) return true;
+    if (event.type === "message.hidden") {
+      const payload = event.payload as { hiddenForParticipantId?: string } | undefined;
+      return payload?.hiddenForParticipantId === userParticipantId;
+    }
+    const snapshot = this.repo.filterSnapshotForUser(this.repo.snapshot(), userParticipantId);
+    const payload = event.payload as any;
+    if (payload?.message?.id) return snapshot.messages.some((message) => message.id === payload.message.id);
+    if (payload?.block?.id) return snapshot.messageBlocks.some((block) => block.id === payload.block.id);
+    if (payload?.artifact?.id) return snapshot.artifacts.some((artifact) => artifact.id === payload.artifact.id);
+    if (payload?.event?.id) return snapshot.agentRunEvents.some((runEvent) => runEvent.id === payload.event.id);
+    if (payload?.run?.id) {
+      return snapshot.agentRuns.some((run) => run.id === payload.run.id)
+        || snapshot.activeRuns.some((run) => run.id === payload.run.id);
+    }
+    if (payload?.task?.requesterParticipantId) return payload.task.requesterParticipantId === userParticipantId;
+    if (event.runId) {
+      return snapshot.agentRuns.some((run) => run.id === event.runId)
+        || snapshot.activeRuns.some((run) => run.id === event.runId);
+    }
+    return true;
   }
 
   private normalizeMentions(conversationId: string, mentions: NonNullable<SendMessageRequest["mentions"]>) {
@@ -1217,6 +1264,7 @@ export class ChatService {
     participant: Participant;
     userMessage: Message;
     taskType: PrivateTaskType;
+    requesterParticipantId: string | null;
     sourceMessageId: string | null;
     sourceMessageIds: string[];
     sourcePreview: string;
@@ -1246,6 +1294,7 @@ export class ChatService {
       sourceMessageIds: input.sourceMessageIds,
       participantId: input.participant.id,
       participantName: input.participant.displayName,
+      requesterParticipantId: input.requesterParticipantId,
       sourcePreview: input.sourcePreview,
       createdAt: now,
       ...partial,

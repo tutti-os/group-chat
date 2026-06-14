@@ -7,14 +7,20 @@ type WsLike = {
   send(data: string): void;
 };
 
+type ClientEntry = {
+  socket: WsLike;
+  shouldSend?: (event: StreamEvent) => boolean;
+};
+
 const OPEN = 1;
 
 export class EventHub {
-  private clients = new Set<WsLike>();
+  private clients = new Set<ClientEntry>();
 
-  addClient(client: WsLike) {
-    this.clients.add(client);
-    return () => this.clients.delete(client);
+  addClient(client: WsLike, options: { shouldSend?: (event: StreamEvent) => boolean } = {}) {
+    const entry: ClientEntry = { socket: client, shouldSend: options.shouldSend };
+    this.clients.add(entry);
+    return () => this.clients.delete(entry);
   }
 
   emit<TPayload>(input: {
@@ -62,7 +68,11 @@ export class EventHub {
   private broadcast(message: WsServerMessage) {
     const data = JSON.stringify(message);
     for (const client of this.clients) {
-      if (client.readyState === OPEN) client.send(data);
+      if (client.socket.readyState !== OPEN) continue;
+      if (message.type === "event" && message.event && client.shouldSend && !client.shouldSend(message.event)) {
+        continue;
+      }
+      client.socket.send(data);
     }
   }
 }
