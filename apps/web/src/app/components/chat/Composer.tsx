@@ -778,10 +778,10 @@ export function Composer(props: {
                   identities={props.identities}
                   runtimeProfiles={props.runtimeProfiles}
                 />
-                <div className={"[display:flex] [min-width:0] [align-items:center] [height:100%]"}>
+                <div className={"[display:flex] [width:100%] [min-width:0] [align-items:center] [justify-content:flex-start] [gap:6px] [height:100%]"}>
                   <button
                     type="button"
-                    className={"[display:inline-flex] [flex:1_1_auto] [min-width:0] [align-items:center] [gap:6px] [height:100%] [border:0] [padding:0] [color:inherit] [text-align:left] [background:transparent] [&:focus-visible]:[outline:none] [&_strong]:[display:block] [&_strong]:[flex:1_1_auto] [&_strong]:[min-width:0] [&_strong]:[overflow:hidden] [&_strong]:[font-size:12px] [&_strong]:[font-weight:500] [&_strong]:[line-height:16px] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap]"}
+                    className={"[display:inline-flex] [min-width:0] [max-width:calc(100%-36px)] [align-items:center] [gap:6px] [height:100%] [overflow:hidden] [border:0] [padding:0] [color:inherit] [text-align:left] [background:transparent] [&:focus-visible]:[outline:none] [&_strong]:[min-width:0] [&_strong]:[overflow:hidden] [&_strong]:[font-size:12px] [&_strong]:[font-weight:500] [&_strong]:[line-height:16px] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap]"}
                     onMouseDown={(event) => {
                       event.preventDefault();
                       saveMentionSelection();
@@ -793,7 +793,7 @@ export function Composer(props: {
                   </button>
                   <button
                     type="button"
-                    className={"[display:inline-grid] [flex:0_0_auto] [width:30px] [height:30px] [margin-left:40px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [&:hover]:[color:#7c3aed] [&:hover]:[background:#f3e8ff] [&:focus-visible]:[outline:none] [&:focus-visible]:[box-shadow:0_0_0_2px_#ddd6fe]"}
+                    className={"[display:inline-grid] [flex:0_0_auto] [width:30px] [height:30px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [&:hover]:[color:#7c3aed] [&:hover]:[background:#f3e8ff] [&:focus-visible]:[outline:none] [&:focus-visible]:[box-shadow:0_0_0_2px_#ddd6fe]"}
                     aria-label={`跟 ${option.label} 说悄悄话`}
                     title="悄悄话"
                     onMouseDown={(event) => {

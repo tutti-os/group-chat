@@ -72,7 +72,7 @@ import { collectMessageProcess } from "./agent-thinking.js";
 const DEFAULT_CONVERSATION_SIDEBAR_WIDTH = 300;
 const MIN_CONVERSATION_SIDEBAR_WIDTH = 240;
 const MIN_CHAT_PANE_WIDTH = 460;
-const SPLITTER_WIDTH = 8;
+const SPLITTER_WIDTH = 4;
 const DESKTOP_NAV_WIDTH = 60;
 const COMPACT_NAV_WIDTH = 56;
 
@@ -1071,7 +1071,7 @@ export function App() {
       ref={appShellRef}
       style={shellStyle}
       data-resizing-sidebar={resizingConversationSidebar || undefined}
-      className={"[display:grid] [grid-template-columns:60px_var(--conversation-sidebar-width)_8px_minmax(var(--chat-pane-min-width),_1fr)] [height:100vh] [overflow:hidden] [background:var(--bg)] [&[data-resizing-sidebar=true]_*]:[cursor:col-resize] max-[1080px]:[grid-template-columns:56px_var(--conversation-sidebar-width)_8px_minmax(var(--chat-pane-min-width),_1fr)] max-[760px]:[grid-template-columns:1fr]"}
+      className={"[display:grid] [grid-template-columns:60px_var(--conversation-sidebar-width)_3px_minmax(var(--chat-pane-min-width),_1fr)] [height:100vh] [overflow:hidden] [background:var(--bg)] [&[data-resizing-sidebar=true]_*]:[cursor:col-resize] max-[1080px]:[grid-template-columns:56px_var(--conversation-sidebar-width)_3px_minmax(var(--chat-pane-min-width),_1fr)] max-[760px]:[grid-template-columns:1fr]"}
     >
       <AppNavRail
         activeSection={activeSection}
@@ -1126,7 +1126,7 @@ export function App() {
 
           <button
             type="button"
-            className={"[position:relative] [z-index:20] [width:8px] [min-width:8px] [height:100vh] [border:0] [border-left:4px_solid_var(--border)] [border-right:1px_solid_transparent] [padding:0] [background:var(--panel)] [cursor:col-resize] [transition:background-color_0.12s_ease,_border-color_0.12s_ease] hover:[border-left-color:var(--border-strong)] hover:[background:#00000008] focus-visible:[outline:none] focus-visible:[background:#0000000d] max-[760px]:[display:none]"}
+            className={"[position:relative] [z-index:20] [width:3px] [min-width:3px] [height:100vh] [border:0] [padding:0] [background:var(--border)] [cursor:col-resize] [transition:background-color_0.12s_ease] hover:[background:var(--border-strong)] focus-visible:[outline:none] focus-visible:[background:var(--border-strong)] max-[760px]:[display:none]"}
             aria-label="拖拽调整会话列表和聊天窗口宽度"
             title="拖拽调整窗口大小"
             onPointerDown={startConversationSidebarResize}

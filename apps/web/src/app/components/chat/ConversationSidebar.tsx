@@ -61,7 +61,7 @@ export function ConversationSidebar(props: {
   }, [contextMenu]);
 
   return (
-    <aside className={"[min-width:0] [border-right:1px_solid_var(--border)] [background:var(--panel)] max-[760px]:[display:none]"}>
+    <aside className={"[min-width:0] [background:var(--panel)] max-[760px]:[display:none]"}>
       <div className={"[display:flex] [height:52px] [align-items:center] [justify-content:space-between] [gap:12px] [padding:12px_14px_10px_16px] [&_h1]:[margin:0] [&_h1]:[color:var(--text)] [&_h1]:[font-size:16px] [&_h1]:[font-weight:650] [&_h1]:[line-height:1.2] [&_h1]:[letter-spacing:0] [&_span]:[color:var(--muted)] [&_span]:[font-size:12px] [&_span]:[display:none]"}>
         <div>
           <h1>消息</h1>
@@ -97,7 +97,7 @@ export function ConversationSidebar(props: {
           return (
             <div
               key={conversation.id}
-              className={`[display:grid] [grid-template-columns:32px_minmax(0,_1fr)_20px] [align-items:center] [gap:8px] [width:100%] [min-height:56px] [border:0] [border-radius:14px] [padding:4px_5px_4px_8px] [text-align:left] [color:var(--text)] [background:transparent] [transition:background-color_0.12s_ease] [&:hover]:[background:var(--sidebar-hover)] [&:hover_[data-slot=conversation-delete]]:[opacity:1] [&:focus-within_[data-slot=conversation-delete]]:[opacity:1] ${conversation.id === props.currentConversationId ? "[background:var(--accent-soft)]" : ""}`}
+              className={`[display:grid] [grid-template-columns:32px_minmax(0,_1fr)_28px] [align-items:center] [gap:8px] [width:100%] [min-width:0] [min-height:56px] [overflow:hidden] [border:0] [border-radius:14px] [padding:4px_8px] [text-align:left] [color:var(--text)] [background:transparent] [transition:background-color_0.12s_ease] [&:hover]:[background:var(--sidebar-hover)] [&:hover_[data-slot=conversation-delete]]:[opacity:1] [&:focus-within_[data-slot=conversation-delete]]:[opacity:1] ${conversation.id === props.currentConversationId ? "[background:var(--accent-soft)]" : ""}`}
               onContextMenu={(event) => {
                 event.preventDefault();
                 setContextMenu({ conversationId: conversation.id, x: event.clientX, y: event.clientY });
@@ -113,7 +113,7 @@ export function ConversationSidebar(props: {
                     {conversation.pinned ? (
                       <Pin size={12} className={"[flex:0_0_auto] [color:var(--muted)]"} aria-hidden />
                     ) : null}
-                    <span className={"[display:block] [overflow:hidden] [font-size:13px] [font-weight:650] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>{conversation.title}</span>
+                    <span className={"[display:block] [overflow:hidden] [font-size:13px] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>{conversation.title}</span>
                   </span>
                   <span className={"[flex:0_0_auto] [color:var(--muted)] [font-size:11px]"}>{formatShortDate(conversation.updatedAt)}</span>
                 </span>
@@ -129,7 +129,7 @@ export function ConversationSidebar(props: {
               <button
                 type="button"
                 data-slot="conversation-delete"
-                className={"[&:focus-visible]:[outline:none] [display:inline-grid] [width:28px] [height:28px] [place-items:center] [border:0] [border-radius:9px] [color:var(--danger)] [background:transparent] [opacity:0] [transition:opacity_0.12s_ease,_background-color_0.12s_ease] [&:hover]:[background:#dc26261a]"}
+                className={"[justify-self:end] [&:focus-visible]:[outline:none] [display:inline-grid] [width:28px] [height:28px] [place-items:center] [border:0] [border-radius:8px] [color:var(--danger)] [background:transparent] [opacity:0] [transition:opacity_0.12s_ease,_background-color_0.12s_ease] [&:hover]:[background:#dc26261a]"}
                 title="Delete chat"
                 onClick={() => props.onDeleteRoom(room, conversation)}
               >
