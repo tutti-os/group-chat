@@ -403,6 +403,8 @@ export interface SendMessageRequest {
   parentMessageId?: string | null;
   maxReplyRounds?: number;
   visibility?: MessageVisibility;
+  /** 本地用户显示名，写入 senderName 供其他客户端展示 */
+  senderName?: string | null;
 }
 
 export type PrivateTaskType = "summary" | "agent";

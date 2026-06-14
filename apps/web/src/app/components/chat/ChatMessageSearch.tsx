@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 import type { Message } from "@group-chat/shared";
 import { formatShortDate } from "../../formatting.js";
+import { messageSenderLabel } from "../../chat-links.js";
 
 export function ChatMessageSearch(props: {
   open: boolean;
@@ -46,7 +47,7 @@ export function ChatMessageSearch(props: {
     return props.messages
       .filter((message) => message.status !== "deleted" && message.status !== "recalled")
       .filter((message) => {
-        const sender = message.role === "user" ? "我" : message.senderName || message.role;
+        const sender = messageSenderLabel(message);
         return [message.content, sender].some((value) => value.toLowerCase().includes(normalizedQuery));
       })
       .slice()
@@ -99,7 +100,7 @@ export function ChatMessageSearch(props: {
             >
               <span className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:8px]"}>
                 <strong className={"[overflow:hidden] [font-size:12px] [font-weight:700] [text-overflow:ellipsis] [white-space:nowrap]"}>
-                  {message.role === "user" ? "我" : message.senderName || message.role}
+                  {messageSenderLabel(message)}
                 </strong>
                 <span className={"[flex:0_0_auto] [color:var(--muted)] [font-size:11px]"}>{formatShortDate(message.createdAt)}</span>
               </span>

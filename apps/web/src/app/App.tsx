@@ -66,7 +66,7 @@ import {
 import { UnreadBadge } from "./components/ui/UnreadBadge.js";
 import { applyEvent, applyRoomUpdate, emptyState, normalizeSnapshot, removeActiveRun, removeDeletedRoom, removeHiddenMessages, upsert, upsertIdentity, upsertMany, upsertMessage, upsertParticipant, type AppState } from "./state.js";
 import { backgroundTaskFromSnapshot, createOptimisticBackgroundTask, enrichBackgroundTask, loadDismissedBackgroundTaskIds, loadLocalTaskBarTaskIds, mergeBackgroundTask, removeLocalTaskBarTaskId, saveDismissedBackgroundTaskIds, addLocalTaskBarTaskId, type AgentRunTaskItem, type BackgroundTask } from "./background-tasks.js";
-import { resolveAgentProfileParticipant, resolveMessageAgentParticipant, resolveMessageSenderLabel } from "./chat-links.js";
+import { resolveAgentProfileParticipant, resolveMessageAgentParticipant, resolveMessageSenderLabel, messageSenderLabel } from "./chat-links.js";
 import { collectMessageProcess } from "./agent-thinking.js";
 
 const DEFAULT_CONVERSATION_SIDEBAR_WIDTH = 300;
@@ -119,6 +119,7 @@ export function App() {
   const [resizingConversationSidebar, setResizingConversationSidebar] = useState(false);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [focusMessageRequest, setFocusMessageRequest] = useState<{ messageId: string; seq: number } | null>(null);
+  const [scrollToBottomRequest, setScrollToBottomRequest] = useState<{ seq: number } | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
   const lastSeqRef = useRef(0);
   const appShellRef = useRef<HTMLDivElement | null>(null);
@@ -372,7 +373,7 @@ export function App() {
       )
     : [];
   const openThinkingParticipantName = openThinkingMessage
-    ? resolveMessageSenderLabel(openThinkingMessage, openThinkingParticipant, openThinkingIdentity)
+    ? resolveMessageSenderLabel(openThinkingMessage, openThinkingParticipant, openThinkingIdentity, userProfile.displayName)
     : "Agent";
   const agentProfileParticipant = agentProfileParticipantId && currentConversation
     ? resolveAgentProfileParticipant(
@@ -830,6 +831,7 @@ export function App() {
     async (...args: Parameters<typeof sendMessage>) => {
       const result = await sendMessage(...args);
       mergeSentMessage(result);
+      setScrollToBottomRequest((current) => ({ seq: (current?.seq ?? 0) + 1 }));
       window.setTimeout(() => void refreshSnapshot(), 900);
       window.setTimeout(() => void refreshSnapshot(), 2500);
       return result;
@@ -885,7 +887,7 @@ export function App() {
         .filter((message) => message.status !== "deleted" && message.status !== "recalled")
         .map((message) => ({
           messageId: message.id,
-          sender: message.role === "user" ? "我" : message.senderName || message.role,
+          sender: messageSenderLabel(message, state.participants, state.identities, userProfile.displayName),
           content: message.content.trim() || "[附件]",
         }));
       if (quotes.length === 1) {
@@ -1074,7 +1076,7 @@ export function App() {
 
           <button
             type="button"
-            className={"[position:relative] [z-index:20] [width:8px] [min-width:8px] [height:100vh] [border:0] [border-left:1px_solid_var(--border)] [border-right:1px_solid_transparent] [padding:0] [background:var(--panel)] [cursor:col-resize] [transition:background-color_0.12s_ease,_border-color_0.12s_ease] hover:[border-left-color:var(--border-strong)] hover:[background:#00000008] focus-visible:[outline:none] focus-visible:[background:#0000000d] max-[760px]:[display:none]"}
+            className={"[position:relative] [z-index:20] [width:8px] [min-width:8px] [height:100vh] [border:0] [border-left:4px_solid_var(--border)] [border-right:1px_solid_transparent] [padding:0] [background:var(--panel)] [cursor:col-resize] [transition:background-color_0.12s_ease,_border-color_0.12s_ease] hover:[border-left-color:var(--border-strong)] hover:[background:#00000008] focus-visible:[outline:none] focus-visible:[background:#0000000d] max-[760px]:[display:none]"}
             aria-label="拖拽调整会话列表和聊天窗口宽度"
             title="拖拽调整窗口大小"
             onPointerDown={startConversationSidebarResize}
@@ -1197,6 +1199,7 @@ export function App() {
                   rooms={state.rooms}
                   participantsCount={currentAgents.length}
                   focusMessageRequest={focusMessageRequest}
+                  scrollToBottomRequest={scrollToBottomRequest}
                   bulkToolbarHost={bulkToolbarHost}
                   userProfile={userProfile}
                   identities={state.identities}
@@ -1309,6 +1312,7 @@ export function App() {
                       mentionRequest={mentionRequest}
                       composerRequest={composerRequest}
                       summaryTasks={backgroundTasks}
+                      userDisplayName={userProfile.displayName}
                     />
                   </div>
                 </div>
@@ -1440,7 +1444,7 @@ function formatMessagesForComposer(messages: Message[], mode: "quote" | "summary
   const lines = messages
     .filter((message) => message.status !== "deleted" && message.status !== "recalled")
     .map((message) => {
-      const sender = message.role === "user" ? "我" : message.senderName || message.role;
+      const sender = messageSenderLabel(message);
       return `> ${sender}: ${message.content.trim() || "[附件]"}`;
     });
   if (mode === "summary") return `请总结并处理以下消息：\n\n${lines.join("\n")}\n`;
@@ -1457,7 +1461,7 @@ function formatSummarySourcePreview(messages: Message[]) {
 
 function formatSummaryRequest(messages: Message[], blocks: AppState["messageBlocks"], artifacts: AppState["artifacts"]) {
   const lines = messages.map((message) => {
-    const sender = message.role === "user" ? "我" : message.senderName || message.role;
+    const sender = messageSenderLabel(message);
     return `- ${sender}: ${message.content.trim() || "[附件]"}`;
   });
   const messageArtifacts = messages.flatMap((message) =>
