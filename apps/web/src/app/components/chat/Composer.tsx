@@ -13,6 +13,7 @@ import {
   summaryLinkLabel,
 } from "../../chat-links.js";
 import type { BackgroundTask } from "../../background-tasks.js";
+import { markMessageGroupBreak, MESSAGE_GROUP_IDLE_MS } from "../../message-group-breaks.js";
 import { AttachmentPreviewDialog, isTextAttachment, type AttachmentPreview } from "./AttachmentPreviewDialog.js";
 import { AgentAvatar } from "../ui/AgentAvatar.js";
 import { resolveAgentAvatarFromContext } from "../../identity-avatar.js";
@@ -34,6 +35,7 @@ export function Composer(props: {
   onCancelRun: typeof cancelRun;
   mentionRequest: { participantId: string; seq: number } | null;
   summaryTasks: BackgroundTask[];
+  userDisplayName: string;
   composerRequest:
     | { type: "insert"; seq: number; content: string }
     | { type: "quote"; seq: number; quote: ComposerQuote }
@@ -46,6 +48,7 @@ export function Composer(props: {
   const [editingMentions, setEditingMentions] = useState<MentionTarget[]>([]);
   const [quotes, setQuotes] = useState<ComposerQuote[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionMenuDismissed, setMentionMenuDismissed] = useState(false);
   const [mentionedIds, setMentionedIds] = useState<Set<string>>(new Set());
   const [mentionedAll, setMentionedAll] = useState(false);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
@@ -60,7 +63,10 @@ export function Composer(props: {
   const previewUrlsRef = useRef<Set<string>>(new Set());
   const mentionSelectionRef = useRef<Range | null>(null);
   const mentionQueryRangeRef = useRef<Range | null>(null);
+  const mentionMenuRef = useRef<HTMLDivElement | null>(null);
   const composerCaretOffsetRef = useRef<number | null>(null);
+  const lastComposerInputAtRef = useRef(Date.now());
+  const composerIdleBreakPendingRef = useRef(false);
   const mentionableParticipants = props.participants.filter(
     (participant) => participant.kind === "ai" && participant.status !== "removed",
   );
@@ -83,13 +89,19 @@ export function Composer(props: {
       const artifacts = await uploadQueuedItems(uploadItems);
       const editorMentions = collectMentionTargetsFromEditor(editorRef.current, mentionableParticipants);
       const isWhisper = hasWhisperChipInEditor(editorRef.current);
-      await props.onSend(props.conversationId, {
+      const result = await props.onSend(props.conversationId, {
         content: quotes.length ? `${formatQuotesForMessage(quotes)}\n\n${text}` : text,
         artifactIds: artifacts.map((artifact) => artifact.id),
         parentMessageId: quotes.length === 1 ? quotes[0]!.messageId : null,
         mentions: editorMentions,
         visibility: isWhisper ? "whisper" : "public",
+        senderName: props.userDisplayName.trim() || undefined,
       });
+      if (composerIdleBreakPendingRef.current && result.message?.id) {
+        markMessageGroupBreak(result.message.id);
+        composerIdleBreakPendingRef.current = false;
+      }
+      lastComposerInputAtRef.current = Date.now();
       setText("");
       setEditorText(editorRef.current, "", 0);
       setQuotes([]);
@@ -190,7 +202,7 @@ export function Composer(props: {
     return mentionQueryRangeRef.current;
   };
 
-  const updateMentionQuery = (value: string, cursor: number) => {
+  const updateMentionQuery = (value: string, cursor: number, reopenMentionMenu = false) => {
     const editor = editorRef.current;
     const nextQuery = editor
       ? readMentionQueryFromRange(mentionQueryRangeRef.current ?? findActiveMentionQueryRange(editor))
@@ -201,10 +213,13 @@ export function Composer(props: {
         })();
     setMentionQuery((current) => {
       if (current !== nextQuery) setActiveMentionIndex(0);
-      if (nextQuery !== null) saveMentionSelection();
-      else {
+      if (nextQuery !== null) {
+        saveMentionSelection();
+        if (reopenMentionMenu) setMentionMenuDismissed(false);
+      } else {
         mentionSelectionRef.current = null;
         mentionQueryRangeRef.current = null;
+        setMentionMenuDismissed(false);
       }
       return nextQuery;
     });
@@ -212,15 +227,20 @@ export function Composer(props: {
 
   const suppressEditorSyncRef = useRef(false);
 
-  const syncEditorText = () => {
+  const syncEditorText = (reopenMentionMenu = false) => {
     if (suppressEditorSyncRef.current) return;
+    const now = Date.now();
+    if (now - lastComposerInputAtRef.current > MESSAGE_GROUP_IDLE_MS) {
+      composerIdleBreakPendingRef.current = true;
+    }
+    lastComposerInputAtRef.current = now;
     const editor = editorRef.current;
     const nextText = editorText(editor);
     const cursor = editor ? caretTextOffset(editor) : nextText.length;
     setText(nextText);
     syncMentionedIds(nextText);
     if (editor) captureActiveMentionQueryRange(editor);
-    updateMentionQuery(nextText, cursor);
+    updateMentionQuery(nextText, cursor, reopenMentionMenu);
     if (editor) composerCaretOffsetRef.current = cursor;
     resizeComposerEditor(editor);
   };
@@ -459,7 +479,7 @@ export function Composer(props: {
         insertSummaryLinkAtCaret(taskId, summaryLinkLabel(
           props.summaryTasks.find((task) => task.id === taskId),
         ));
-        requestAnimationFrame(syncEditorText);
+        requestAnimationFrame(() => syncEditorText(true));
         return;
       }
       if (!pastedText) return;
@@ -468,7 +488,7 @@ export function Composer(props: {
         getMessageLabel: (messageId) => messageLinkLabel(messageId, props.allMessages, props.allParticipants),
         getSummaryLabel: (taskId) => summaryLinkLabel(props.summaryTasks.find((task) => task.id === taskId)),
       });
-      requestAnimationFrame(syncEditorText);
+      requestAnimationFrame(() => syncEditorText(true));
       return;
     }
     event.preventDefault();
@@ -571,10 +591,26 @@ export function Composer(props: {
     requestAnimationFrame(() => setEditorText(editorRef.current, nextText, nextText.length));
   }, [props.composerRequest, text]);
 
-  const mentionMenuOpen = mentionQuery !== null && mentionOptions.length > 0;
+  const mentionMenuVisible = mentionQuery !== null && mentionOptions.length > 0;
+  const mentionMenuOpen = mentionMenuVisible && !mentionMenuDismissed;
+
+  useEffect(() => {
+    if (!mentionMenuVisible) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (mentionMenuRef.current?.contains(target)) return;
+      if (editorRef.current?.contains(target)) return;
+      setMentionMenuDismissed(true);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [mentionMenuVisible]);
 
   return (
-    <footer className={"[position:relative] [border-top:0] [padding:8px_16px_16px] [background:var(--panel)] max-[760px]:[padding-inline:12px]"}>
+    <footer className={"[position:relative] [z-index:2] [border-top:0] [padding:8px_16px_16px] [background:var(--panel)] max-[760px]:[padding-inline:12px]"}>
       {editingMessageId ? (
         <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [margin-bottom:8px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:8px_10px] [background:#fff7ed] [color:#9a3412] [font-size:12px] [font-weight:650]"}>
           <span>正在编辑消息，发送后会让被 @ 的 Agent 重新回复。</span>
@@ -634,10 +670,14 @@ export function Composer(props: {
               contentEditable
               suppressContentEditableWarning
               className={"[min-height:28px] [max-height:168px] [overflow-y:hidden] [outline:none] [white-space:pre-wrap] [overflow-wrap:anywhere] [color:var(--text)] [font-size:13px] [line-height:20px] [padding:4px_0] empty:before:[content:'']"}
-              onInput={syncEditorText}
-              onClick={syncEditorText}
+              onInput={() => syncEditorText(true)}
+              onClick={() => syncEditorText(true)}
               onPaste={pasteFiles}
-              onKeyUp={syncEditorText}
+              onKeyUp={() => syncEditorText(true)}
+              onFocus={() => {
+                syncEditorText();
+                setMentionMenuDismissed(false);
+              }}
               onBlur={handleEditorBlur}
               onKeyDown={(event) => {
                 if ((event.key === "Backspace" || event.key === "Delete") && deleteAdjacentMentionChip(editorRef.current, event.key)) {
@@ -696,7 +736,8 @@ export function Composer(props: {
       </div>
       {mentionMenuOpen ? (
         <div
-          className={"[position:absolute] [z-index:20] [left:16px] [right:16px] [bottom:calc(100%_-_4px)] [max-height:min(300px,_calc(100vh_-_180px))] [overflow-y:auto] [border:1px_solid_var(--border)] [border-radius:18px] [padding:6px] [background:var(--panel)] [box-shadow:0_14px_42px_rgb(0_0_0_/_12%)] max-[760px]:[left:12px] max-[760px]:[right:12px]"}
+          ref={mentionMenuRef}
+          className={"[position:absolute] [z-index:60] [left:16px] [right:16px] [bottom:calc(100%_-_4px)] [max-height:min(300px,_calc(100vh_-_180px))] [overflow-y:auto] [border:1px_solid_var(--border)] [border-radius:18px] [padding:6px] [background:var(--panel)] [box-shadow:0_14px_42px_rgb(0_0_0_/_12%)] max-[760px]:[left:12px] max-[760px]:[right:12px]"}
           role="listbox"
           aria-label="Mention suggestions"
         >
@@ -708,7 +749,7 @@ export function Composer(props: {
                 role="option"
                 aria-selected={index === activeMentionIndex}
                 data-active={index === activeMentionIndex || undefined}
-                className={"[display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:9px] [width:100%] [min-width:0] [height:38px] [border:0] [border-radius:12px] [padding:0_8px] [color:var(--text)] [text-align:left] [background:transparent] [transition:background-color_0.12s_ease] [&[data-active=true]]:[background:#00000008] [&:hover]:[background:#00000008] [&_strong]:[display:block] [&_strong]:[min-width:0] [&_strong]:[overflow:hidden] [&_strong]:[font-size:12px] [&_strong]:[font-weight:500] [&_strong]:[line-height:16px] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap]"}
+                className={"[display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:9px] [width:100%] [min-width:0] [height:38px] [border:0] [border-radius:12px] [padding:0_8px] [color:var(--text)] [text-align:left] [background:transparent] [transition:background-color_0.12s_ease] [&[data-active=true]]:[background:#00000014] [&:hover]:[background:#00000014] [&_strong]:[display:block] [&_strong]:[min-width:0] [&_strong]:[overflow:hidden] [&_strong]:[font-size:12px] [&_strong]:[font-weight:500] [&_strong]:[line-height:16px] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap]"}
                 onMouseDown={(event) => {
                   event.preventDefault();
                   saveMentionSelection();
@@ -729,7 +770,7 @@ export function Composer(props: {
                 role="option"
                 aria-selected={index === activeMentionIndex}
                 data-active={index === activeMentionIndex || undefined}
-                className={"[display:grid] [grid-template-columns:32px_minmax(0,_1fr)_30px] [align-items:center] [gap:9px] [width:100%] [min-width:0] [height:38px] [border-radius:12px] [padding:0_4px_0_8px] [color:var(--text)] [transition:background-color_0.12s_ease] [&[data-active=true]]:[background:#00000008] [&:hover]:[background:#00000008]"}
+                className={"[display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:9px] [width:100%] [min-width:0] [height:38px] [border-radius:12px] [padding:0_4px_0_8px] [color:var(--text)] [transition:background-color_0.12s_ease] [&[data-active=true]]:[background:#00000014] [&:hover]:[background:#00000014]"}
                 onMouseEnter={() => setActiveMentionIndex(index)}
               >
                 <MentionParticipantAvatar
@@ -737,31 +778,33 @@ export function Composer(props: {
                   identities={props.identities}
                   runtimeProfiles={props.runtimeProfiles}
                 />
-                <button
-                  type="button"
-                  className={"[display:inline-flex] [min-width:0] [align-items:center] [gap:6px] [height:100%] [border:0] [padding:0] [color:inherit] [text-align:left] [background:transparent] [&:focus-visible]:[outline:none] [&_strong]:[display:block] [&_strong]:[min-width:0] [&_strong]:[overflow:hidden] [&_strong]:[font-size:12px] [&_strong]:[font-weight:500] [&_strong]:[line-height:16px] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap]"}
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    saveMentionSelection();
-                    selectMentionOption(option);
-                  }}
-                >
-                  <strong>{option.label}</strong>
-                  <Zap size={13} fill="currentColor" className={"[flex:0_0_auto] [color:#111111]"} />
-                </button>
-                <button
-                  type="button"
-                  className={"[display:inline-grid] [width:30px] [height:30px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [&:hover]:[color:#7c3aed] [&:hover]:[background:#f3e8ff] [&:focus-visible]:[outline:none] [&:focus-visible]:[box-shadow:0_0_0_2px_#ddd6fe]"}
-                  aria-label={`跟 ${option.label} 说悄悄话`}
-                  title="悄悄话"
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    saveMentionSelection();
-                    insertWhisperMention(option.participant);
-                  }}
-                >
-                  <Ear size={15} />
-                </button>
+                <div className={"[display:flex] [min-width:0] [align-items:center] [height:100%]"}>
+                  <button
+                    type="button"
+                    className={"[display:inline-flex] [flex:1_1_auto] [min-width:0] [align-items:center] [gap:6px] [height:100%] [border:0] [padding:0] [color:inherit] [text-align:left] [background:transparent] [&:focus-visible]:[outline:none] [&_strong]:[display:block] [&_strong]:[flex:1_1_auto] [&_strong]:[min-width:0] [&_strong]:[overflow:hidden] [&_strong]:[font-size:12px] [&_strong]:[font-weight:500] [&_strong]:[line-height:16px] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap]"}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      saveMentionSelection();
+                      selectMentionOption(option);
+                    }}
+                  >
+                    <strong>{option.label}</strong>
+                    <Zap size={13} fill="currentColor" className={"[flex:0_0_auto] [color:#111111]"} />
+                  </button>
+                  <button
+                    type="button"
+                    className={"[display:inline-grid] [flex:0_0_auto] [width:30px] [height:30px] [margin-left:40px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [&:hover]:[color:#7c3aed] [&:hover]:[background:#f3e8ff] [&:focus-visible]:[outline:none] [&:focus-visible]:[box-shadow:0_0_0_2px_#ddd6fe]"}
+                    aria-label={`跟 ${option.label} 说悄悄话`}
+                    title="悄悄话"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      saveMentionSelection();
+                      insertWhisperMention(option.participant);
+                    }}
+                  >
+                    <Ear size={15} />
+                  </button>
+                </div>
               </div>
             )
           ))}

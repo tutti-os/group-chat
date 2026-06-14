@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Braces, BrainCircuit, CheckSquare, ChevronsDown, Copy, Edit3, FileText, MoreHorizontal, Reply, RotateCcw, Terminal, Trash2, Wrench, X } from "lucide-react";
+import { Braces, BrainCircuit, CheckSquare, ChevronsDown, Copy, Edit3, Ear, FileText, MoreHorizontal, Reply, RotateCcw, Terminal, Trash2, Wrench, X } from "lucide-react";
 import type { Artifact, AgentRun, AgentRunEvent, Conversation, Identity, Message, MessageBlock, Participant, Room, RuntimeProfile } from "@group-chat/shared";
 import { isLocalUserMessage, resolveMessageVisibility } from "@group-chat/shared";
 import { openArtifact } from "../../artifact-actions.js";
@@ -27,9 +27,11 @@ import {
   messageSenderLabel,
   summaryLinkLabel,
 } from "../../chat-links.js";
+import { isMessageGroupBreak, MESSAGE_GROUP_IDLE_MS } from "../../message-group-breaks.js";
 
-const COLLAPSED_MESSAGE_CHAR_LIMIT = 300;
+const COLLAPSED_MESSAGE_CHAR_LIMIT = 800;
 const COPY_TIP_OFFSET_PX = 8;
+const MESSAGE_GROUP_GAP_MS = MESSAGE_GROUP_IDLE_MS;
 
 type CopyTipPosition = { x: number; y: number };
 
@@ -68,6 +70,7 @@ export function MessageTimeline(props: {
   rooms: Room[];
   participantsCount: number;
   focusMessageRequest: { messageId: string; seq: number } | null;
+  scrollToBottomRequest: { seq: number } | null;
   bulkToolbarHost?: HTMLElement | null;
   onSelectionModeChange?: (active: boolean) => void;
   onOpenMembers: (options?: { startAdding?: boolean }) => void;
@@ -86,7 +89,7 @@ export function MessageTimeline(props: {
   onDeleteMessage: (message: Message) => Promise<unknown>;
   onDeleteMessages?: (messages: Message[]) => Promise<unknown>;
   onRecallMessage: (message: Message) => Promise<unknown>;
-  userProfile: Pick<LocalUserProfile, "avatarPreset" | "customAvatarUrl">;
+  userProfile: Pick<LocalUserProfile, "avatarPreset" | "customAvatarUrl" | "displayName">;
   onOpenUserProfile: (anchor: HTMLElement) => void;
   onViewThinking: (message: Message) => void;
   onRegisterScrollPreserver?: (preserver: { capture: () => void } | null) => void;
@@ -111,6 +114,10 @@ export function MessageTimeline(props: {
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [summaryAgentPickerMessages, setSummaryAgentPickerMessages] = useState<Message[] | null>(null);
   const visibleMessages = props.messages.filter(shouldShowMessage);
+  const messageGroupLayout = useMemo(
+    () => buildMessageGroupLayout(visibleMessages, props.messages),
+    [visibleMessages, props.messages],
+  );
   const selectedMessages = visibleMessages.filter(
     (message) => selectedMessageIds.has(message.id) && !isRemovedMessage(message),
   );
@@ -160,15 +167,36 @@ export function MessageTimeline(props: {
     : props.openBackgroundTask?.sourceMessageId
       ? imageArtifactsForMessage(props.openBackgroundTask.sourceMessageId, props.blocks, props.artifacts)
       : [];
-  useEffect(() => {
+  const updateJumpToBottomVisibility = () => {
+    const element = scrollRef.current;
+    if (!element) return;
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    stickToBottomRef.current = distanceFromBottom < 48;
+    setShowJumpToBottom(distanceFromBottom > element.clientHeight);
+  };
+
+  const scrollToBottomInstant = useCallback(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    stickToBottomRef.current = true;
+    container.scrollTop = container.scrollHeight;
+    setShowJumpToBottom(false);
+  }, []);
+
+  useLayoutEffect(() => {
     if (selectionMode) return;
     if (preserveTimelineScrollRef.current) {
       preserveTimelineScrollRef.current = false;
       return;
     }
     if (!stickToBottomRef.current) return;
-    bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [props.messages, props.blocks, selectionMode]);
+    scrollToBottomInstant();
+  }, [props.messages, props.blocks, selectionMode, scrollToBottomInstant]);
+
+  useLayoutEffect(() => {
+    if (!props.scrollToBottomRequest) return;
+    scrollToBottomInstant();
+  }, [props.scrollToBottomRequest, scrollToBottomInstant]);
 
   useEffect(() => {
     updateJumpToBottomVisibility();
@@ -233,7 +261,7 @@ export function MessageTimeline(props: {
   const copyMessages = async (messages: Message[], position: CopyTipPosition) => {
     const text = messages
       .filter((message) => message.status !== "deleted" && message.status !== "recalled")
-      .map((message) => `${messageSenderLabel(message, props.allParticipants, props.identities)}: ${message.content.trim() || "[附件]"}`)
+      .map((message) => `${messageSenderLabel(message, props.allParticipants, props.identities, props.userProfile.displayName)}: ${message.content.trim() || "[附件]"}`)
       .join("\n");
     await copyTextToClipboard(text);
     showCopyTip(position);
@@ -293,18 +321,8 @@ export function MessageTimeline(props: {
     setSummaryAgentPickerMessages(messages);
   };
 
-  const updateJumpToBottomVisibility = () => {
-    const element = scrollRef.current;
-    if (!element) return;
-    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
-    stickToBottomRef.current = distanceFromBottom < 48;
-    setShowJumpToBottom(distanceFromBottom > element.clientHeight);
-  };
-
   const scrollToBottom = () => {
-    stickToBottomRef.current = true;
-    bottomRef.current?.scrollIntoView({ block: "end" });
-    setShowJumpToBottom(false);
+    scrollToBottomInstant();
   };
 
   const scrollToMessage = (messageId: string) => {
@@ -344,7 +362,11 @@ export function MessageTimeline(props: {
   return (
     <section
       ref={scrollRef}
-      className={"[position:relative] [min-height:0] [overflow-y:auto] [padding:26px_clamp(14px,_2.25vw,_32px)_18px] [background:var(--panel)] max-[1080px]:[padding-inline:16px] max-[760px]:[padding:18px_12px]"}
+      className={`[position:relative] [min-height:0] [overflow-y:auto] [background:var(--panel)] ${
+        selectionMode
+          ? "[padding:26px_18px_18px_4px] max-[1080px]:[padding-inline:4px_18px] max-[760px]:[padding:18px_18px_18px_4px]"
+          : "[padding:26px_18px_18px_14px] max-[1080px]:[padding-inline:14px_18px] max-[760px]:[padding:18px_18px_18px_14px]"
+      }`}
       onScroll={updateJumpToBottomVisibility}
     >
       {visibleMessages.length === 0 ? (
@@ -353,13 +375,17 @@ export function MessageTimeline(props: {
           onOpenMembers={props.onOpenMembers}
         />
       ) : null}
-      {visibleMessages.map((message) =>
-        message.role === "system" ? (
-          <SystemNoticeRow key={message.id} message={message} />
-        ) : (
+      {visibleMessages.map((message) => {
+        if (message.role === "system") {
+          return <SystemNoticeRow key={message.id} message={message} />;
+        }
+        const groupLayout = messageGroupLayout.get(message.id) ?? { showHeader: true, isLastInGroup: true };
+        return (
         <MessageRow
           key={message.id}
           message={message}
+          showHeader={groupLayout.showHeader}
+          isLastInGroup={groupLayout.isLastInGroup}
           quotedMessage={resolveReferencedMessage(message, props.messages, props.allParticipants, props.identities)}
           blocks={props.blocks.filter((block) => block.messageId === message.id)}
           artifacts={props.artifacts}
@@ -405,8 +431,8 @@ export function MessageTimeline(props: {
           onRecallMessage={() => props.onRecallMessage(message)}
           onSelectMessage={() => enterSelectionMode(message)}
         />
-        ),
-      )}
+        );
+      })}
       {selectionMode && props.bulkToolbarHost
         ? createPortal(
             <BulkMessageToolbar
@@ -546,6 +572,64 @@ function isRemovedMessage(message: Message) {
   return message.status === "deleted" || message.status === "recalled";
 }
 
+function resolveMessageSenderKey(message: Message, allMessages: Message[]) {
+  const visibility = resolveMessageVisibility(message, allMessages);
+  if (message.role === "user") return `user:${visibility}`;
+  if (message.role === "system") return `system:${message.id}`;
+  return `assistant:${message.senderParticipantId ?? message.senderName ?? "unknown"}:${visibility}`;
+}
+
+function shouldStartNewMessageGroup(
+  previous: Message | null,
+  current: Message,
+  allMessages: Message[],
+) {
+  if (!previous) return true;
+  if (previous.role === "system" || current.role === "system") return true;
+  if (isRemovedMessage(previous) || isRemovedMessage(current)) return true;
+  if (resolveMessageSenderKey(previous, allMessages) !== resolveMessageSenderKey(current, allMessages)) {
+    return true;
+  }
+  if (current.role === "user" && isMessageGroupBreak(current.id)) return true;
+  const previousTime = Date.parse(previous.createdAt);
+  const currentTime = Date.parse(current.createdAt);
+  if (!Number.isFinite(previousTime) || !Number.isFinite(currentTime)) return true;
+  return currentTime - previousTime > MESSAGE_GROUP_GAP_MS;
+}
+
+function buildMessageGroupLayout(visibleMessages: Message[], allMessages: Message[]) {
+  const layout = new Map<string, { showHeader: boolean; isLastInGroup: boolean }>();
+  let previous: Message | null = null;
+
+  for (let index = 0; index < visibleMessages.length; index++) {
+    const message = visibleMessages[index];
+    if (!message) continue;
+    if (message.role === "system") {
+      previous = null;
+      continue;
+    }
+
+    const showHeader = shouldStartNewMessageGroup(previous, message, allMessages);
+    let nextConversationMessage: Message | null = null;
+    for (let nextIndex = index + 1; nextIndex < visibleMessages.length; nextIndex++) {
+      const candidate = visibleMessages[nextIndex];
+      if (!candidate) continue;
+      if (candidate.role !== "system") {
+        nextConversationMessage = candidate;
+        break;
+      }
+    }
+    const isLastInGroup =
+      !nextConversationMessage
+      || shouldStartNewMessageGroup(message, nextConversationMessage, allMessages);
+
+    layout.set(message.id, { showHeader, isLastInGroup });
+    previous = message;
+  }
+
+  return layout;
+}
+
 function shouldShowMessage(message: Message) {
   if (message.role === "assistant" && message.status === "error") return true;
   return !(message.role === "assistant" && !message.content.trim() && (message.status === "cancelled" || message.status === "streaming"));
@@ -591,11 +675,65 @@ function buildReferencedThread(
   return chain;
 }
 
-function WhisperBadge() {
+function resolveWhisperFooterLabel(
+  message: Message,
+  isWhisper: boolean,
+  allParticipants: Participant[],
+): { label: string; variant: "user" | "agent" } | null {
+  if (message.role === "user" && message.visibility === "whisper") {
+    const mention = message.mentions.find((item) => item.mentionType === "participant" && item.participantId !== "all");
+    const participant = mention?.participantId
+      ? allParticipants.find((item) => item.id === mention.participantId) ?? null
+      : null;
+    const name = participant?.displayName?.trim() || mention?.displayNameSnapshot?.trim() || "Agent";
+    return { label: `给 ${name} 的悄悄话`, variant: "user" };
+  }
+  if (message.role === "assistant" && isWhisper) {
+    return { label: "只对我可见", variant: "agent" };
+  }
+  return null;
+}
+
+const WHISPER_MARKDOWN_COMPONENTS = {
+  p: ({ children }: { children?: ReactNode }) => (
+    <span data-slot="whisper-body" className="[display:block] [margin:0] [line-height:1.35] [white-space:pre-wrap]">{children}</span>
+  ),
+};
+
+function shouldRenderWhisperPlainText(content: string) {
+  const trimmed = content.trim();
+  if (!trimmed) return false;
+  return !/^#{1,6}\s/m.test(trimmed)
+    && !/[*_~`]/.test(trimmed)
+    && !/^\s*[-*+]\s/m.test(trimmed)
+    && !/^\s*\d+\.\s/m.test(trimmed)
+    && !/^\s*>/m.test(trimmed)
+    && !/\[.+?\]\(.+?\)/.test(trimmed);
+}
+
+function stripLeadingMentionsFromContent(content: string, mentions: Message["mentions"]): string {
+  let result = content;
+  for (const mention of mentions) {
+    if (mention.mentionType === "all") continue;
+    const name = mention.displayNameSnapshot.trim();
+    if (!name) continue;
+    const pattern = new RegExp(`^@${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*`);
+    if (pattern.test(result)) {
+      result = result.replace(pattern, "");
+    }
+  }
+  return result;
+}
+
+function WhisperMessageFooter(props: { label: string }) {
   return (
-    <span data-whisper-badge="true" className={"[display:inline-flex] [flex:0_0_auto] [height:18px] [align-items:center] [border:1px_dashed_#c4b5fd] [border-radius:999px] [padding:0_6px] [color:#7c3aed] [background:#f5f3ff] [font-size:10px] [font-weight:650] [line-height:18px]"}>
-      悄悄话
-    </span>
+    <div
+      data-slot="whisper-footer"
+      className={"[display:flex] [align-items:center] [gap:4px] [padding-left:4px] [color:#8f959e] [font-size:11px] [line-height:16px]"}
+    >
+      <Ear size={12} strokeWidth={1.75} className={"[flex:0_0_auto]"} aria-hidden />
+      <span>{props.label}</span>
+    </div>
   );
 }
 
@@ -618,6 +756,8 @@ function SystemNoticeRow(props: { message: Message }) {
 
 function MessageRow(props: {
   message: Message;
+  showHeader: boolean;
+  isLastInGroup: boolean;
   quotedMessage: Message | null;
   blocks: MessageBlock[];
   artifacts: Artifact[];
@@ -650,7 +790,7 @@ function MessageRow(props: {
   onDeleteMessage: () => Promise<unknown>;
   onRecallMessage: () => Promise<unknown>;
   onSelectMessage: () => void;
-  userProfile: Pick<LocalUserProfile, "avatarPreset" | "customAvatarUrl">;
+  userProfile: Pick<LocalUserProfile, "avatarPreset" | "customAvatarUrl" | "displayName">;
   identities: Identity[];
   runtimeProfiles: RuntimeProfile[];
   onOpenUserProfile: (anchor: HTMLElement) => void;
@@ -665,15 +805,26 @@ function MessageRow(props: {
   const participantIdentity = props.participant?.identityId
     ? props.identities.find((identity) => identity.id === props.participant?.identityId) ?? null
     : null;
-  const senderLabel = resolveMessageSenderLabel(props.message, props.participant, participantIdentity);
+  const senderLabel = resolveMessageSenderLabel(
+    props.message,
+    props.participant,
+    participantIdentity,
+    props.userProfile.displayName,
+  );
   const isWhisper = resolveMessageVisibility(props.message, props.allMessages) === "whisper";
+  const whisperFooter = resolveWhisperFooterLabel(props.message, isWhisper, props.allParticipants);
+  const whisperFooterBlockId = whisperFooter
+    ? [...conversationBlocks].reverse().find((block) => block.type === "main_text")?.id
+      ?? conversationBlocks.at(-1)?.id
+      ?? null
+    : null;
 
   const messageAvatar = isUserMessage ? (
     <button
       data-slot="message-avatar"
       data-profile-trigger="message-avatar"
       type="button"
-      className={"[position:relative] [z-index:50] [display:inline-grid] [flex:0_0_auto] [width:34px] [height:34px] [overflow:hidden] [border:0] [border-radius:999px] [padding:0] [background:transparent] [cursor:pointer] [transition:transform_0.12s_ease] [&:hover]:[transform:translateY(-1px)] [&:focus-visible]:[outline:2px_solid_var(--accent)] [&:focus-visible]:[outline-offset:2px]"}
+      className={"[position:relative] [display:inline-grid] [flex:0_0_auto] [width:34px] [height:34px] [overflow:hidden] [border:0] [border-radius:999px] [padding:0] [background:transparent] [cursor:pointer] [transition:transform_0.12s_ease] [&:hover]:[transform:translateY(-1px)] [&:focus-visible]:[outline:2px_solid_var(--accent)] [&:focus-visible]:[outline-offset:2px]"}
       title="查看我的资料"
       aria-label="查看我的资料"
       onMouseDown={(event) => {
@@ -728,9 +879,15 @@ function MessageRow(props: {
   );
 
   const messageBody = (
-    <div
-      data-slot="message-body"
-      className={`[position:relative] [min-width:0] [max-width:min(760px,_70%)] max-[1080px]:[max-width:min(720px,_86%)] max-[760px]:[max-width:88%] ${isUserMessage ? "[grid-column:1] [grid-row:1] [width:fit-content] [max-width:100%] [justify-self:end] [pointer-events:none] [&_*]:[pointer-events:auto]" : ""}`}
+    <MessageBodyShell
+      selectionMode={props.selectionMode}
+      menuOpen={props.menuOpen}
+      disabled={isRemoved}
+      showHoverTime={!props.showHeader}
+      createdAt={props.message.createdAt}
+      onReply={props.onQuoteMessage}
+      onCopy={props.onCopyMessage}
+      onOpenMenu={props.onOpenMenu}
     >
         {props.menuOpen ? (
           <MessageMoreMenu
@@ -751,10 +908,11 @@ function MessageRow(props: {
             onSelect={props.onSelectMessage}
           />
         ) : null}
-        {!isUserMessage || statusLabel || isWhisper ? (
-          <div data-slot="message-meta" className={`[&_span:not([data-whisper-badge=true])]:[color:var(--muted)] [&_span:not([data-whisper-badge=true])]:[font-size:12px] [display:flex] [align-items:center] [gap:7px] [min-height:20px] [margin-bottom:4px] [&_strong]:[color:var(--muted)] [&_strong]:[font-size:12px] [&_strong]:[font-weight:550] ${isUserMessage ? "[width:100%] [justify-content:flex-end]" : ""}`}>
-            {!isUserMessage ? (
-              props.participant && props.participant.status !== "removed" ? (
+        {props.showHeader ? (
+        <div data-slot="message-meta" className={"[&_span:not([data-message-status=error])]:[color:var(--muted)] [&_span[data-message-status=error]]:[color:#dc2626] [&_span]:[font-size:12px] [display:flex] [align-items:center] [gap:7px] [min-height:20px] [margin-bottom:4px] [&_strong]:[color:var(--muted)] [&_strong]:[font-size:12px] [&_strong]:[font-weight:550]"}>
+            {isUserMessage ? (
+              <strong>{senderLabel}</strong>
+            ) : props.participant && props.participant.status !== "removed" ? (
                 <button
                   type="button"
                   className={"group [display:inline-flex] [align-items:center] [border:0] [padding:0] [color:var(--muted)] [background:transparent] [font-size:12px] [font-weight:550] [line-height:20px] [cursor:pointer] [transition:color_0.12s_ease] hover:![color:#2563eb] focus-visible:![color:#2563eb] focus-visible:[outline:none]"}
@@ -770,10 +928,11 @@ function MessageRow(props: {
                 </button>
               ) : (
                 <strong>{senderLabel}</strong>
-              )
+              )}
+            <span>{formatMessageTime(props.message.createdAt)}</span>
+            {statusLabel ? (
+              <span data-message-status={props.message.status === "error" ? "error" : undefined}>{statusLabel}</span>
             ) : null}
-            {statusLabel ? <span>{statusLabel}</span> : null}
-            {isWhisper ? <WhisperBadge /> : null}
           </div>
         ) : null}
         {isRemoved ? (
@@ -790,12 +949,6 @@ function MessageRow(props: {
                 identities={props.identities}
                 conversations={props.conversations}
                 rooms={props.rooms}
-                messageRole={props.message.role}
-                selectionMode={props.selectionMode}
-                menuOpen={props.menuOpen}
-                onReply={props.onQuoteMessage}
-                onCopy={props.onCopyMessage}
-                onOpenMenu={props.onOpenMenu}
                 onOpenArtifact={props.onOpenArtifact}
                 onOpenMessageLink={props.onOpenMessageLink}
                 onOpenSummaryLink={props.onOpenSummaryLink}
@@ -803,12 +956,18 @@ function MessageRow(props: {
                 summaryTasks={props.summaryTasks}
                 quotedMessage={index === 0 ? props.quotedMessage : null}
                 onOpenReferencedMessage={(referencedMessage) => props.onOpenReferencedMessage(referencedMessage, props.message)}
+                whisperFooter={whisperFooter && block.id === whisperFooterBlockId ? whisperFooter : null}
+                whisperMentionsToStrip={
+                  whisperFooter?.variant === "user" && block.id === whisperFooterBlockId
+                    ? props.message.mentions
+                    : undefined
+                }
               />
             ))}
             {runtimeEventBlocks.length ? <RuntimeEventGroup blocks={runtimeEventBlocks} artifacts={props.artifacts} onOpenArtifact={props.onOpenArtifact} /> : null}
           </>
         )}
-      </div>
+    </MessageBodyShell>
   );
 
   return (
@@ -817,26 +976,25 @@ function MessageRow(props: {
       data-role={props.message.role}
       data-whisper={isWhisper || undefined}
       data-selected={props.selected || undefined}
-      className={`group/message [position:relative] [display:grid] [grid-template-columns:22px_34px_minmax(0,_1fr)] [gap:8px] [margin-bottom:12px] [align-items:start] [border-radius:18px] [transition:background-color_0.2s_ease,_box-shadow_0.2s_ease] [&[data-selected=true]]:[background:#eaf2ff66] [&[data-flash=true]]:[background:#fef3c7] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#c4b5fd] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[background:#faf5ff] [&[data-role=user]]:[grid-template-columns:22px_minmax(0,_1fr)_34px] [&[data-role=user]_[data-slot=message-avatar]]:[grid-column:3] [&[data-role=user]_[data-slot=message-avatar]]:[grid-row:1] [&[data-role=user]_[data-slot=message-body]]:[grid-column:2] [&[data-role=user]_[data-slot=message-body]]:[grid-row:1] [&[data-role=user]_[data-slot=message-meta]]:[justify-content:flex-end] [&[data-role=user]_[data-slot=message-block]]:[margin-left:auto] [&[data-role=user]_[data-slot=message-block]:not([data-link-only])]:[border-color:transparent] [&[data-role=user]_[data-slot=message-block]:not([data-link-only])]:[background:#d6e9ff] [&[data-whisper=true][data-role=user]_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#c4b5fd] [&[data-whisper=true][data-role=user]_[data-slot=message-block]:not([data-link-only])]:[background:#f3e8ff] [&[data-role=user]_[data-slot=message-block][data-link-only]]:[background:transparent] [&[data-role=user]_[data-slot=message-block][data-link-only]]:[justify-items:end] [&[data-role=user]_[data-slot=message-block-shell]]:[margin-left:auto] [&[data-role=user]_[data-slot=event-block]]:[margin-left:auto] [&[data-role=user]_[data-slot=artifact-block]]:[margin-left:auto]`}
+      data-group-continuation={!props.showHeader || undefined}
+      className={`group/message [position:relative] [display:grid] [grid-template-columns:34px_minmax(0,_1fr)] [gap:8px] [align-items:start] [border-radius:18px] [transition:background-color_0.2s_ease,_box-shadow_0.2s_ease] ${props.selectionMode ? "[margin-left:10px]" : ""} ${props.isLastInGroup ? "[margin-bottom:18px]" : "[margin-bottom:4px]"} [&[data-selected=true]]:[background:#eaf2ff66] [&[data-flash=true]]:[background:#fef3c7] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#d0d3d6] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[border-radius:8px] [&[data-whisper=true][data-role=assistant]_[data-slot=message-block]:not([data-link-only])]:[background:#f8f9fb] [&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[background:#f2f3f5] [&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[border-radius:8px] [&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[border-color:transparent] [&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[background:#d6e9ff] [&[data-role=user][data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[background:#eef6ff]`}
     >
-      <div data-slot="message-select" className={"[grid-column:1] [grid-row:1] [width:22px]"}>
-        {props.selectionMode && !isRemoved ? (
-          <label className={"[display:grid] [width:22px] [height:22px] [place-items:center] [margin-top:8px] [cursor:pointer]"}>
+      {props.selectionMode ? (
+      <div
+        data-slot="message-select"
+        className={"[position:absolute] [left:-10px] [top:0] [z-index:1] [display:flex] [height:34px] [align-items:center] [justify-content:flex-end]"}
+      >
+        {!isRemoved ? (
+          <label className={"[display:grid] [width:16px] [height:16px] [place-items:center] [cursor:pointer]"}>
             <input className={"[width:16px] [height:16px] [accent-color:var(--primary)]"} type="checkbox" checked={props.selected} onChange={props.onToggleSelected} aria-label="选择消息" />
           </label>
         ) : null}
       </div>
-      {isUserMessage ? (
-        <>
-          {messageBody}
-          {messageAvatar}
-        </>
-      ) : (
-        <>
-          {messageAvatar}
-          {messageBody}
-        </>
+      ) : null}
+      {props.showHeader ? messageAvatar : (
+        <div data-slot="message-avatar" aria-hidden="true" className={"[width:34px] [height:34px]"} />
       )}
+      {messageBody}
     </article>
   );
 }
@@ -850,19 +1008,23 @@ const MESSAGE_MORE_MENU_Z_INDEX = MESSAGE_ACTION_BAR_Z_INDEX + 1;
 const MESSAGE_MORE_MENU_BOTTOM_RESERVE_PX = 96;
 
 function MessageActionBar(props: {
-  role: Message["role"];
   visible: boolean;
   menuOpen: boolean;
+  position: { top: number; left: number } | null;
   onReply: () => void;
   onCopy: (position: CopyTipPosition) => void;
   onOpenMenu: (anchor: HTMLElement) => void;
 }) {
-  const isUser = props.role === "user";
   return (
     <div
       data-slot="message-actions"
-      className={`[position:absolute] [z-index:30] [display:flex] [align-items:center] [gap:2px] [overflow:visible] [border:1px_solid_var(--border)] [border-radius:999px] [padding:3px] [background:#fffffff2] [box-shadow:0_8px_24px_rgb(0_0_0_/_10%)] [transition:opacity_0.12s_ease,_transform_0.12s_ease] [top:8px] ${props.visible ? "[opacity:1] [pointer-events:auto]" : "[opacity:0] [pointer-events:none]"} ${isUser ? "[left:0] [transform:translate(calc(-100%_-_6px),_0)]" : "[right:0] [transform:translate(calc(100%_+_6px),_0)]"} ${props.menuOpen ? "![opacity:1] ![pointer-events:auto]" : ""}`}
-      style={props.menuOpen ? { zIndex: MESSAGE_ACTION_BAR_Z_INDEX } : undefined}
+      className={`[position:absolute] [z-index:30] [display:flex] [align-items:center] [gap:2px] [overflow:visible] [border:1px_solid_var(--border)] [border-radius:4px] [padding:3px] [background:#fffffff2] [box-shadow:0_8px_24px_rgb(0_0_0_/_10%)] [transition:opacity_0.12s_ease] before:[content:''] before:[position:absolute] before:[top:0] before:[right:100%] before:[width:4px] before:[height:100%] before:[pointer-events:auto] ${props.visible && props.position ? "[opacity:1] [pointer-events:auto]" : "[opacity:0] [pointer-events:none]"} ${props.menuOpen ? "![opacity:1] ![pointer-events:auto]" : ""}`}
+      style={{
+        ...(props.position
+          ? { top: props.position.top, left: props.position.left, right: "auto", transform: "none" }
+          : { top: 0, left: 0, visibility: "hidden" }),
+        ...(props.menuOpen ? { zIndex: MESSAGE_ACTION_BAR_Z_INDEX } : {}),
+      }}
       aria-label="消息操作"
       onMouseEnter={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
@@ -896,7 +1058,6 @@ function MessageMoreMenu(props: {
   onRecall: () => Promise<unknown>;
   onSelect: () => void;
 }) {
-  const isUser = props.message.role === "user";
   const canRecallMessage = isLocalUserMessage(props.message);
   const isAssistant = props.message.role === "assistant";
   const isRemoved = isRemovedMessage(props.message);
@@ -931,20 +1092,11 @@ function MessageMoreMenu(props: {
     let left: number;
     let transform: string | undefined;
 
-    if (isUser) {
+    left = anchorRect.right;
+    transform = undefined;
+    if (left + menuWidth > window.innerWidth - viewportPadding) {
       left = anchorRect.left;
       transform = "translateX(-100%)";
-      if (left - menuWidth < viewportPadding) {
-        left = anchorRect.right;
-        transform = undefined;
-      }
-    } else {
-      left = anchorRect.right;
-      transform = undefined;
-      if (left + menuWidth > window.innerWidth - viewportPadding) {
-        left = anchorRect.left;
-        transform = "translateX(-100%)";
-      }
     }
 
     setMenuStyle({
@@ -957,13 +1109,13 @@ function MessageMoreMenu(props: {
       overflowY: "auto",
       visibility: "visible",
     });
-  }, [props.messageId, isUser]);
+  }, [props.messageId]);
 
   useLayoutEffect(() => {
     updateMenuPosition();
     const frame = window.requestAnimationFrame(() => updateMenuPosition());
     return () => window.cancelAnimationFrame(frame);
-  }, [updateMenuPosition, props.message.id, isAssistant, isUser]);
+  }, [updateMenuPosition, props.message.id, isAssistant]);
 
   useEffect(() => {
     const handleReposition = () => updateMenuPosition();
@@ -979,7 +1131,7 @@ function MessageMoreMenu(props: {
     <div
       ref={menuRef}
       data-slot="message-more-menu"
-      className={"[display:grid] [min-width:178px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:6px] [background:#ffffff] [box-shadow:0_18px_46px_rgb(0_0_0_/_14%)]"}
+      className={"[display:grid] [min-width:178px] [border:1px_solid_var(--border)] [border-radius:4px] [padding:6px] [background:#ffffff] [box-shadow:0_18px_46px_rgb(0_0_0_/_14%)]"}
       style={menuStyle}
       role="menu"
       onPointerDown={(event) => event.stopPropagation()}
@@ -1164,7 +1316,7 @@ function SummaryPanel(props: {
 
 function DeletedMessageBubble(props: { status: Message["status"] }) {
   return (
-    <div data-slot="message-block" className={"[width:fit-content] [max-width:100%] [border:1px_dashed_var(--border)] [border-radius:16px] [padding:9px_12px] [color:var(--muted)] [background:#00000004] [font-size:13px] [font-style:italic]"}>
+    <div data-slot="message-block" className={"[width:fit-content] [max-width:100%] [border:1px_dashed_var(--border)] [border-radius:4px_6px_6px_4px] [padding:9px_12px] [color:var(--muted)] [background:#00000004] [font-size:13px] [font-style:italic]"}>
       {props.status === "recalled" ? "这条消息已撤回" : "这条消息已删除"}
     </div>
   );
@@ -1204,7 +1356,7 @@ function ReferencedMessagePanel(props: {
   identities: Identity[];
   runtimeProfiles: RuntimeProfile[];
   artifacts: Artifact[];
-  userProfile: Pick<LocalUserProfile, "avatarPreset" | "customAvatarUrl">;
+  userProfile: Pick<LocalUserProfile, "avatarPreset" | "customAvatarUrl" | "displayName">;
   onClose: () => void;
   onBackToMessage: (messageId: string) => void;
   onOpenArtifact: (artifact: Artifact) => void;
@@ -1249,7 +1401,7 @@ function DetailMessageCard(props: {
   participant: Participant | null;
   identities: Identity[];
   runtimeProfiles: RuntimeProfile[];
-  userProfile: Pick<LocalUserProfile, "avatarPreset" | "customAvatarUrl">;
+  userProfile: Pick<LocalUserProfile, "avatarPreset" | "customAvatarUrl" | "displayName">;
   onBackToMessage: () => void;
   onOpenArtifact: (artifact: Artifact) => void;
 }) {
@@ -1259,7 +1411,12 @@ function DetailMessageCard(props: {
   const participantIdentity = props.participant?.identityId
     ? props.identities.find((identity) => identity.id === props.participant?.identityId) ?? null
     : null;
-  const senderLabel = resolveMessageSenderLabel(props.message, props.participant, participantIdentity);
+  const senderLabel = resolveMessageSenderLabel(
+    props.message,
+    props.participant,
+    participantIdentity,
+    props.userProfile.displayName,
+  );
   return (
     <article className={"[display:grid] [gap:10px] [border-radius:16px] [padding:16px] [background:#eef0f3]"}>
       <div className={"[display:grid] [grid-template-columns:38px_minmax(0,_1fr)_auto] [gap:10px] [align-items:center]"}>
@@ -1343,7 +1500,7 @@ function MessageSenderAvatar(props: {
   participant: Participant | null;
   identity?: Pick<Identity, "name" | "icon" | "defaultRuntimeProfileId"> | null;
   runtimeProfiles: RuntimeProfile[];
-  userProfile: Pick<LocalUserProfile, "avatarPreset" | "customAvatarUrl">;
+  userProfile: Pick<LocalUserProfile, "avatarPreset" | "customAvatarUrl" | "displayName">;
   size?: UserAvatarSize;
   className?: string;
 }) {
@@ -1443,20 +1600,80 @@ function RuntimeEventGroup(props: { blocks: MessageBlock[]; artifacts: Artifact[
   );
 }
 
-const MESSAGE_ACTION_BAR_BRIDGE_PX = 96;
+const MESSAGE_ACTION_BAR_GAP_PX = 4;
+const MESSAGE_HOVER_TIME_GAP_PX = 6;
+const MESSAGE_ACTION_ANCHOR_SELECTOR = '[data-slot="message-block"], [data-slot="artifact-block"]';
 
-function MessageBlockShell(props: {
-  role: Message["role"];
+type MessageBubbleAnchor = { top: number; left: number; width: number; height: number };
+
+function measureMessageBubbleAnchor(body: HTMLElement): MessageBubbleAnchor | null {
+  const anchor = body.querySelector(MESSAGE_ACTION_ANCHOR_SELECTOR);
+  if (!(anchor instanceof HTMLElement)) return null;
+  const bodyRect = body.getBoundingClientRect();
+  const anchorRect = anchor.getBoundingClientRect();
+  return {
+    top: anchorRect.top - bodyRect.top,
+    left: anchorRect.left - bodyRect.left,
+    width: anchorRect.width,
+    height: anchorRect.height,
+  };
+}
+
+function measureMessageActionBarPosition(anchor: MessageBubbleAnchor): { top: number; left: number } {
+  return {
+    top: anchor.top,
+    left: anchor.left + anchor.width + MESSAGE_ACTION_BAR_GAP_PX,
+  };
+}
+
+function measureHoverTimePosition(anchor: MessageBubbleAnchor): { top: number; left: number } {
+  return {
+    top: anchor.top + anchor.height / 2,
+    left: anchor.left - MESSAGE_HOVER_TIME_GAP_PX,
+  };
+}
+
+function MessageHoverTime(props: { createdAt: string; position: { top: number; left: number } | null }) {
+  return (
+    <time
+      dateTime={props.createdAt}
+      data-slot="message-hover-time"
+      className={"[position:absolute] [z-index:2] [white-space:nowrap] [color:var(--muted)] [font-size:12px] [line-height:20px] [opacity:0] [pointer-events:none] [transition:opacity_0.12s_ease] group-hover/message:opacity-100 group-focus-within/message:opacity-100"}
+      style={
+        props.position
+          ? { top: props.position.top, left: props.position.left, transform: "translate(-100%, -50%)" }
+          : { visibility: "hidden" }
+      }
+    >
+      {formatMessageTime(props.createdAt)}
+    </time>
+  );
+}
+
+function MessageBodyShell(props: {
   selectionMode: boolean;
   menuOpen: boolean;
+  disabled?: boolean;
+  showHoverTime?: boolean;
+  createdAt?: string;
   onReply: () => void;
   onCopy: (position: CopyTipPosition) => void;
   onOpenMenu: (anchor: HTMLElement) => void;
   children: ReactNode;
 }) {
   const [actionsVisible, setActionsVisible] = useState(false);
+  const [bubbleAnchor, setBubbleAnchor] = useState<MessageBubbleAnchor | null>(null);
   const hideTimerRef = useRef<number | null>(null);
-  const isUser = props.role === "user";
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  const updateBubbleAnchor = useCallback(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    setBubbleAnchor(measureMessageBubbleAnchor(body));
+  }, []);
+
+  const actionBarPosition = bubbleAnchor ? measureMessageActionBarPosition(bubbleAnchor) : null;
+  const hoverTimePosition = bubbleAnchor ? measureHoverTimePosition(bubbleAnchor) : null;
 
   const showActions = () => {
     if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current);
@@ -1479,11 +1696,29 @@ function MessageBlockShell(props: {
     if (props.menuOpen) showActions();
   }, [props.menuOpen]);
 
+  useLayoutEffect(() => {
+    updateBubbleAnchor();
+    const body = bodyRef.current;
+    if (!body) return;
+
+    const observer = new ResizeObserver(() => updateBubbleAnchor());
+    observer.observe(body);
+    const anchor = body.querySelector(MESSAGE_ACTION_ANCHOR_SELECTOR);
+    if (anchor instanceof HTMLElement) observer.observe(anchor);
+
+    const handleReposition = () => updateBubbleAnchor();
+    window.addEventListener("resize", handleReposition);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", handleReposition);
+    };
+  }, [updateBubbleAnchor, props.children, props.disabled]);
+
   return (
     <div
-      data-slot="message-block-shell"
-      className={`group/block [position:relative] [width:fit-content] [max-width:100%] ${isUser ? "before:[content:''] before:[position:absolute] before:[top:0] before:[left:calc(-1_*_var(--message-action-bridge))] before:[height:100%] before:[width:var(--message-action-bridge)] before:[pointer-events:none]" : "after:[content:''] after:[position:absolute] after:[top:0] after:[right:calc(-1_*_var(--message-action-bridge))] after:[height:100%] after:[width:var(--message-action-bridge)] after:[pointer-events:none]"}`}
-      style={{ ["--message-action-bridge" as string]: `${MESSAGE_ACTION_BAR_BRIDGE_PX}px` }}
+      ref={bodyRef}
+      data-slot="message-body"
+      className={"group/body [position:relative] [min-width:0] [max-width:min(760px,_70%)] [overflow:visible] max-[1080px]:[max-width:min(720px,_86%)] max-[760px]:[max-width:88%]"}
       onMouseEnter={showActions}
       onMouseLeave={hideActions}
       onFocusCapture={showActions}
@@ -1492,15 +1727,18 @@ function MessageBlockShell(props: {
         hideActions();
       }}
     >
-      {!props.selectionMode ? (
+      {!props.selectionMode && !props.disabled ? (
         <MessageActionBar
-          role={props.role}
           visible={actionsVisible || props.menuOpen}
           menuOpen={props.menuOpen}
+          position={actionBarPosition}
           onReply={props.onReply}
           onCopy={props.onCopy}
           onOpenMenu={props.onOpenMenu}
         />
+      ) : null}
+      {props.showHoverTime && props.createdAt && !props.selectionMode && !props.disabled ? (
+        <MessageHoverTime createdAt={props.createdAt} position={hoverTimePosition} />
       ) : null}
       {props.children}
     </div>
@@ -1516,36 +1754,16 @@ function MessageBlockRenderer(props: {
   conversations?: Conversation[];
   rooms?: Room[];
   summaryTasks?: BackgroundTask[];
-  messageRole?: Message["role"];
-  selectionMode?: boolean;
-  menuOpen?: boolean;
-  onReply?: () => void;
-  onCopy?: (position: CopyTipPosition) => void;
-  onOpenMenu?: (anchor: HTMLElement) => void;
   onOpenArtifact: (artifact: Artifact) => void;
   onOpenMessageLink?: (messageId: string) => void;
   onOpenSummaryLink?: (taskId: string) => void;
   onEnsureSummaryTask?: (taskId: string) => Promise<BackgroundTask | null>;
   quotedMessage?: Message | null;
   onOpenReferencedMessage?: (message: Message) => void;
+  whisperFooter?: { label: string; variant: "user" | "agent" } | null;
+  whisperMentionsToStrip?: Message["mentions"];
 }) {
-  const blockShell = (content: ReactNode) => {
-    if (props.messageRole && props.onReply && props.onCopy && props.onOpenMenu) {
-      return (
-        <MessageBlockShell
-          role={props.messageRole}
-          selectionMode={props.selectionMode ?? false}
-          menuOpen={props.menuOpen ?? false}
-          onReply={props.onReply}
-          onCopy={props.onCopy}
-          onOpenMenu={props.onOpenMenu}
-        >
-          {content}
-        </MessageBlockShell>
-      );
-    }
-    return content;
-  };
+  const blockShell = (content: ReactNode) => content;
 
   if (props.block.type === "image" || props.block.type === "file") {
     const artifactId = props.block.metadata?.artifactId;
@@ -1592,7 +1810,10 @@ function MessageBlockRenderer(props: {
   }
   const content = normalizeMarkdownContent(props.block.content || " ");
   const quotedContent = extractLeadingReplyQuote(content);
-  const bodyContent = quotedContent?.body ?? content;
+  const rawBodyContent = quotedContent?.body ?? content;
+  const bodyContent = props.whisperMentionsToStrip?.length
+    ? stripLeadingMentionsFromContent(rawBodyContent, props.whisperMentionsToStrip)
+    : rawBodyContent;
   const messageLinks = extractMessageLinks(bodyContent);
   const summaryLinks = extractSummaryLinks(bodyContent);
   const bodyWithoutLinks = removeEmbeddedLinks(bodyContent).trim();
@@ -1603,11 +1824,13 @@ function MessageBlockRenderer(props: {
     && !bodyWithoutLinks
     && !props.quotedMessage
     && !quotedContent;
+  const hasWhisperFooter = Boolean(props.whisperFooter) && !isLinkOnly;
+  const whisperPlainText = hasWhisperFooter && Boolean(bodyWithoutLinks) && shouldRenderWhisperPlainText(bodyWithoutLinks);
   return blockShell(
     <div
       data-slot="message-block"
       data-link-only={isLinkOnly || undefined}
-      className={`message-prose [width:fit-content] [max-width:100%] [border:0] [border-radius:16px] [color:var(--text)] ${isLinkOnly ? "[display:grid] [gap:6px] [padding:0] [background:transparent]" : "[padding:10px_13px] [background:#00000008]"} ${props.block.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${props.block.status === "error" ? "[border:1px_solid_#fecaca] [color:var(--danger)] [background:#fef2f2]" : ""}`}
+      className={`message-prose [width:fit-content] [max-width:100%] [border:0] [color:var(--text)] ${isLinkOnly ? "[display:grid] [gap:6px] [padding:0] [background:transparent] [border-radius:0]" : hasWhisperFooter ? "[display:flex] [flex-direction:column] [gap:4px] [padding:10px_12px] [border-radius:8px]" : "[padding:10px_13px] [border-radius:4px_6px_6px_4px]"} ${props.block.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${props.block.status === "error" ? "[border:1px_solid_#fecaca] [color:var(--danger)] [background:#fef2f2]" : ""}`}
     >
       {props.quotedMessage ? (
         <ReferencedMessagePreview
@@ -1642,12 +1865,17 @@ function MessageBlockRenderer(props: {
         />
       ))}
       {collapsed ? (
-        <CollapsibleMessageContent content={displayContent} />
+        <CollapsibleMessageContent content={displayContent} tightSpacing={hasWhisperFooter} />
+      ) : whisperPlainText ? (
+        <span data-slot="whisper-body" className="[display:block] [line-height:1.35] [white-space:pre-wrap]">{bodyWithoutLinks}</span>
       ) : bodyWithoutLinks ? (
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{bodyWithoutLinks}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={hasWhisperFooter ? WHISPER_MARKDOWN_COMPONENTS : undefined}>{bodyWithoutLinks}</ReactMarkdown>
       ) : messageLinks.length || summaryLinks.length ? null : (
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{bodyContent || " "}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={hasWhisperFooter ? WHISPER_MARKDOWN_COMPONENTS : undefined}>{bodyContent || " "}</ReactMarkdown>
       )}
+      {hasWhisperFooter && props.whisperFooter ? (
+        <WhisperMessageFooter label={props.whisperFooter.label} />
+      ) : null}
     </div>,
   );
 }
@@ -1751,7 +1979,7 @@ function MessageLinkCard(props: {
   );
 }
 
-function CollapsibleMessageContent(props: { content: string }) {
+function CollapsibleMessageContent(props: { content: string; tightSpacing?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const needsCollapse = props.content.length > COLLAPSED_MESSAGE_CHAR_LIMIT;
   const visibleContent =
@@ -1760,8 +1988,8 @@ function CollapsibleMessageContent(props: { content: string }) {
       : `${props.content.slice(0, COLLAPSED_MESSAGE_CHAR_LIMIT)}...`;
 
   return (
-    <div className={"[display:grid] [gap:6px]"}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{visibleContent}</ReactMarkdown>
+    <div className={props.tightSpacing ? "[display:grid] [gap:4px]" : "[display:grid] [gap:6px]"}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={props.tightSpacing ? WHISPER_MARKDOWN_COMPONENTS : undefined}>{visibleContent}</ReactMarkdown>
       {needsCollapse ? (
         <button
           type="button"

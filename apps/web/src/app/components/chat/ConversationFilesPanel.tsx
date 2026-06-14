@@ -9,6 +9,7 @@ import {
   type ArtifactFilterCategory,
 } from "../../artifact-actions.js";
 import { formatBytes, formatShortDate } from "../../formatting.js";
+import { messageSenderLabel } from "../../chat-links.js";
 import { AttachmentPreviewDialog, type AttachmentPreview } from "./AttachmentPreviewDialog.js";
 
 const PAGE_SIZE = 30;
@@ -279,6 +280,5 @@ export function ConversationFilesPanel(props: {
 }
 
 function formatMessageSender(message: Message) {
-  if (message.role === "user") return "我";
-  return message.senderName || message.role;
+  return messageSenderLabel(message);
 }
