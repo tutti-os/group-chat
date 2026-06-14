@@ -23,7 +23,6 @@ import type {
   UploadArtifactRequest,
   UploadArtifactResponse,
 } from "@group-chat/shared";
-import { loadLocalUserId } from "../app/user-profile.js";
 
 export interface SendMessageResponse {
   message: Message;
@@ -206,10 +205,6 @@ export async function setParticipantListenMode(participantId: string, listenMode
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
-  const userId = loadLocalUserId();
-  if (userId && !headers.has("x-group-chat-user-id")) {
-    headers.set("x-group-chat-user-id", userId);
-  }
   if (init?.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
@@ -222,9 +217,4 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
     throw new Error(text || response.statusText);
   }
   return response.json() as Promise<T>;
-}
-
-export function currentUserQueryParam() {
-  const userId = loadLocalUserId();
-  return userId ? `userId=${encodeURIComponent(userId)}` : "";
 }

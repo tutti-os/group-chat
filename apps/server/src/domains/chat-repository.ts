@@ -95,94 +95,33 @@ export class ChatRepository {
     };
   }
 
-  listHiddenMessageIds(userParticipantId: string | null = null): Set<string> {
-    const rows = getDb()
-      .prepare(`SELECT message_id FROM hidden_messages WHERE user_participant_id = ?`)
-      .all(userParticipantKey(userParticipantId)) as Array<{ message_id: string }>;
+  listHiddenMessageIds(): Set<string> {
+    const rows = getDb().prepare(`SELECT message_id FROM hidden_messages`).all() as Array<{ message_id: string }>;
     return new Set(rows.map((row) => row.message_id));
   }
 
-  hideMessageForLocalUser(messageId: string, conversationId: string, userParticipantId: string | null = null): boolean {
+  hideMessageForLocalUser(messageId: string, conversationId: string): boolean {
     const now = new Date().toISOString();
     const result = getDb()
       .prepare(
-        `INSERT OR IGNORE INTO hidden_messages (message_id, conversation_id, user_participant_id, hidden_at)
-         VALUES (?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO hidden_messages (message_id, conversation_id, hidden_at) VALUES (?, ?, ?)`,
       )
-      .run(messageId, conversationId, userParticipantKey(userParticipantId), now);
+      .run(messageId, conversationId, now);
     return result.changes > 0;
   }
 
   filterHiddenFromSnapshot(snapshot: ChatSnapshot): ChatSnapshot {
-    return this.filterSnapshotForUser(snapshot, null);
-  }
-
-  filterSnapshotForUser(snapshot: ChatSnapshot, userParticipantId: string | null): ChatSnapshot {
-    const hiddenIds = this.listHiddenMessageIds(userParticipantId);
-    const hasUserContext = Boolean(userParticipantId);
-    if (!hasUserContext && hiddenIds.size === 0) return snapshot;
-    const messageById = new Map(snapshot.messages.map((message) => [message.id, message]));
-    const runById = new Map(snapshot.agentRuns.map((run) => [run.id, run]));
-    const visibleMessageCache = new Map<string, boolean>();
-    const visibleRunCache = new Map<string, boolean>();
-
-    const isMessageVisible = (message: Message): boolean => {
-      if (hiddenIds.has(message.id)) return false;
-      if (!hasUserContext || message.visibility !== "whisper") return true;
-      const cached = visibleMessageCache.get(message.id);
-      if (cached !== undefined) return cached;
-
-      let visible = false;
-      if (message.senderParticipantId === userParticipantId) {
-        visible = true;
-      } else if (message.role === "user") {
-        visible = message.mentions.some(
-          (mention) => mention.mentionType === "all" || mention.participantId === userParticipantId,
-        );
-      } else if (message.role === "assistant") {
-        const run = message.runId ? runById.get(message.runId) : null;
-        const trigger = run?.triggerMessageId ? messageById.get(run.triggerMessageId) : null;
-        visible = trigger ? isMessageVisible(trigger) : message.senderParticipantId === userParticipantId;
-      }
-      visibleMessageCache.set(message.id, visible);
-      return visible;
-    };
-
-    const isRunVisible = (run: AgentRun): boolean => {
-      if (!hasUserContext || run.visibility !== "whisper") return true;
-      const cached = visibleRunCache.get(run.id);
-      if (cached !== undefined) return cached;
-
-      let visible = run.participantId === userParticipantId;
-      if (!visible && run.triggerMessageId) {
-        const trigger = messageById.get(run.triggerMessageId);
-        visible = trigger ? isMessageVisible(trigger) : false;
-      }
-      if (!visible && run.assistantMessageId) {
-        const assistant = messageById.get(run.assistantMessageId);
-        visible = assistant ? isMessageVisible(assistant) : false;
-      }
-      visibleRunCache.set(run.id, visible);
-      return visible;
-    };
-
-    const messages = snapshot.messages.filter(isMessageVisible);
+    const hiddenIds = this.listHiddenMessageIds();
+    if (hiddenIds.size === 0) return snapshot;
+    const messages = snapshot.messages.filter((message) => !hiddenIds.has(message.id));
     const visibleMessageIds = new Set(messages.map((message) => message.id));
-    const agentRuns = snapshot.agentRuns.filter(isRunVisible);
-    const visibleRunIds = new Set(agentRuns.map((run) => run.id));
     return {
       ...snapshot,
       messages,
       messageBlocks: snapshot.messageBlocks.filter((block) => visibleMessageIds.has(block.messageId)),
       artifacts: snapshot.artifacts.filter(
-        (artifact) =>
-          (!artifact.messageId && !artifact.sourceRunId)
-          || (artifact.messageId ? visibleMessageIds.has(artifact.messageId) : false)
-          || (artifact.sourceRunId ? visibleRunIds.has(artifact.sourceRunId) : false),
+        (artifact) => !artifact.messageId || visibleMessageIds.has(artifact.messageId),
       ),
-      agentRuns,
-      activeRuns: snapshot.activeRuns.filter(isRunVisible),
-      agentRunEvents: snapshot.agentRunEvents.filter((event) => visibleRunIds.has(event.runId)),
     };
   }
 
@@ -1154,8 +1093,8 @@ export class ChatRepository {
     getDb()
       .prepare(
         `INSERT INTO private_tasks
-         (id, conversation_id, type, source_message_id, source_message_ids, participant_id, participant_name, requester_participant_id, source_preview, status, content, error, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (id, conversation_id, type, source_message_id, source_message_ids, participant_id, participant_name, source_preview, status, content, error, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            status = excluded.status,
            content = excluded.content,
@@ -1171,7 +1110,6 @@ export class ChatRepository {
         json(task.sourceMessageIds ?? []),
         task.participantId,
         task.participantName,
-        task.requesterParticipantId ?? null,
         task.sourcePreview,
         task.status,
         task.content,
@@ -1195,18 +1133,10 @@ export class ChatRepository {
     return row ? rowToPrivateTask(row) : null;
   }
 
-  listPrivateTasksForConversation(conversationId: string, requesterParticipantId: string | null = null): PrivateTaskSnapshot[] {
-    const rows = requesterParticipantId
-      ? getDb()
-          .prepare(
-            `SELECT * FROM private_tasks
-             WHERE conversation_id = ? AND requester_participant_id = ?
-             ORDER BY updated_at DESC`,
-          )
-          .all(conversationId, requesterParticipantId) as any[]
-      : getDb()
-          .prepare(`SELECT * FROM private_tasks WHERE conversation_id = ? ORDER BY updated_at DESC`)
-          .all(conversationId) as any[];
+  listPrivateTasksForConversation(conversationId: string): PrivateTaskSnapshot[] {
+    const rows = getDb()
+      .prepare(`SELECT * FROM private_tasks WHERE conversation_id = ? ORDER BY updated_at DESC`)
+      .all(conversationId) as any[];
     return rows.map(rowToPrivateTask);
   }
 
@@ -1429,7 +1359,6 @@ function rowToPrivateTask(row: any): PrivateTaskSnapshot {
         : [],
     participantId: row.participant_id,
     participantName: row.participant_name,
-    requesterParticipantId: row.requester_participant_id ?? null,
     sourcePreview: row.source_preview,
     status: row.status,
     content: row.content,
@@ -1452,10 +1381,6 @@ function normalizeReasoningEffort(value: string | null | undefined) {
 function modelSlug(model: string) {
   const slug = model.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
   return slug.slice(0, 80) || "default";
-}
-
-function userParticipantKey(userParticipantId: string | null | undefined) {
-  return userParticipantId?.trim() || "local-user";
 }
 
 function removeRoomArtifactRoot(roomId: string, artifactRoot: string) {

@@ -459,7 +459,6 @@ export interface PrivateTaskSnapshot {
   sourceMessageIds: Id[];
   participantId: Id;
   participantName: string;
-  requesterParticipantId: Id | null;
   sourcePreview: string;
   status: "running" | "completed" | "failed" | "cancelled";
   content: string;

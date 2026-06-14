@@ -68,7 +68,7 @@ export function Composer(props: {
   const lastComposerInputAtRef = useRef(Date.now());
   const composerIdleBreakPendingRef = useRef(false);
   const mentionableParticipants = props.participants.filter(
-    (participant) => participant.status !== "removed",
+    (participant) => participant.kind === "ai" && participant.status !== "removed",
   );
   const mentionOptions = buildMentionOptions(mentionableParticipants, mentionQuery, mentionedIds, mentionedAll);
   const send = async () => {

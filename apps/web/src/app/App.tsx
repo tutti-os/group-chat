@@ -39,7 +39,6 @@ import {
   updateRoom,
   updateConversationPin,
   uploadArtifact,
-  currentUserQueryParam,
 } from "../api/client.js";
 import { ConversationSidebar } from "./components/chat/ConversationSidebar.js";
 import { ChatHeader } from "./components/chat/ChatHeader.js";
@@ -273,8 +272,7 @@ export function App() {
       clearReconnectTimer();
 
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const userQuery = currentUserQueryParam();
-      ws = new WebSocket(`${protocol}//${window.location.host}/api/ws${userQuery ? `?${userQuery}` : ""}`);
+      ws = new WebSocket(`${protocol}//${window.location.host}/api/ws`);
 
       ws.addEventListener("open", () => {
         reconnectAttempt = 0;
