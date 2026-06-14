@@ -1,7 +1,7 @@
 {
   "schemaVersion": "tutti.app.manifest.v1",
   "appId": "group-chat",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "name": "Group Chat",
   "description": "Get work done with your agents in group chat.",
   "icon": {
