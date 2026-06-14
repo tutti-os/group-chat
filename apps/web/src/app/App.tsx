@@ -44,6 +44,7 @@ import { ConversationSidebar } from "./components/chat/ConversationSidebar.js";
 import { ChatHeader } from "./components/chat/ChatHeader.js";
 import { ConversationFilesPanel } from "./components/chat/ConversationFilesPanel.js";
 import { AgentRunPanel } from "./components/chat/AgentRunPanel.js";
+import { AgentThinkingPanel } from "./components/chat/AgentThinkingPanel.js";
 import { RoomAgentsDialog } from "./components/chat/RoomAgentsDialog.js";
 import { AgentProfileDialog } from "./components/chat/AgentProfileDialog.js";
 import { MessageTimeline } from "./components/chat/MessageTimeline.js";
@@ -64,7 +65,8 @@ import {
 import { UnreadBadge } from "./components/ui/UnreadBadge.js";
 import { applyEvent, applyRoomUpdate, emptyState, normalizeSnapshot, removeActiveRun, removeDeletedRoom, upsert, upsertIdentity, upsertMany, upsertMessage, upsertParticipant, type AppState } from "./state.js";
 import { backgroundTaskFromSnapshot, createOptimisticBackgroundTask, enrichBackgroundTask, loadDismissedBackgroundTaskIds, loadLocalTaskBarTaskIds, mergeBackgroundTask, removeLocalTaskBarTaskId, saveDismissedBackgroundTaskIds, addLocalTaskBarTaskId, type AgentRunTaskItem, type BackgroundTask } from "./background-tasks.js";
-import { resolveAgentProfileParticipant } from "./chat-links.js";
+import { resolveAgentProfileParticipant, resolveMessageAgentParticipant, resolveMessageSenderLabel } from "./chat-links.js";
+import { collectMessageProcess } from "./agent-thinking.js";
 
 const DEFAULT_CONVERSATION_SIDEBAR_WIDTH = 300;
 const MIN_CONVERSATION_SIDEBAR_WIDTH = 240;
@@ -91,6 +93,8 @@ export function App() {
   const [refreshingLocalAgentProviders, setRefreshingLocalAgentProviders] = useState(false);
   const [activeSection, setActiveSection] = useState<"chats" | "team">("chats");
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [profileMenuPlacement, setProfileMenuPlacement] = useState<"rail" | "mobile" | "chat">("rail");
+  const [profileMenuAnchorEl, setProfileMenuAnchorEl] = useState<HTMLElement | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<LocalUserProfile>(() => loadUserProfile());
   const saveUserProfileState = useCallback((profile: LocalUserProfile) => {
@@ -107,6 +111,7 @@ export function App() {
   const [filesPanelOpen, setFilesPanelOpen] = useState(false);
   const [openAgentRunId, setOpenAgentRunId] = useState<string | null>(null);
   const [openAgentRunSnapshot, setOpenAgentRunSnapshot] = useState<AgentRun | null>(null);
+  const [openThinkingMessageId, setOpenThinkingMessageId] = useState<string | null>(null);
   const [mentionRequest, setMentionRequest] = useState<{ participantId: string; seq: number } | null>(null);
   const [composerRequest, setComposerRequest] = useState<ComposerRequest | null>(null);
   const [conversationSidebarWidth, setConversationSidebarWidth] = useState(DEFAULT_CONVERSATION_SIDEBAR_WIDTH);
@@ -120,6 +125,23 @@ export function App() {
   const mobileProfileButtonRef = useRef<HTMLButtonElement | null>(null);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const mobileProfileMenuRef = useRef<HTMLDivElement | null>(null);
+  const chatProfileMenuRef = useRef<HTMLDivElement | null>(null);
+
+  const openProfileMenu = useCallback((placement: "rail" | "mobile" | "chat", anchorEl?: HTMLElement | null) => {
+    setProfileMenuPlacement(placement);
+    setProfileMenuAnchorEl(anchorEl ?? null);
+    setProfileMenuOpen(true);
+  }, []);
+
+  const closeProfileMenu = useCallback(() => {
+    setProfileMenuOpen(false);
+    setProfileMenuAnchorEl(null);
+  }, []);
+
+  const toggleProfileMenu = useCallback((placement: "rail" | "mobile") => {
+    setProfileMenuPlacement(placement);
+    setProfileMenuOpen((current) => !current);
+  }, []);
   const [bulkToolbarHost, setBulkToolbarHost] = useState<HTMLDivElement | null>(null);
   const [messageSelectionMode, setMessageSelectionMode] = useState(false);
   const [backgroundTasks, setBackgroundTasks] = useState<BackgroundTask[]>([]);
@@ -316,9 +338,37 @@ export function App() {
     const run = state.activeRuns.find((item) => item.id === runId);
     if (run) setOpenAgentRunSnapshot(run);
     setOpenAgentRunId(runId);
+    setOpenThinkingMessageId(null);
     setFilesPanelOpen(false);
     setOpenBackgroundTaskId(null);
   }, [state.activeRuns]);
+  const openMessageThinking = useCallback((message: Message) => {
+    setOpenThinkingMessageId(message.id);
+    setOpenAgentRunId(null);
+    setOpenAgentRunSnapshot(null);
+    setFilesPanelOpen(false);
+    setOpenBackgroundTaskId(null);
+  }, []);
+  const openThinkingMessage = openThinkingMessageId
+    ? state.messages.find((message) => message.id === openThinkingMessageId) ?? null
+    : null;
+  const openThinkingParticipant = openThinkingMessage
+    ? resolveMessageAgentParticipant(openThinkingMessage, currentParticipants, state.participants)
+    : null;
+  const openThinkingIdentity = openThinkingParticipant?.identityId
+    ? state.identities.find((identity) => identity.id === openThinkingParticipant.identityId) ?? null
+    : null;
+  const openThinkingSections = openThinkingMessage
+    ? collectMessageProcess(
+        openThinkingMessage,
+        state.messageBlocks.filter((block) => block.messageId === openThinkingMessage.id),
+        state.agentRunEvents,
+        state.agentRuns,
+      )
+    : [];
+  const openThinkingParticipantName = openThinkingMessage
+    ? resolveMessageSenderLabel(openThinkingMessage, openThinkingParticipant, openThinkingIdentity)
+    : "Agent";
   const agentProfileParticipant = agentProfileParticipantId && currentConversation
     ? resolveAgentProfileParticipant(
         agentProfileParticipantId,
@@ -542,6 +592,7 @@ export function App() {
   const openBackgroundTaskPanel = (taskId: string) => {
     setBackgroundTasks((current) => current.map((task) => ({ ...task, panelOpen: task.id === taskId })));
     setOpenBackgroundTaskId(taskId);
+    setOpenThinkingMessageId(null);
   };
 
   const closeBackgroundTaskPanel = () => {
@@ -856,6 +907,7 @@ export function App() {
     setFilesPanelOpen(false);
     setOpenAgentRunId(null);
     setOpenAgentRunSnapshot(null);
+    setOpenThinkingMessageId(null);
     clearAgentProfileDialog();
     setMessageSelectionMode(false);
     setMentionRequest(null);
@@ -877,14 +929,17 @@ export function App() {
       if (mobileProfileButtonRef.current?.contains(target)) return;
       if (profileMenuRef.current?.contains(target)) return;
       if (mobileProfileMenuRef.current?.contains(target)) return;
-      setProfileMenuOpen(false);
+      if (chatProfileMenuRef.current?.contains(target)) return;
+      if (profileMenuAnchorEl?.contains(target)) return;
+      if (target instanceof Element && target.closest('[data-profile-trigger="message-avatar"]')) return;
+      closeProfileMenu();
     };
 
     document.addEventListener("pointerdown", handlePointerDown);
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown);
     };
-  }, [profileMenuOpen]);
+  }, [closeProfileMenu, profileMenuAnchorEl, profileMenuOpen]);
 
   const markConversationRead = useCallback((conversationId: string) => {
     const lastReadAt = resolveLatestConversationActivityAt(conversationId, state.messages);
@@ -941,16 +996,17 @@ export function App() {
       <AppNavRail
         activeSection={activeSection}
         onSectionChange={setActiveSection}
-        profileMenuOpen={profileMenuOpen}
-        onToggleProfileMenu={() => setProfileMenuOpen((current) => !current)}
+        profileMenuOpen={profileMenuOpen && profileMenuPlacement === "rail"}
+        onToggleProfileMenu={() => toggleProfileMenu("rail")}
         onOpenSettings={() => setSettingsOpen(true)}
         profileButtonRef={profileButtonRef}
         profileMenuRef={profileMenuRef}
         userProfile={userProfile}
         onSaveProfile={(profile) => {
           saveUserProfileState(profile);
-          setProfileMenuOpen(false);
+          closeProfileMenu();
         }}
+        onCloseProfileMenu={closeProfileMenu}
         totalUnreadCount={totalUnreadCount}
       />
 
@@ -1008,9 +1064,9 @@ export function App() {
                   agentsOpen={membersPanelOpen}
                   filesOpen={filesPanelOpen}
                   userProfile={userProfile}
-                  profileMenuOpen={profileMenuOpen}
+                  profileMenuOpen={profileMenuOpen && profileMenuPlacement === "mobile"}
                   profileButtonRef={mobileProfileButtonRef}
-                  onToggleProfileMenu={() => setProfileMenuOpen((current) => !current)}
+                  onToggleProfileMenu={() => toggleProfileMenu("mobile")}
                   onUpdateRoom={onUpdateRoom}
                   onRoomPreviewChange={onRoomPreviewChange}
                   onToggleAgents={() => {
@@ -1025,6 +1081,7 @@ export function App() {
                     clearAgentProfileDialog();
                     setOpenAgentRunId(null);
                     setOpenAgentRunSnapshot(null);
+                    setOpenThinkingMessageId(null);
                     setFilesPanelOpen((current) => !current);
                   }}
                   onInvitePeople={() => window.alert("本地版暂不支持邀请其他人加入房间。云端多人协作版将支持邀请队友和他们的 Agent 进房间。")}
@@ -1092,12 +1149,20 @@ export function App() {
                     }));
                   }}
                 />
+                <AgentThinkingPanel
+                  open={Boolean(openThinkingMessage)}
+                  participantName={openThinkingParticipantName}
+                  sections={openThinkingSections}
+                  onClose={() => setOpenThinkingMessageId(null)}
+                />
                 <MessageTimeline
                   key={currentConversation.id}
                   messages={currentMessages}
                   allMessages={state.messages}
                   blocks={state.messageBlocks}
                   artifacts={state.artifacts}
+                  agentRunEvents={state.agentRunEvents}
+                  agentRuns={state.agentRuns}
                   participants={currentParticipants}
                   allParticipants={state.participants}
                   conversations={state.conversations}
@@ -1108,6 +1173,8 @@ export function App() {
                   userProfile={userProfile}
                   identities={state.identities}
                   runtimeProfiles={state.runtimeProfiles}
+                  onOpenUserProfile={(anchor) => openProfileMenu("chat", anchor)}
+                  onViewThinking={openMessageThinking}
                   onSelectionModeChange={setMessageSelectionMode}
                   onOpenMembers={(options) => {
                     clearAgentProfileDialog();
@@ -1218,7 +1285,7 @@ export function App() {
         </>
       )}
       <MobileSectionNav activeSection={activeSection} onChange={setActiveSection} totalUnreadCount={totalUnreadCount} />
-      {profileMenuOpen ? (
+      {profileMenuOpen && profileMenuPlacement === "mobile" ? (
         <div className={"[display:none] max-[760px]:[display:block]"}>
           <ProfileMenu
             menuRef={mobileProfileMenuRef}
@@ -1226,10 +1293,24 @@ export function App() {
             anchor="mobile"
             onSave={(profile) => {
               saveUserProfileState(profile);
-              setProfileMenuOpen(false);
+              closeProfileMenu();
             }}
+            onClose={closeProfileMenu}
           />
         </div>
+      ) : null}
+      {profileMenuOpen && profileMenuPlacement === "chat" ? (
+        <ProfileMenu
+          menuRef={chatProfileMenuRef}
+          profile={userProfile}
+          anchor="chat"
+          anchorEl={profileMenuAnchorEl}
+          onSave={(profile) => {
+            saveUserProfileState(profile);
+            closeProfileMenu();
+          }}
+          onClose={closeProfileMenu}
+        />
       ) : null}
       {settingsOpen ? (
         <SettingsDialog

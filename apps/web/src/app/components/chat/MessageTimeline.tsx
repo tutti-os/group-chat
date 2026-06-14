@@ -2,8 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProp
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Braces, BrainCircuit, CheckSquare, ChevronsDown, Copy, Edit3, FileText, MoreHorizontal, Reply, RotateCcw, SendToBack, Terminal, Trash2, Wrench, X } from "lucide-react";
-import type { Artifact, Conversation, Identity, Message, MessageBlock, Participant, Room, RuntimeProfile } from "@group-chat/shared";
+import { Braces, BrainCircuit, CheckSquare, ChevronsDown, Copy, Edit3, FileText, MoreHorizontal, Reply, RotateCcw, Terminal, Trash2, Wrench, X } from "lucide-react";
+import type { Artifact, AgentRun, AgentRunEvent, Conversation, Identity, Message, MessageBlock, Participant, Room, RuntimeProfile } from "@group-chat/shared";
 import { resolveMessageVisibility } from "@group-chat/shared";
 import { openArtifact } from "../../artifact-actions.js";
 import { formatBytes, formatMessageStatus } from "../../formatting.js";
@@ -58,6 +58,8 @@ export function MessageTimeline(props: {
   allMessages: Message[];
   blocks: MessageBlock[];
   artifacts: Artifact[];
+  agentRunEvents: AgentRunEvent[];
+  agentRuns: AgentRun[];
   participants: Participant[];
   allParticipants: Participant[];
   identities: Identity[];
@@ -84,6 +86,8 @@ export function MessageTimeline(props: {
   onDeleteMessage: (message: Message) => Promise<unknown>;
   onRecallMessage: (message: Message) => Promise<unknown>;
   userProfile: Pick<LocalUserProfile, "avatarPreset" | "customAvatarUrl">;
+  onOpenUserProfile: (anchor: HTMLElement) => void;
+  onViewThinking: (message: Message) => void;
 }) {
   const scrollRef = useRef<HTMLElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -312,6 +316,8 @@ export function MessageTimeline(props: {
           quotedMessage={resolveReferencedMessage(message, props.messages, props.allParticipants, props.identities)}
           blocks={props.blocks.filter((block) => block.messageId === message.id)}
           artifacts={props.artifacts}
+          agentRunEvents={props.agentRunEvents}
+          agentRuns={props.agentRuns}
           allMessages={props.allMessages}
           allParticipants={props.allParticipants}
           conversations={props.conversations}
@@ -320,6 +326,8 @@ export function MessageTimeline(props: {
           identities={props.identities}
           runtimeProfiles={props.runtimeProfiles}
           userProfile={props.userProfile}
+          onOpenUserProfile={props.onOpenUserProfile}
+          onViewThinking={props.onViewThinking}
           onOpenAgentProfile={props.onOpenAgentProfile}
           onMentionParticipant={mentionParticipantKeepingScroll}
           onOpenArtifact={handleOpenArtifact}
@@ -343,8 +351,6 @@ export function MessageTimeline(props: {
           onCloseMenu={closeOpenMessageMenu}
           onQuoteMessage={() => props.onQuoteMessages([message], "quote")}
           onSummarizeMessage={() => requestSummary([message])}
-          onSendToApp={() => props.onQuoteMessages([message], "send-to-app")}
-          onSendToAgent={() => props.onQuoteMessages([message], "send-to-agent")}
           onCopyMessage={(position) => void copyMessages([message], position)}
           onCopyMessageLink={(position) => void copyMessageLink(message.id, position)}
           onEditMessage={() => props.onEditMessage(message)}
@@ -572,6 +578,8 @@ function MessageRow(props: {
   quotedMessage: Message | null;
   blocks: MessageBlock[];
   artifacts: Artifact[];
+  agentRunEvents: AgentRunEvent[];
+  agentRuns: AgentRun[];
   allMessages: Message[];
   allParticipants: Participant[];
   conversations: Conversation[];
@@ -593,8 +601,6 @@ function MessageRow(props: {
   onCloseMenu: () => void;
   onQuoteMessage: () => void;
   onSummarizeMessage: () => void;
-  onSendToApp: () => void;
-  onSendToAgent: () => void;
   onCopyMessage: (position: CopyTipPosition) => void;
   onCopyMessageLink: (position: CopyTipPosition) => void;
   onEditMessage: () => void;
@@ -604,6 +610,8 @@ function MessageRow(props: {
   userProfile: Pick<LocalUserProfile, "avatarPreset" | "customAvatarUrl">;
   identities: Identity[];
   runtimeProfiles: RuntimeProfile[];
+  onOpenUserProfile: (anchor: HTMLElement) => void;
+  onViewThinking: (message: Message) => void;
 }) {
   const statusLabel = formatMessageStatus(props.message.status);
   const sortedBlocks = [...props.blocks].sort(compareMessageBlocks);
@@ -616,67 +624,82 @@ function MessageRow(props: {
     : null;
   const senderLabel = resolveMessageSenderLabel(props.message, props.participant, participantIdentity);
   const isWhisper = resolveMessageVisibility(props.message, props.allMessages) === "whisper";
-  return (
-    <article
-      data-message-id={props.message.id}
-      data-role={props.message.role}
-      data-whisper={isWhisper || undefined}
-      data-selected={props.selected || undefined}
-      className={`group/message [position:relative] [display:grid] [grid-template-columns:34px_minmax(0,_1fr)] [gap:8px] [margin-bottom:12px] [align-items:start] [border-radius:18px] [transition:background-color_0.2s_ease,_box-shadow_0.2s_ease] [&[data-selected=true]]:[background:#eaf2ff66] [&[data-flash=true]]:[background:#fef3c7] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] ${props.selectionMode ? "[padding-left:30px]" : ""} [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#c4b5fd] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[background:#faf5ff] [&[data-role=user]]:[grid-template-columns:minmax(0,_1fr)_34px] [&[data-role=user]_[data-slot=message-avatar]]:[grid-column:2] [&[data-role=user]_[data-slot=message-avatar]]:[grid-row:1] [&[data-role=user]_[data-slot=message-body]]:[grid-column:1] [&[data-role=user]_[data-slot=message-body]]:[grid-row:1] [&[data-role=user]_[data-slot=message-body]]:[width:fit-content] [&[data-role=user]_[data-slot=message-body]]:[justify-self:end] [&[data-role=user]_[data-slot=message-meta]]:[justify-content:flex-end] [&[data-role=user]_[data-slot=message-block]]:[margin-left:auto] [&[data-role=user]_[data-slot=message-block]:not([data-link-only])]:[border-color:transparent] [&[data-role=user]_[data-slot=message-block]:not([data-link-only])]:[background:#d6e9ff] [&[data-whisper=true][data-role=user]_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#c4b5fd] [&[data-whisper=true][data-role=user]_[data-slot=message-block]:not([data-link-only])]:[background:#f3e8ff] [&[data-role=user]_[data-slot=message-block][data-link-only]]:[background:transparent] [&[data-role=user]_[data-slot=message-block][data-link-only]]:[justify-items:end] [&[data-role=user]_[data-slot=message-block-shell]]:[margin-left:auto] [&[data-role=user]_[data-slot=event-block]]:[margin-left:auto] [&[data-role=user]_[data-slot=artifact-block]]:[margin-left:auto]`}
+
+  const messageAvatar = isUserMessage ? (
+    <button
+      data-slot="message-avatar"
+      data-profile-trigger="message-avatar"
+      type="button"
+      className={"[position:relative] [z-index:50] [display:inline-grid] [flex:0_0_auto] [width:34px] [height:34px] [overflow:hidden] [border:0] [border-radius:999px] [padding:0] [background:transparent] [cursor:pointer] [transition:transform_0.12s_ease] [&:hover]:[transform:translateY(-1px)] [&:focus-visible]:[outline:2px_solid_var(--accent)] [&:focus-visible]:[outline-offset:2px]"}
+      title="查看我的资料"
+      aria-label="查看我的资料"
+      onMouseDown={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        props.onOpenUserProfile(event.currentTarget);
+      }}
     >
-      {props.selectionMode ? (
-        <label className={"[position:absolute] [left:2px] [top:8px] [display:grid] [width:22px] [height:22px] [place-items:center] [cursor:pointer]"}>
-          <input className={"[width:16px] [height:16px] [accent-color:var(--primary)]"} type="checkbox" checked={props.selected} onChange={props.onToggleSelected} aria-label="选择消息" />
-        </label>
-      ) : null}
-      {props.participant ? (
-        <button
-          data-slot="message-avatar"
-          type="button"
-          className={"[position:relative] [display:inline-flex] [flex:0_0_auto] [align-items:center] [justify-content:center] [width:34px] [height:34px] [border:0] [padding:0] [background:transparent] [cursor:pointer] [transition:transform_0.12s_ease] [&:hover]:[transform:translateY(-1px)] [&:focus-visible]:[outline:2px_solid_var(--accent)] [&:focus-visible]:[outline-offset:2px]"}
-          title={`查看 ${props.participant.displayName}`}
-          aria-label={`查看 ${props.participant.displayName} 的 Agent 信息`}
-          onClick={() => props.onOpenAgentProfile(props.participant!)}
-        >
-          <MessageSenderAvatar
-            message={props.message}
-            participant={props.participant}
-            identity={participantIdentity}
-            runtimeProfiles={props.runtimeProfiles}
-            userProfile={props.userProfile}
-          />
-        </button>
-      ) : (
-        <div
-          data-slot="message-avatar"
-          className={isUserMessage
-            ? "[display:inline-grid] [flex:0_0_auto] [width:34px] [height:34px] [overflow:hidden] [border-radius:999px]"
-            : "[display:inline-flex] [flex:0_0_auto] [width:34px] [height:34px] [align-items:center] [justify-content:center]"}
-        >
-          <MessageSenderAvatar
-            message={props.message}
-            participant={props.participant}
-            identity={participantIdentity}
-            runtimeProfiles={props.runtimeProfiles}
-            userProfile={props.userProfile}
-          />
-        </div>
-      )}
-      <div data-slot="message-body" className={"[position:relative] [min-width:0] [max-width:min(760px,_70%)] max-[1080px]:[max-width:min(720px,_86%)] max-[760px]:[max-width:88%]"}>
+      <MessageSenderAvatar
+        message={props.message}
+        participant={props.participant}
+        identity={participantIdentity}
+        runtimeProfiles={props.runtimeProfiles}
+        userProfile={props.userProfile}
+        className={"[pointer-events:none]"}
+      />
+    </button>
+  ) : props.participant ? (
+    <button
+      data-slot="message-avatar"
+      type="button"
+      className={"[position:relative] [display:inline-flex] [flex:0_0_auto] [align-items:center] [justify-content:center] [width:34px] [height:34px] [border:0] [padding:0] [background:transparent] [cursor:pointer] [transition:transform_0.12s_ease] [&:hover]:[transform:translateY(-1px)] [&:focus-visible]:[outline:2px_solid_var(--accent)] [&:focus-visible]:[outline-offset:2px]"}
+      title={`查看 ${props.participant.displayName}`}
+      aria-label={`查看 ${props.participant.displayName} 的 Agent 信息`}
+      onClick={() => props.onOpenAgentProfile(props.participant!)}
+    >
+      <MessageSenderAvatar
+        message={props.message}
+        participant={props.participant}
+        identity={participantIdentity}
+        runtimeProfiles={props.runtimeProfiles}
+        userProfile={props.userProfile}
+      />
+    </button>
+  ) : (
+    <div
+      data-slot="message-avatar"
+      className={"[display:inline-flex] [flex:0_0_auto] [width:34px] [height:34px] [align-items:center] [justify-content:center]"}
+    >
+      <MessageSenderAvatar
+        message={props.message}
+        participant={props.participant}
+        identity={participantIdentity}
+        runtimeProfiles={props.runtimeProfiles}
+        userProfile={props.userProfile}
+      />
+    </div>
+  );
+
+  const messageBody = (
+    <div
+      data-slot="message-body"
+      className={`[position:relative] [min-width:0] [max-width:min(760px,_70%)] max-[1080px]:[max-width:min(720px,_86%)] max-[760px]:[max-width:88%] ${isUserMessage ? "[grid-column:1] [grid-row:1] [width:fit-content] [max-width:100%] [justify-self:end] [pointer-events:none] [&_*]:[pointer-events:auto]" : ""}`}
+    >
         {props.menuOpen ? (
           <MessageMoreMenu
             messageId={props.message.id}
             message={props.message}
-            hasParticipant={Boolean(props.participant && props.participant.status !== "removed")}
             onClose={props.onCloseMenu}
-            onMention={props.participant && props.participant.status !== "removed" ? () => props.onMentionParticipant(props.participant!) : null}
             onContinue={() => {
               if (props.participant && props.participant.status !== "removed") props.onMentionParticipant(props.participant);
               props.onQuoteMessage();
             }}
             onSummarize={props.onSummarizeMessage}
-            onSendToApp={props.onSendToApp}
-            onSendToAgent={props.onSendToAgent}
+            onViewThinking={() => props.onViewThinking(props.message)}
             onCopyLink={props.onCopyMessageLink}
             onEdit={props.onEditMessage}
             onDelete={props.onDeleteMessage}
@@ -742,6 +765,32 @@ function MessageRow(props: {
           </>
         )}
       </div>
+  );
+
+  return (
+    <article
+      data-message-id={props.message.id}
+      data-role={props.message.role}
+      data-whisper={isWhisper || undefined}
+      data-selected={props.selected || undefined}
+      className={`group/message [position:relative] [display:grid] [grid-template-columns:34px_minmax(0,_1fr)] [gap:8px] [margin-bottom:12px] [align-items:start] [border-radius:18px] [transition:background-color_0.2s_ease,_box-shadow_0.2s_ease] [&[data-selected=true]]:[background:#eaf2ff66] [&[data-flash=true]]:[background:#fef3c7] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] ${props.selectionMode ? "[padding-left:30px]" : ""} [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#c4b5fd] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[background:#faf5ff] [&[data-role=user]]:[grid-template-columns:minmax(0,_1fr)_34px] [&[data-role=user]_[data-slot=message-avatar]]:[grid-column:2] [&[data-role=user]_[data-slot=message-avatar]]:[grid-row:1] [&[data-role=user]_[data-slot=message-body]]:[grid-column:1] [&[data-role=user]_[data-slot=message-body]]:[grid-row:1] [&[data-role=user]_[data-slot=message-meta]]:[justify-content:flex-end] [&[data-role=user]_[data-slot=message-block]]:[margin-left:auto] [&[data-role=user]_[data-slot=message-block]:not([data-link-only])]:[border-color:transparent] [&[data-role=user]_[data-slot=message-block]:not([data-link-only])]:[background:#d6e9ff] [&[data-whisper=true][data-role=user]_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#c4b5fd] [&[data-whisper=true][data-role=user]_[data-slot=message-block]:not([data-link-only])]:[background:#f3e8ff] [&[data-role=user]_[data-slot=message-block][data-link-only]]:[background:transparent] [&[data-role=user]_[data-slot=message-block][data-link-only]]:[justify-items:end] [&[data-role=user]_[data-slot=message-block-shell]]:[margin-left:auto] [&[data-role=user]_[data-slot=event-block]]:[margin-left:auto] [&[data-role=user]_[data-slot=artifact-block]]:[margin-left:auto]`}
+    >
+      {props.selectionMode ? (
+        <label className={"[position:absolute] [left:2px] [top:8px] [display:grid] [width:22px] [height:22px] [place-items:center] [cursor:pointer]"}>
+          <input className={"[width:16px] [height:16px] [accent-color:var(--primary)]"} type="checkbox" checked={props.selected} onChange={props.onToggleSelected} aria-label="选择消息" />
+        </label>
+      ) : null}
+      {isUserMessage ? (
+        <>
+          {messageBody}
+          {messageAvatar}
+        </>
+      ) : (
+        <>
+          {messageAvatar}
+          {messageBody}
+        </>
+      )}
     </article>
   );
 }
@@ -790,13 +839,10 @@ function MessageActionBar(props: {
 function MessageMoreMenu(props: {
   messageId: string;
   message: Message;
-  hasParticipant: boolean;
   onClose: () => void;
-  onMention: (() => void) | null;
   onContinue: () => void;
   onSummarize: () => void;
-  onSendToApp: () => void;
-  onSendToAgent: () => void;
+  onViewThinking: () => void;
   onCopyLink: (position: CopyTipPosition) => void;
   onEdit: () => void;
   onDelete: () => Promise<unknown>;
@@ -868,7 +914,7 @@ function MessageMoreMenu(props: {
     updateMenuPosition();
     const frame = window.requestAnimationFrame(() => updateMenuPosition());
     return () => window.cancelAnimationFrame(frame);
-  }, [updateMenuPosition, props.message.id, props.hasParticipant, isAssistant, isUser]);
+  }, [updateMenuPosition, props.message.id, isAssistant, isUser]);
 
   useEffect(() => {
     const handleReposition = () => updateMenuPosition();
@@ -890,11 +936,9 @@ function MessageMoreMenu(props: {
       onPointerDown={(event) => event.stopPropagation()}
     >
       <MenuButton icon={<CheckSquare size={14} />} label="多选" onClick={() => void run(props.onSelect)} />
-      {props.onMention ? <MenuButton icon={<SendToBack size={14} />} label="@ 这个 Agent" onClick={() => void run(props.onMention!)} /> : null}
       {isAssistant ? <MenuButton icon={<RotateCcw size={14} />} label="继续追问" onClick={() => void run(props.onContinue)} /> : null}
       <MenuButton icon={<BrainCircuit size={14} />} label="总结" onClick={() => void run(props.onSummarize)} />
-      <MenuButton icon={<SendToBack size={14} />} label="发送给应用" onClick={() => void run(props.onSendToApp)} />
-      <MenuButton icon={<SendToBack size={14} />} label="发送给 Agent" onClick={() => void run(props.onSendToAgent)} />
+      {isAssistant ? <MenuButton icon={<BrainCircuit size={14} />} label="查看思考过程" onClick={() => void run(props.onViewThinking)} /> : null}
       <MenuButton icon={<Copy size={14} />} label="复制消息链接" onClick={(event) => void run(() => props.onCopyLink({ x: event.clientX, y: event.clientY }))} />
       {isUser ? <MenuButton icon={<Edit3 size={14} />} label="编辑并重新回复" onClick={() => void run(props.onEdit)} /> : null}
       {isUser ? <MenuButton icon={<RotateCcw size={14} />} label="撤回" danger onClick={() => void run(props.onRecall)} /> : null}
@@ -1256,6 +1300,7 @@ function MessageSenderAvatar(props: {
   runtimeProfiles: RuntimeProfile[];
   userProfile: Pick<LocalUserProfile, "avatarPreset" | "customAvatarUrl">;
   size?: UserAvatarSize;
+  className?: string;
 }) {
   const size = props.size ?? 34;
   if (props.message.role === "user") {
@@ -1264,6 +1309,7 @@ function MessageSenderAvatar(props: {
         size={size}
         preset={props.userProfile.avatarPreset}
         customAvatarUrl={props.userProfile.customAvatarUrl}
+        className={props.className}
       />
     );
   }
@@ -1391,7 +1437,7 @@ function MessageBlockShell(props: {
   return (
     <div
       data-slot="message-block-shell"
-      className={`group/block [position:relative] [width:fit-content] [max-width:100%] ${isUser ? "before:[content:''] before:[position:absolute] before:[top:0] before:[left:calc(-1_*_var(--message-action-bridge))] before:[height:100%] before:[width:var(--message-action-bridge)]" : "after:[content:''] after:[position:absolute] after:[top:0] after:[right:calc(-1_*_var(--message-action-bridge))] after:[height:100%] after:[width:var(--message-action-bridge)]"}`}
+      className={`group/block [position:relative] [width:fit-content] [max-width:100%] ${isUser ? "before:[content:''] before:[position:absolute] before:[top:0] before:[left:calc(-1_*_var(--message-action-bridge))] before:[height:100%] before:[width:var(--message-action-bridge)] before:[pointer-events:none]" : "after:[content:''] after:[position:absolute] after:[top:0] after:[right:calc(-1_*_var(--message-action-bridge))] after:[height:100%] after:[width:var(--message-action-bridge)] after:[pointer-events:none]"}`}
       style={{ ["--message-action-bridge" as string]: `${MESSAGE_ACTION_BAR_BRIDGE_PX}px` }}
       onMouseEnter={showActions}
       onMouseLeave={hideActions}

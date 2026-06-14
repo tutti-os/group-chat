@@ -89,6 +89,7 @@ export class ChatRepository {
       activeRuns: (
         db.prepare(`SELECT * FROM agent_runs WHERE status IN ('accepted', 'running')`).all() as any[]
       ).map(rowToAgentRun),
+      agentRuns: (db.prepare(`SELECT * FROM agent_runs ORDER BY created_at ASC`).all() as any[]).map(rowToAgentRun),
       lastSeq: (db.prepare(`SELECT COALESCE(MAX(seq), 0) AS seq FROM stream_events`).get() as { seq: number })
         .seq,
     };

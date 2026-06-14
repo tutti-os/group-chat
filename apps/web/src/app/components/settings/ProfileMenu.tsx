@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { X } from "lucide-react";
 import type { LocalUserProfile } from "../../user-profile.js";
 import { AvatarPicker } from "../ui/AvatarPicker.js";
 import { AvatarUploadButton } from "../ui/AvatarUploadButton.js";
@@ -6,11 +7,15 @@ import { AvatarUploadButton } from "../ui/AvatarUploadButton.js";
 export function ProfileMenu(props: {
   menuRef?: RefObject<HTMLDivElement | null>;
   profile: LocalUserProfile;
-  anchor?: "rail" | "mobile";
+  anchor?: "rail" | "mobile" | "chat";
+  anchorEl?: HTMLElement | null;
   onSave: (profile: LocalUserProfile) => void;
+  onClose: () => void;
 }) {
   const [draft, setDraft] = useState<LocalUserProfile>(props.profile);
+  const [chatPosition, setChatPosition] = useState<CSSProperties | undefined>();
   const nameRef = useRef<HTMLInputElement | null>(null);
+  const localMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setDraft(props.profile);
@@ -21,10 +26,58 @@ export function ProfileMenu(props: {
     nameRef.current?.select();
   }, []);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") props.onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [props.onClose]);
+
+  useLayoutEffect(() => {
+    if (props.anchor !== "chat" || !props.anchorEl) {
+      setChatPosition(undefined);
+      return;
+    }
+
+    const updatePosition = () => {
+      const anchorRect = props.anchorEl!.getBoundingClientRect();
+      const menuNode = localMenuRef.current;
+      const menuWidth = menuNode?.offsetWidth ?? 340;
+      const menuHeight = menuNode?.offsetHeight ?? 420;
+      const gutter = 10;
+      const viewportPadding = 12;
+
+      let left = anchorRect.right + gutter;
+      let top = anchorRect.top;
+
+      if (left + menuWidth > window.innerWidth - viewportPadding) {
+        left = Math.max(viewportPadding, anchorRect.left - menuWidth - gutter);
+      }
+      if (top + menuHeight > window.innerHeight - viewportPadding) {
+        top = Math.max(viewportPadding, window.innerHeight - menuHeight - viewportPadding);
+      }
+
+      setChatPosition({ position: "fixed", top, left, zIndex: 70 });
+    };
+
+    updatePosition();
+    const frame = window.requestAnimationFrame(updatePosition);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [props.anchor, props.anchorEl]);
+
   const positionClass =
     props.anchor === "mobile"
       ? "[position:fixed] [top:12px] [left:12px] [z-index:60]"
-      : "[position:absolute] [top:0] [left:calc(100%+8px)] [z-index:60]";
+      : props.anchor === "chat"
+        ? ""
+        : "[position:absolute] [top:0] [left:calc(100%+10px)] [z-index:60]";
 
   const save = () => {
     const next: LocalUserProfile = {
@@ -36,52 +89,85 @@ export function ProfileMenu(props: {
 
   return (
     <div
-      ref={props.menuRef}
-      className={`${positionClass} [width:min(320px,_calc(100vw_-_24px))] [border-radius:20px] [padding:14px] [background:#ffffff] [box-shadow:0_18px_60px_rgb(0_0_0_/_18%)]`}
+      ref={(node) => {
+        localMenuRef.current = node;
+        if (props.menuRef) props.menuRef.current = node;
+      }}
+      style={props.anchor === "chat" ? chatPosition : undefined}
+      className={`${positionClass} [width:min(340px,_calc(100vw_-_24px))] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:18px] [background:#ffffff] [box-shadow:0_20px_56px_rgb(0_0_0_/_16%),_0_2px_8px_rgb(0_0_0_/_6%)]`}
       role="dialog"
       aria-label="编辑个人资料"
+      onMouseDown={(event) => event.stopPropagation()}
     >
-      <div className={"[display:flex] [align-items:flex-start] [gap:12px] [margin-bottom:12px]"}>
+      <header className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:12px] [padding:14px_16px_0]"}>
+        <h2 className={"[margin:0] [color:var(--text)] [font-size:15px] [font-weight:680] [line-height:1.2]"}>个人资料</h2>
+        <button
+          type="button"
+          className={"[display:grid] [width:30px] [height:30px] [flex-shrink:0] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000008]"}
+          aria-label="关闭"
+          title="关闭"
+          onClick={props.onClose}
+        >
+          <X size={16} />
+        </button>
+      </header>
+
+      <div className={"[display:flex] [align-items:center] [gap:14px] [padding:14px_16px_0]"}>
         <AvatarUploadButton
           size={58}
           preset={draft.avatarPreset}
           customAvatarUrl={draft.customAvatarUrl}
           onUpload={(customAvatarUrl) => setDraft((current) => ({ ...current, customAvatarUrl }))}
         />
-        <div className={"[display:grid] [gap:4px] [min-width:0] [flex:1]"}>
-          <label className={"[color:var(--muted)] [font-size:11px] [font-weight:680]"} htmlFor="profile-display-name">
+        <div className={"[display:grid] [gap:6px] [min-width:0] [flex:1]"}>
+          <label className={"[color:var(--muted)] [font-size:11px] [font-weight:650] [line-height:1]"} htmlFor="profile-display-name">
             名称
           </label>
           <input
             id="profile-display-name"
             ref={nameRef}
-            className={"[width:100%] [height:36px] [border:1px_solid_var(--border-strong)] [border-radius:10px] [padding:0_10px] [color:var(--text)] [background:#f7f7f8] [font-size:14px] [font-weight:650] [outline:none] focus:[border-color:var(--primary)]"}
+            className={"[width:100%] [height:38px] [border:1px_solid_var(--border)] [border-radius:11px] [padding:0_11px] [color:var(--text)] [background:#ffffff] [font-size:14px] [font-weight:620] [outline:none] focus:[border-color:var(--border-strong)] focus:[box-shadow:0_0_0_3px_#00000008]"}
             value={draft.displayName}
             maxLength={32}
+            placeholder="输入名称"
             onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))}
             onKeyDown={(event) => {
               if (event.key === "Enter") save();
             }}
           />
-          <span className={"[color:var(--muted)] [font-size:11px]"}>Local workspace</span>
+          <span className={"[display:inline-flex] [width:fit-content] [align-items:center] [height:20px] [border-radius:999px] [padding:0_8px] [color:var(--muted)] [background:#f4f4f5] [font-size:10px] [font-weight:650] [line-height:1]"}>
+            Local workspace
+          </span>
         </div>
       </div>
 
-      <AvatarPicker
-        compact
-        profile={draft}
-        onChange={(next) => setDraft((current) => ({ ...current, ...next }))}
-      />
+      <section className={"[padding:16px_16px_0]"}>
+        <h3 className={"[margin:0_0_10px] [color:var(--muted)] [font-size:11px] [font-weight:650] [line-height:1] [letter-spacing:0.02em]"}>
+          选择头像
+        </h3>
+        <AvatarPicker
+          compact
+          profile={draft}
+          onChange={(next) => setDraft((current) => ({ ...current, ...next }))}
+        />
+      </section>
 
-      <div className={"[display:flex] [justify-content:flex-end] [gap:8px] [margin-top:14px] [padding-top:12px] [border-top:1px_solid_var(--border)]"}>
+      <footer className={"[display:flex] [justify-content:flex-end] [gap:8px] [margin-top:16px] [padding:12px_16px_14px] [border-top:1px_solid_var(--border)]"}>
         <button
           type="button"
-          className={"[display:inline-flex] [height:34px] [align-items:center] [justify-content:center] [border:0] [border-radius:10px] [padding:0_14px] [color:var(--primary-contrast)] [background:var(--primary)] [font-size:13px] [font-weight:700]"}
+          className={"[display:inline-flex] [height:34px] [align-items:center] [justify-content:center] [border:1px_solid_var(--border)] [border-radius:10px] [padding:0_14px] [color:var(--text)] [background:#ffffff] [font-size:13px] [font-weight:650] [&:hover]:[background:#fafafa]"}
+          onClick={props.onClose}
+        >
+          取消
+        </button>
+        <button
+          type="button"
+          className={"[display:inline-flex] [height:34px] [align-items:center] [justify-content:center] [border:0] [border-radius:10px] [padding:0_14px] [color:var(--primary-contrast)] [background:var(--primary)] [font-size:13px] [font-weight:700] [&:hover]:[background:#2563eb]"}
           onClick={save}
         >
           保存
         </button>
-      </div>
+      </footer>
     </div>
   );
 }

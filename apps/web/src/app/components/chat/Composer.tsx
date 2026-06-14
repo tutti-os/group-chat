@@ -218,7 +218,12 @@ export function Composer(props: {
     syncMentionedIds(nextText);
     if (editor) captureActiveMentionQueryRange(editor);
     updateMentionQuery(nextText, cursor);
+    resizeComposerEditor(editor);
   };
+
+  useLayoutEffect(() => {
+    resizeComposerEditor(editorRef.current);
+  }, [text, quotes.length, uploadItems.length, props.conversationId]);
 
   const insertMentionChipAtActiveQuery = (label: string, mentionId: string): boolean => {
     const editor = editorRef.current;
@@ -589,7 +594,7 @@ export function Composer(props: {
             onRemoveUpload={removeUploadItem}
             onOpenUpload={openUploadItem}
           />
-          <div className={"[position:relative] [height:28px] [display:grid] [align-items:start]"}>
+          <div className={"[position:relative] [min-height:28px] [display:grid] [align-items:start]"}>
             {!text ? (
               <span className={"[pointer-events:none] [position:absolute] [left:0] [top:4px] [color:#17171755] [font-size:13px] [line-height:20px]"}>
                 发送消息，输入 / 使用命令...
@@ -602,7 +607,7 @@ export function Composer(props: {
               aria-multiline="true"
               contentEditable
               suppressContentEditableWarning
-              className={"[height:28px] [max-height:28px] [overflow-y:auto] [outline:none] [white-space:pre-wrap] [overflow-wrap:anywhere] [color:var(--text)] [font-size:13px] [line-height:20px] [padding:4px_0] empty:before:[content:'']"}
+              className={"[min-height:28px] [max-height:168px] [overflow-y:hidden] [outline:none] [white-space:pre-wrap] [overflow-wrap:anywhere] [color:var(--text)] [font-size:13px] [line-height:20px] [padding:4px_0] empty:before:[content:'']"}
               onInput={syncEditorText}
               onClick={syncEditorText}
               onPaste={pasteFiles}
@@ -783,11 +788,27 @@ function editorText(editor: HTMLDivElement | null) {
   return editor ? nodeTextValue(editor).replace(/\n$/, "") : "";
 }
 
+const COMPOSER_EDITOR_MIN_HEIGHT = 28;
+const COMPOSER_EDITOR_MAX_HEIGHT = 168;
+
+function resizeComposerEditor(editor: HTMLDivElement | null) {
+  if (!editor) return;
+  editor.style.height = "0px";
+  const scrollHeight = editor.scrollHeight;
+  const nextHeight = Math.min(
+    COMPOSER_EDITOR_MAX_HEIGHT,
+    Math.max(COMPOSER_EDITOR_MIN_HEIGHT, scrollHeight),
+  );
+  editor.style.height = `${nextHeight}px`;
+  editor.style.overflowY = scrollHeight > COMPOSER_EDITOR_MAX_HEIGHT ? "auto" : "hidden";
+}
+
 function setEditorText(editor: HTMLDivElement | null, value: string, cursor: number) {
   if (!editor) return;
   editor.textContent = value;
   editor.focus();
   setCaretTextOffset(editor, cursor);
+  resizeComposerEditor(editor);
 }
 
 function focusEditorAtEnd(editor: HTMLDivElement | null) {

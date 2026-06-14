@@ -408,6 +408,7 @@ function buildKitSystemPrompt(context: RuntimeReplyContext) {
     "Reply as the current participant, not as the host application.",
     "Your normal text output is already streamed to the current conversation as your reply.",
     "Do not use tools to send the same reply again. Only use messaging tools for intentional additional side messages.",
+    "When the user asks you to create or provide a file, image, video, or other generated asset, create it in the local workspace or save it with the artifact tool, then include the resulting local filesystem path in your normal final text so the user can open it. Do not send an extra group-chat message or attach it to the conversation unless the user explicitly asks you to post it to the group.",
     "If the current message does not need your response, output [NO_REPLY] as your entire output.",
     context.conversation.type === "group" && context.participant.listenMode === "active"
       ? "In active group listen mode, most messages should be ignored with [NO_REPLY] unless they clearly address you, mention all agents, ask for your expertise, or need a substantive contribution. Do not engage in agent-to-agent small talk."

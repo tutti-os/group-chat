@@ -52,6 +52,7 @@ export function AppNavRail(props: {
   profileMenuRef: RefObject<HTMLDivElement | null>;
   userProfile: LocalUserProfile;
   onSaveProfile: (profile: LocalUserProfile) => void;
+  onCloseProfileMenu: () => void;
   totalUnreadCount?: number;
 }) {
   return (
@@ -79,6 +80,7 @@ export function AppNavRail(props: {
             profile={props.userProfile}
             anchor="rail"
             onSave={props.onSaveProfile}
+            onClose={props.onCloseProfileMenu}
           />
         ) : null}
       </div>

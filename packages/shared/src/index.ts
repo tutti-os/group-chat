@@ -313,6 +313,7 @@ export interface ChatSnapshot {
   messageBlocks: MessageBlock[];
   agentRunEvents: AgentRunEvent[];
   artifacts: Artifact[];
+  agentRuns: AgentRun[];
   activeRuns: AgentRun[];
   lastSeq: number;
 }

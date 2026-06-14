@@ -29,6 +29,7 @@ export const emptyState: AppState = {
   messageBlocks: [],
   agentRunEvents: [],
   artifacts: [],
+  agentRuns: [],
   activeRuns: [],
   lastSeq: 0,
 };
@@ -98,6 +99,7 @@ export function applyEvent(state: AppState, event: StreamEvent): AppState {
               withSeq.activeRuns,
               enrichAgentRun(payload.run as AgentRun, withSeq.messages),
             ),
+            agentRuns: upsert(withSeq.agentRuns, payload.run as AgentRun),
           }
         : withSeq;
     case "run.completed":
@@ -107,6 +109,7 @@ export function applyEvent(state: AppState, event: StreamEvent): AppState {
       return {
         ...withSeq,
         activeRuns: runId ? state.activeRuns.filter((run) => run.id !== runId) : state.activeRuns,
+        agentRuns: payload.run ? upsert(state.agentRuns, payload.run as AgentRun) : state.agentRuns,
       };
     }
     default:
@@ -202,6 +205,7 @@ export function removeDeletedRoom(state: AppState, roomId: string | null, conver
     artifacts: state.artifacts.filter(
       (artifact) => artifact.roomId !== roomId && artifact.conversationId !== conversationId,
     ),
+    agentRuns: state.agentRuns.filter((run) => run.roomId !== roomId && run.conversationId !== conversationId),
     activeRuns: state.activeRuns.filter((run) => run.roomId !== roomId && run.conversationId !== conversationId),
   };
 }
