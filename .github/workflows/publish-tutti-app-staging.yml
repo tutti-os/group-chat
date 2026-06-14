@@ -1,0 +1,43 @@
+name: Publish Tutti App Staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: Optional release version override. Defaults to the automatic manifest patch bump.
+        required: false
+        type: string
+      publish_catalog:
+        description: Whether to publish the staging App Center catalog after this release.
+        required: false
+        type: boolean
+        default: false
+      catalog_only:
+        description: Whether to skip app release upload and only publish the existing latest release to staging catalog.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  publish:
+    uses: tutti-os/tutti/.github/workflows/publish-tutti-app-release.yml@main
+    with:
+      app_id: group-chat
+      package_command: pnpm package:tutti
+      package_dir: build/tutti-app/package
+      icon_path: build/tutti-app/package/icon.svg
+      release_version: ${{ inputs.release_version || '' }}
+      runner: macos-latest
+      pnpm_version: 10.11.0
+      aws_region: ${{ vars.TUTTI_APP_RELEASES_STAGING_AWS_REGION || vars.TUTTI_APP_RELEASES_AWS_REGION }}
+      aws_role_arn: ${{ vars.TUTTI_APP_RELEASES_STAGING_AWS_ROLE_ARN || vars.TUTTI_APP_RELEASES_AWS_ROLE_ARN }}
+      s3_bucket: ${{ vars.TUTTI_APP_RELEASES_STAGING_S3_BUCKET || vars.TUTTI_APP_RELEASES_S3_BUCKET }}
+      s3_prefix: ${{ vars.TUTTI_APP_RELEASES_STAGING_S3_PREFIX || 'tutti-app-releases-staging' }}
+      release_assets_base_url: ${{ vars.TUTTI_APP_RELEASES_STAGING_BASE_URL || 'https://d1x7gb6wqsqmnm.cloudfront.net/tutti-app-releases-staging' }}
+      publish_catalog: ${{ inputs.publish_catalog }}
+      catalog_only: ${{ inputs.catalog_only }}
+      catalog_cloudfront_distribution_id: ${{ vars.TUTTI_APP_RELEASES_STAGING_CLOUDFRONT_DISTRIBUTION_ID || vars.TUTTI_APP_RELEASES_CLOUDFRONT_DISTRIBUTION_ID || '' }}

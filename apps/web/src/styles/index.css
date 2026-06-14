@@ -1,0 +1,219 @@
+@layer theme, base, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@theme inline {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Tahoma, "PingFang SC", "Microsoft YaHei", Arial, "Hiragino Sans GB", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --color-app-bg: var(--bg);
+  --color-app-panel: var(--panel);
+  --color-app-panel-2: var(--panel-2);
+  --color-app-border: var(--border);
+  --color-app-border-strong: var(--border-strong);
+  --color-app-text: var(--text);
+  --color-app-muted: var(--muted);
+  --color-app-primary: var(--primary);
+  --color-app-accent: var(--accent);
+  --color-app-danger: var(--danger);
+  --shadow-app: var(--shadow);
+  --shadow-app-soft: var(--shadow-soft);
+}
+
+@layer base {
+  :root {
+    font-family: var(--font-sans);
+    color: #171717;
+    background: #f5f5f5;
+    --bg: #f5f5f5;
+    --panel: #ffffff;
+    --panel-2: #f3f4f6;
+    --border: #0000000f;
+    --border-strong: #0000001a;
+    --text: #171717;
+    --muted: #737373;
+    --primary: #171717;
+    --primary-contrast: #ffffff;
+    --accent: #3b82f6;
+    --accent-soft: #3b82f61f;
+    --accent-hover: #3b82f62e;
+    --danger: #dc2626;
+    --agent-bubble: #00000008;
+    --own-bubble: #3b82f61f;
+    --sidebar-hover: #00000008;
+    --tag-agent: #eef2ff;
+    --tag-agent-text: #6366f1;
+    --mention-all: #d6e6fb;
+    --focus-ring: #3b82f64d;
+    --shadow: 0 6px 18px rgb(0 0 0 / 8%);
+    --shadow-soft: 0 1px 2px rgb(0 0 0 / 4%);
+    --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%231c1c1f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  }
+
+  *,
+  ::before,
+  ::after {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  button,
+  textarea,
+  input,
+  select {
+    font: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  button:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible,
+  [role="button"]:focus-visible {
+    outline: 2px solid #3b82f64d;
+    outline-offset: 2px;
+  }
+
+  button:disabled {
+    cursor: default;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.message-prose {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.58;
+}
+
+.message-prose p {
+  margin: 0 0 8px;
+}
+
+.message-prose p:last-child {
+  margin-bottom: 0;
+}
+
+.message-prose h1,
+.message-prose h2,
+.message-prose h3,
+.message-prose h4 {
+  margin: 0.65em 0 0.35em;
+  color: var(--text);
+  font-weight: 700;
+  line-height: 1.28;
+}
+
+.message-prose h1:first-child,
+.message-prose h2:first-child,
+.message-prose h3:first-child,
+.message-prose h4:first-child {
+  margin-top: 0;
+}
+
+.message-prose h1 {
+  font-size: 18px;
+}
+
+.message-prose h2 {
+  font-size: 15px;
+}
+
+.message-prose h3,
+.message-prose h4 {
+  font-size: 14px;
+}
+
+.message-prose ul,
+.message-prose ol {
+  margin: 6px 0 8px;
+  padding-left: 1.35em;
+}
+
+.message-prose ul {
+  list-style: disc;
+}
+
+.message-prose ol {
+  list-style: decimal;
+}
+
+.message-prose li {
+  margin: 2px 0;
+}
+
+.message-prose li > p {
+  margin: 0;
+}
+
+.message-prose a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.message-prose code:not(pre code) {
+  border-radius: 4px;
+  padding: 1px 4px;
+  background: #0000000d;
+  font-size: 0.92em;
+}
+
+.message-prose pre {
+  max-width: 100%;
+  margin: 8px 0;
+  overflow-x: auto;
+  border-radius: 10px;
+  padding: 10px;
+  color: #262626;
+  background: #ffffff;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.message-prose blockquote {
+  margin: 8px 0;
+  border-left: 3px solid var(--border-strong);
+  padding-left: 10px;
+  color: var(--muted);
+}
+
+.message-prose table {
+  width: 100%;
+  margin: 8px 0;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.message-prose th,
+.message-prose td {
+  border: 1px solid var(--border);
+  padding: 5px 7px;
+  text-align: left;
+}
+
+.message-prose th {
+  background: #00000008;
+}

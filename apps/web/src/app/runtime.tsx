@@ -1,0 +1,146 @@
+import { Info, RefreshCw, Terminal } from "lucide-react";
+import type { LocalAgentProviderStatus, RuntimeProfile } from "@group-chat/shared";
+
+export function runtimeOptionLabel(profile: RuntimeProfile, localAgentProviders: LocalAgentProviderStatus[]) {
+  const status = localAgentStatus(profile, localAgentProviders);
+  if (!status) return `${profile.displayName} · Detecting`;
+  return `${profile.displayName} · ${status.available ? "Ready" : "Unready"}`;
+}
+
+export function runtimeStatusSummary(profile: RuntimeProfile | null, localAgentProviders: LocalAgentProviderStatus[]) {
+  if (!profile) return "No runtime";
+  if (profile.kind !== "local-agent") return "Server runtime";
+  const status = localAgentStatus(profile, localAgentProviders);
+  if (!status) return "Detecting";
+  return status.available ? "Ready" : "Needs setup";
+}
+
+export function localAgentStatus(profile: RuntimeProfile | null, localAgentProviders: LocalAgentProviderStatus[]) {
+  if (!profile || profile.kind !== "local-agent") return null;
+  return localAgentProviders.find((item) => item.provider === profile.provider) ?? null;
+}
+
+export function listRuntimeModels(
+  profile: RuntimeProfile | null,
+  localAgentProviders: LocalAgentProviderStatus[],
+) {
+  if (!profile) return [];
+  const detected = localAgentStatus(profile, localAgentProviders)?.models ?? [];
+  if (detected.length) return detected;
+  if (profile.model) return [{ id: profile.model, label: profile.model }];
+  return [];
+}
+
+function isCanonicalLocalAgentProfile(profile: RuntimeProfile) {
+  return profile.kind === "local-agent" && profile.id === `local-agent:${profile.provider}`;
+}
+
+export function listCanonicalRuntimeProfiles(profiles: RuntimeProfile[]) {
+  return profiles.filter((profile) => profile.kind !== "local-agent" || isCanonicalLocalAgentProfile(profile));
+}
+
+export function resolveCanonicalRuntimeProfile(profile: RuntimeProfile | null, profiles: RuntimeProfile[]) {
+  if (!profile) return null;
+  if (isCanonicalLocalAgentProfile(profile)) return profile;
+  return (
+    profiles.find(
+      (item) =>
+        item.kind === "local-agent" &&
+        item.provider === profile.provider &&
+        isCanonicalLocalAgentProfile(item),
+    ) ?? profile
+  );
+}
+
+export function RuntimeStatusHint(props: {
+  profile: RuntimeProfile | null;
+  localAgentProviders: LocalAgentProviderStatus[];
+}) {
+  if (!props.profile) {
+    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap] [color:var(--danger)]"}>No runtime selected.</span>;
+  }
+  if (props.profile.kind !== "local-agent") {
+    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>Server-hosted runtime.</span>;
+  }
+  const status = localAgentStatus(props.profile, props.localAgentProviders);
+  if (!status) {
+    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>Detecting local provider...</span>;
+  }
+  if (!status.available) {
+    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap] [color:var(--danger)]"}>Needs setup · {status.reason ?? "Provider is unavailable."}</span>;
+  }
+  const version = status.version && status.version !== "not-installed" ? status.version : null;
+  return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap] [color:#16a34a]"}>Ready{version ? ` · ${version}` : ""}</span>;
+}
+
+function providerStatusLine(profile: RuntimeProfile, status: LocalAgentProviderStatus | null) {
+  if (!status) return `${profile.provider} · Detecting`;
+  const modelCount = status.models.length;
+  const modelLabel = modelCount === 1 ? "1 model" : `${modelCount} models`;
+  return status.available ? `Ready · ${status.version} · ${modelLabel}` : `Needs setup · ${status.reason ?? "Unavailable"}`;
+}
+
+function providerDetailLine(status: LocalAgentProviderStatus | null) {
+  if (!status) return "Waiting for provider detection";
+  if (!status.available) return status.reason ?? "Provider unavailable";
+  return status.executablePath || status.configDir || "Available";
+}
+
+function uniqueBy<TItem, TKey>(items: TItem[], getKey: (item: TItem) => TKey) {
+  const seen = new Set<TKey>();
+  return items.filter((item) => {
+    const key = getKey(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export function LocalAgentProvidersPanel(props: {
+  runtimeProfiles: RuntimeProfile[];
+  localAgentProviders: LocalAgentProviderStatus[];
+  refreshing: boolean;
+  onRefresh: () => Promise<void>;
+}) {
+  const localProfiles = props.runtimeProfiles.filter((profile) => profile.kind === "local-agent");
+  const providers = uniqueBy(
+    localProfiles.map((profile) => ({
+      profile,
+      status: localAgentStatus(profile, props.localAgentProviders),
+    })),
+    (item) => item.profile.provider,
+  );
+  return (
+    <section className={"[margin:8px] [overflow:hidden] [border:0] [border-top:1px_solid_var(--border)] [border-radius:0] [background:transparent]"} aria-label="Local providers">
+      <div className={"[&_h3]:[margin:0] [&_h3]:[color:var(--text)] [&_h3]:[font-size:13px] [&_h3]:[font-weight:650] [&_span]:[display:block] [&_span]:[margin-top:3px] [display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [padding:12px] [border-bottom:0] [&_span]:[color:var(--muted)] [&_span]:[font-size:11px]"}>
+        <div>
+          <h3>Local providers</h3>
+          <span>{providers.length} configured</span>
+        </div>
+        <button
+          type="button"
+          className={"[display:inline-grid] [place-items:center] [border:0] [width:34px] [height:34px] [border-radius:12px] [color:var(--muted)] [background:#00000008] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [width:28px] [height:28px] [&:disabled]:[opacity:0.45]"}
+          title="Refresh local providers"
+          aria-label="Refresh local providers"
+          disabled={props.refreshing}
+          onClick={() => void props.onRefresh()}
+        >
+          <RefreshCw size={14} className={props.refreshing ? "[animation:spin_0.9s_linear_infinite]" : ""} />
+        </button>
+      </div>
+      <div className={"[display:grid] [gap:4px] [padding:8px]"}>
+        {providers.map(({ profile, status }) => (
+          <div key={profile.provider} className={`[&_strong]:[display:block] [&_strong]:[min-width:0] [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:[display:block] [&_span]:[min-width:0] [&_span]:[overflow:hidden] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_small]:[display:block] [&_small]:[min-width:0] [&_small]:[overflow:hidden] [&_small]:[text-overflow:ellipsis] [&_small]:[white-space:nowrap] [&_small]:[color:var(--muted)] [&_small]:[font-size:12px] [&_small]:[font-size:11px] [display:grid] [grid-template-columns:22px_minmax(0,_1fr)] [gap:8px] [align-items:start] [border-radius:12px] [padding:9px] [color:var(--muted)] [background:transparent] [&_strong]:[color:var(--text)] [&_strong]:[font-size:12px] [&_span]:[margin-top:2px] [&_span]:[font-size:12px] [&_span]:[font-weight:650] ${status?.available ? "[color:#16a34a]" : "[color:var(--danger)]"}`}>
+            <Terminal size={15} />
+            <div>
+              <strong>{status?.displayName ?? profile.displayName}</strong>
+              <span>{providerStatusLine(profile, status)}</span>
+              <small title={status?.executablePath || undefined}>{providerDetailLine(status)}</small>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
