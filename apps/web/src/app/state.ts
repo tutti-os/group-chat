@@ -81,6 +81,8 @@ export function applyEvent(state: AppState, event: StreamEvent): AppState {
         activeRuns: enrichAgentRuns(withMessages.activeRuns, messages),
       };
     }
+    case "message.hidden":
+      return removeHiddenMessages(withSeq, [payload.messageId]);
     case "message_block.created":
     case "message_block.updated":
       return { ...withSeq, messageBlocks: upsert(state.messageBlocks, payload.block) };
@@ -115,6 +117,25 @@ export function applyEvent(state: AppState, event: StreamEvent): AppState {
     default:
       return withSeq;
   }
+}
+
+export function removeHiddenMessages(state: AppState, messageIds: string[]): AppState {
+  if (messageIds.length === 0) return state;
+  const idSet = new Set(messageIds);
+  const messages = state.messages.filter((message) => !idSet.has(message.id));
+  const visibleMessageIds = new Set(messages.map((message) => message.id));
+  return {
+    ...state,
+    messages,
+    messageBlocks: state.messageBlocks.filter((block) => visibleMessageIds.has(block.messageId)),
+    artifacts: state.artifacts.filter(
+      (artifact) => !artifact.messageId || visibleMessageIds.has(artifact.messageId),
+    ),
+    activeRuns: enrichAgentRuns(
+      state.activeRuns.filter((run) => !run.assistantMessageId || visibleMessageIds.has(run.assistantMessageId)),
+      messages,
+    ),
+  };
 }
 
 export function removeActiveRun(state: AppState, runId: string): AppState {

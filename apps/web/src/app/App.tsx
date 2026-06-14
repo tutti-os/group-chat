@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { Bot, MessageCircle, WifiOff } from "lucide-react";
-import { enrichAgentRuns, resolveAgentRunVisibility, type AgentRun,
+import { enrichAgentRuns, isLocalUserMessage, resolveAgentRunVisibility, type AgentRun,
   type Conversation,
   type CreateIdentityRequest,
   type Identity,
@@ -48,6 +48,7 @@ import { AgentThinkingPanel } from "./components/chat/AgentThinkingPanel.js";
 import { RoomAgentsDialog } from "./components/chat/RoomAgentsDialog.js";
 import { AgentProfileDialog } from "./components/chat/AgentProfileDialog.js";
 import { MessageTimeline } from "./components/chat/MessageTimeline.js";
+import { DeleteMessageConfirmDialog } from "./components/chat/DeleteMessageConfirmDialog.js";
 import { Composer } from "./components/chat/Composer.js";
 import { BackgroundTaskBar } from "./components/chat/BackgroundTaskBar.js";
 import { AppNavRail } from "./components/nav/AppNavRail.js";
@@ -63,7 +64,7 @@ import {
   type ConversationReadAtMap,
 } from "./conversation-read-state.js";
 import { UnreadBadge } from "./components/ui/UnreadBadge.js";
-import { applyEvent, applyRoomUpdate, emptyState, normalizeSnapshot, removeActiveRun, removeDeletedRoom, upsert, upsertIdentity, upsertMany, upsertMessage, upsertParticipant, type AppState } from "./state.js";
+import { applyEvent, applyRoomUpdate, emptyState, normalizeSnapshot, removeActiveRun, removeDeletedRoom, removeHiddenMessages, upsert, upsertIdentity, upsertMany, upsertMessage, upsertParticipant, type AppState } from "./state.js";
 import { backgroundTaskFromSnapshot, createOptimisticBackgroundTask, enrichBackgroundTask, loadDismissedBackgroundTaskIds, loadLocalTaskBarTaskIds, mergeBackgroundTask, removeLocalTaskBarTaskId, saveDismissedBackgroundTaskIds, addLocalTaskBarTaskId, type AgentRunTaskItem, type BackgroundTask } from "./background-tasks.js";
 import { resolveAgentProfileParticipant, resolveMessageAgentParticipant, resolveMessageSenderLabel } from "./chat-links.js";
 import { collectMessageProcess } from "./agent-thinking.js";
@@ -126,6 +127,10 @@ export function App() {
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const mobileProfileMenuRef = useRef<HTMLDivElement | null>(null);
   const chatProfileMenuRef = useRef<HTMLDivElement | null>(null);
+  const deleteDialogRef = useRef<{ resolve: () => void; reject: (reason?: unknown) => void } | null>(null);
+  const timelineScrollPreserverRef = useRef<{ capture: () => void } | null>(null);
+  const [deletePrompt, setDeletePrompt] = useState<{ ids: string[] } | null>(null);
+  const [deletingMessages, setDeletingMessages] = useState(false);
 
   const openProfileMenu = useCallback((placement: "rail" | "mobile" | "chat", anchorEl?: HTMLElement | null) => {
     setProfileMenuPlacement(placement);
@@ -842,14 +847,37 @@ export function App() {
     [mergeSentMessage, refreshSnapshot],
   );
 
-  const onDeleteMessage = useCallback(
-    async (messageId: string) => {
-      const result = await deleteMessage(messageId);
-      mergeSentMessage(result);
-      return result;
-    },
-    [mergeSentMessage],
-  );
+
+  const requestDeleteMessages = useCallback((messageIds: string[]) => {
+    const ids = [...new Set(messageIds)];
+    if (ids.length === 0) return Promise.resolve();
+    return new Promise<void>((resolve, reject) => {
+      deleteDialogRef.current = { resolve, reject };
+      setDeletePrompt({ ids });
+    });
+  }, []);
+
+  const cancelDeleteMessages = useCallback(() => {
+    deleteDialogRef.current?.reject(new Error("cancelled"));
+    deleteDialogRef.current = null;
+    setDeletePrompt(null);
+  }, []);
+
+  const confirmDeleteMessages = useCallback(async () => {
+    if (!deletePrompt) return;
+    setDeletingMessages(true);
+    try {
+      const ids = deletePrompt.ids;
+      timelineScrollPreserverRef.current?.capture();
+      await Promise.all(ids.map((id) => deleteMessage(id)));
+      setState((current) => removeHiddenMessages(current, ids));
+      setDeletePrompt(null);
+      deleteDialogRef.current?.resolve();
+      deleteDialogRef.current = null;
+    } finally {
+      setDeletingMessages(false);
+    }
+  }, [deletePrompt]);
 
   const requestComposerInsert = (messages: Message[], mode: "quote" | "summary" | "send-to-app" | "send-to-agent" = "quote") => {
     if (mode === "quote") {
@@ -1175,6 +1203,9 @@ export function App() {
                   runtimeProfiles={state.runtimeProfiles}
                   onOpenUserProfile={(anchor) => openProfileMenu("chat", anchor)}
                   onViewThinking={openMessageThinking}
+                  onRegisterScrollPreserver={(preserver) => {
+                    timelineScrollPreserverRef.current = preserver;
+                  }}
                   onSelectionModeChange={setMessageSelectionMode}
                   onOpenMembers={(options) => {
                     clearAgentProfileDialog();
@@ -1204,12 +1235,24 @@ export function App() {
                     }));
                   }}
                   onEditMessage={requestComposerEdit}
-                  onDeleteMessage={(message) => {
-                    if (!window.confirm("确定删除这条消息吗？")) return Promise.resolve();
-                    return onDeleteMessage(message.id);
+                  onDeleteMessage={async (message) => {
+                    try {
+                      await requestDeleteMessages([message.id]);
+                    } catch {
+                      // cancelled
+                    }
+                  }}
+                  onDeleteMessages={async (messages) => {
+                    try {
+                      await requestDeleteMessages(messages.map((message) => message.id));
+                    } catch {
+                      // cancelled
+                    }
                   }}
                   onRecallMessage={(message) => {
+                    if (!isLocalUserMessage(message)) return Promise.resolve();
                     if (!window.confirm("确定撤回这条消息吗？撤回后 Agent 不会再回复这条消息。")) return Promise.resolve();
+                    timelineScrollPreserverRef.current?.capture();
                     return onUpdateMessage(message.id, { status: "recalled" });
                   }}
                 />
@@ -1324,6 +1367,14 @@ export function App() {
             setSettingsOpen(false);
           }}
           onClose={() => setSettingsOpen(false)}
+        />
+      ) : null}
+      {deletePrompt ? (
+        <DeleteMessageConfirmDialog
+          count={deletePrompt.ids.length}
+          deleting={deletingMessages}
+          onCancel={cancelDeleteMessages}
+          onConfirm={() => void confirmDeleteMessages()}
         />
       ) : null}
     </div>

@@ -175,6 +175,7 @@ export function IdentityEditor(props: {
     "[height:42px] [min-width:0] [border:1px_solid_var(--border)] [border-radius:12px] [padding:0_12px] [color:var(--text)] [background:var(--panel)] [font-size:13px] [outline:none] focus:[border-color:var(--border-strong)] focus:[box-shadow:0_0_0_3px_#00000008]";
   const selectControl = `${fieldControl} [appearance:none] [padding:0_42px_0_12px] [background-color:var(--panel)] [background-image:var(--select-chevron)] [background-repeat:no-repeat] [background-position:right_14px_center] [background-size:16px_16px]`;
   const sectionLayout = "[display:grid] [gap:10px]";
+  const sectionTitle = "[margin:0] [color:#2563eb] [font-size:15px] [font-weight:720]";
 
   return (
     <div
@@ -220,7 +221,7 @@ export function IdentityEditor(props: {
           <div className={"[display:grid] [gap:24px] [width:100%]"}>
             {!props.isNew ? (
               <section className={sectionLayout}>
-                <h3 className={"[margin:0] [color:var(--text)] [font-size:15px] [font-weight:720]"}>使用情况</h3>
+                <h3 className={sectionTitle}>使用情况</h3>
                 <IdentityUsagePanel
                   usage={identityUsage}
                   identityIcon={props.identity.icon}
@@ -231,7 +232,7 @@ export function IdentityEditor(props: {
             ) : null}
 
             <section className={sectionLayout}>
-              <h3 className={"[margin:0] [color:var(--text)] [font-size:15px] [font-weight:720]"}>基础信息</h3>
+              <h3 className={sectionTitle}>基础信息</h3>
               <label className={"[display:flex] [align-items:center] [gap:12px] max-[760px]:[flex-direction:column] max-[760px]:[align-items:stretch]"}>
                 <span className={`${fieldLabel} [flex-shrink:0] [width:48px]`}>名称</span>
                 <input
@@ -247,10 +248,9 @@ export function IdentityEditor(props: {
             </section>
 
             <section className={sectionLayout}>
-              <h3 className={"[margin:0] [color:var(--text)] [font-size:15px] [font-weight:720]"}>运行时</h3>
-              <div className={"[display:grid] [grid-template-columns:repeat(3,_minmax(0,_1fr))] [gap:16px] max-[760px]:[grid-template-columns:1fr]"}>
+              <h3 className={sectionTitle}>运行时</h3>
+              <div className={"[display:grid] [grid-template-columns:repeat(3,_minmax(0,_1fr))] [gap:16px] [align-items:end] max-[760px]:[grid-template-columns:1fr]"}>
                 <label className={"[display:grid] [gap:8px]"}>
-                  <span className={fieldLabel}>运行时</span>
                   <select
                     aria-label="Runtime"
                     className={selectControl}
@@ -305,7 +305,7 @@ export function IdentityEditor(props: {
             </section>
 
             <section className={sectionLayout}>
-              <h3 className={"[margin:0] [color:var(--text)] [font-size:15px] [font-weight:720]"}>角色设定</h3>
+              <h3 className={sectionTitle}>角色设定</h3>
               <div className={"[display:flex] [flex-wrap:wrap] [gap:8px]"}>
                 {roleDescriptionPresets.map((preset) => {
                   const selected = selectedRolePresetId === preset.id;

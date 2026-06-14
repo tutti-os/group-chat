@@ -170,7 +170,7 @@ server.patch<{ Params: { messageId: string }; Body: UpdateMessageRequest }>(
   "/api/messages/:messageId",
   async (request, reply) => {
     try {
-      const result = chat.updateMessage(request.params.messageId, request.body);
+      const result = await chat.updateMessage(request.params.messageId, request.body);
       if (!result) return reply.code(404).send({ error: "Message not found" });
       return result;
     } catch (error) {
@@ -181,9 +181,14 @@ server.patch<{ Params: { messageId: string }; Body: UpdateMessageRequest }>(
 );
 
 server.delete<{ Params: { messageId: string } }>("/api/messages/:messageId", async (request, reply) => {
-  const result = chat.updateMessage(request.params.messageId, { status: "deleted" });
-  if (!result) return reply.code(404).send({ error: "Message not found" });
-  return result;
+  try {
+    const result = chat.hideMessageForLocalUser(request.params.messageId);
+    if (!result) return reply.code(404).send({ error: "Message not found" });
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to delete message";
+    return reply.code(400).send({ error: message });
+  }
 });
 
 server.post<{ Params: { runId: string } }>("/api/runs/:runId/cancel", async (request, reply) => {

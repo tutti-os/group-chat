@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Braces, BrainCircuit, CheckSquare, ChevronsDown, Copy, Edit3, FileText, MoreHorizontal, Reply, RotateCcw, Terminal, Trash2, Wrench, X } from "lucide-react";
 import type { Artifact, AgentRun, AgentRunEvent, Conversation, Identity, Message, MessageBlock, Participant, Room, RuntimeProfile } from "@group-chat/shared";
-import { resolveMessageVisibility } from "@group-chat/shared";
+import { isLocalUserMessage, resolveMessageVisibility } from "@group-chat/shared";
 import { openArtifact } from "../../artifact-actions.js";
 import { formatBytes, formatMessageStatus } from "../../formatting.js";
 import type { LocalUserProfile } from "../../user-profile.js";
@@ -84,14 +84,19 @@ export function MessageTimeline(props: {
   onFocusMessage: (messageId: string) => void;
   onEditMessage: (message: Message) => void;
   onDeleteMessage: (message: Message) => Promise<unknown>;
+  onDeleteMessages?: (messages: Message[]) => Promise<unknown>;
   onRecallMessage: (message: Message) => Promise<unknown>;
   userProfile: Pick<LocalUserProfile, "avatarPreset" | "customAvatarUrl">;
   onOpenUserProfile: (anchor: HTMLElement) => void;
   onViewThinking: (message: Message) => void;
+  onRegisterScrollPreserver?: (preserver: { capture: () => void } | null) => void;
 }) {
   const scrollRef = useRef<HTMLElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const copyTipTimerRef = useRef<number | null>(null);
+  const pendingScrollTopRef = useRef<number | null>(null);
+  const preserveTimelineScrollRef = useRef(false);
+  const stickToBottomRef = useRef(true);
   const [preview, setPreview] = useState<AttachmentPreview | null>(null);
   const [detailReplyMessageId, setDetailReplyMessageId] = useState<string | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
@@ -106,11 +111,31 @@ export function MessageTimeline(props: {
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [summaryAgentPickerMessages, setSummaryAgentPickerMessages] = useState<Message[] | null>(null);
   const visibleMessages = props.messages.filter(shouldShowMessage);
-  const selectedMessages = visibleMessages.filter((message) => selectedMessageIds.has(message.id));
+  const selectedMessages = visibleMessages.filter(
+    (message) => selectedMessageIds.has(message.id) && !isRemovedMessage(message),
+  );
   const detailReplyMessage = detailReplyMessageId ? props.messages.find((message) => message.id === detailReplyMessageId) ?? null : null;
   const detailMessages = detailReplyMessage
     ? buildReferencedThread(detailReplyMessage, props.messages, props.allParticipants, props.identities)
     : [];
+
+  const captureTimelineScroll = useCallback(() => {
+    if (scrollRef.current) {
+      pendingScrollTopRef.current = scrollRef.current.scrollTop;
+      preserveTimelineScrollRef.current = true;
+    }
+  }, []);
+
+  useEffect(() => {
+    props.onRegisterScrollPreserver?.({ capture: captureTimelineScroll });
+    return () => props.onRegisterScrollPreserver?.(null);
+  }, [props.onRegisterScrollPreserver, captureTimelineScroll]);
+
+  useLayoutEffect(() => {
+    if (pendingScrollTopRef.current === null || !scrollRef.current) return;
+    restoreTimelineScroll(scrollRef.current, pendingScrollTopRef.current);
+    pendingScrollTopRef.current = null;
+  });
 
   const mentionParticipantKeepingScroll = useCallback((participant: Participant) => {
     const container = scrollRef.current;
@@ -136,8 +161,14 @@ export function MessageTimeline(props: {
       ? imageArtifactsForMessage(props.openBackgroundTask.sourceMessageId, props.blocks, props.artifacts)
       : [];
   useEffect(() => {
+    if (selectionMode) return;
+    if (preserveTimelineScrollRef.current) {
+      preserveTimelineScrollRef.current = false;
+      return;
+    }
+    if (!stickToBottomRef.current) return;
     bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [props.messages, props.blocks]);
+  }, [props.messages, props.blocks, selectionMode]);
 
   useEffect(() => {
     updateJumpToBottomVisibility();
@@ -169,6 +200,9 @@ export function MessageTimeline(props: {
   };
 
   const toggleSelectedMessage = (messageId: string) => {
+    const message = visibleMessages.find((item) => item.id === messageId);
+    if (message && isRemovedMessage(message)) return;
+    captureTimelineScroll();
     setSelectedMessageIds((current) => {
       const next = new Set(current);
       if (next.has(messageId)) {
@@ -181,6 +215,8 @@ export function MessageTimeline(props: {
   };
 
   const enterSelectionMode = (message: Message) => {
+    if (isRemovedMessage(message)) return;
+    captureTimelineScroll();
     setSelectionMode(true);
     setSelectedMessageIds(new Set([message.id]));
     closeOpenMessageMenu();
@@ -188,6 +224,7 @@ export function MessageTimeline(props: {
   };
 
   const exitSelectionMode = () => {
+    captureTimelineScroll();
     setSelectionMode(false);
     setSelectedMessageIds(new Set());
     props.onSelectionModeChange?.(false);
@@ -217,8 +254,16 @@ export function MessageTimeline(props: {
   };
 
   const deleteSelectedMessages = async () => {
-    await Promise.all(selectedMessages.map((message) => props.onDeleteMessage(message)));
-    exitSelectionMode();
+    try {
+      if (props.onDeleteMessages) {
+        await props.onDeleteMessages(selectedMessages);
+      } else {
+        await Promise.all(selectedMessages.map((message) => props.onDeleteMessage(message)));
+      }
+      exitSelectionMode();
+    } catch {
+      // cancelled
+    }
   };
 
   const startSummary = (messages: Message[], participant: Participant) => {
@@ -252,10 +297,12 @@ export function MessageTimeline(props: {
     const element = scrollRef.current;
     if (!element) return;
     const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    stickToBottomRef.current = distanceFromBottom < 48;
     setShowJumpToBottom(distanceFromBottom > element.clientHeight);
   };
 
   const scrollToBottom = () => {
+    stickToBottomRef.current = true;
     bottomRef.current?.scrollIntoView({ block: "end" });
     setShowJumpToBottom(false);
   };
@@ -376,14 +423,6 @@ export function MessageTimeline(props: {
                 requestSummary(selectedMessages);
                 exitSelectionMode();
               }}
-              onSendToApp={() => {
-                props.onQuoteMessages(selectedMessages, "send-to-app");
-                exitSelectionMode();
-              }}
-              onSendToAgent={() => {
-                props.onQuoteMessages(selectedMessages, "send-to-agent");
-                exitSelectionMode();
-              }}
               onDelete={() => void deleteSelectedMessages()}
               onClose={exitSelectionMode}
             />,
@@ -501,6 +540,10 @@ function EmptyTimelineState(props: { participantsCount: number; onOpenMembers: (
       </div>
     </div>
   );
+}
+
+function isRemovedMessage(message: Message) {
+  return message.status === "deleted" || message.status === "recalled";
 }
 
 function shouldShowMessage(message: Message) {
@@ -693,6 +736,7 @@ function MessageRow(props: {
           <MessageMoreMenu
             messageId={props.message.id}
             message={props.message}
+            selectionMode={props.selectionMode}
             onClose={props.onCloseMenu}
             onContinue={() => {
               if (props.participant && props.participant.status !== "removed") props.onMentionParticipant(props.participant);
@@ -773,13 +817,15 @@ function MessageRow(props: {
       data-role={props.message.role}
       data-whisper={isWhisper || undefined}
       data-selected={props.selected || undefined}
-      className={`group/message [position:relative] [display:grid] [grid-template-columns:34px_minmax(0,_1fr)] [gap:8px] [margin-bottom:12px] [align-items:start] [border-radius:18px] [transition:background-color_0.2s_ease,_box-shadow_0.2s_ease] [&[data-selected=true]]:[background:#eaf2ff66] [&[data-flash=true]]:[background:#fef3c7] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] ${props.selectionMode ? "[padding-left:30px]" : ""} [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#c4b5fd] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[background:#faf5ff] [&[data-role=user]]:[grid-template-columns:minmax(0,_1fr)_34px] [&[data-role=user]_[data-slot=message-avatar]]:[grid-column:2] [&[data-role=user]_[data-slot=message-avatar]]:[grid-row:1] [&[data-role=user]_[data-slot=message-body]]:[grid-column:1] [&[data-role=user]_[data-slot=message-body]]:[grid-row:1] [&[data-role=user]_[data-slot=message-meta]]:[justify-content:flex-end] [&[data-role=user]_[data-slot=message-block]]:[margin-left:auto] [&[data-role=user]_[data-slot=message-block]:not([data-link-only])]:[border-color:transparent] [&[data-role=user]_[data-slot=message-block]:not([data-link-only])]:[background:#d6e9ff] [&[data-whisper=true][data-role=user]_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#c4b5fd] [&[data-whisper=true][data-role=user]_[data-slot=message-block]:not([data-link-only])]:[background:#f3e8ff] [&[data-role=user]_[data-slot=message-block][data-link-only]]:[background:transparent] [&[data-role=user]_[data-slot=message-block][data-link-only]]:[justify-items:end] [&[data-role=user]_[data-slot=message-block-shell]]:[margin-left:auto] [&[data-role=user]_[data-slot=event-block]]:[margin-left:auto] [&[data-role=user]_[data-slot=artifact-block]]:[margin-left:auto]`}
+      className={`group/message [position:relative] [display:grid] [grid-template-columns:22px_34px_minmax(0,_1fr)] [gap:8px] [margin-bottom:12px] [align-items:start] [border-radius:18px] [transition:background-color_0.2s_ease,_box-shadow_0.2s_ease] [&[data-selected=true]]:[background:#eaf2ff66] [&[data-flash=true]]:[background:#fef3c7] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#c4b5fd] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[background:#faf5ff] [&[data-role=user]]:[grid-template-columns:22px_minmax(0,_1fr)_34px] [&[data-role=user]_[data-slot=message-avatar]]:[grid-column:3] [&[data-role=user]_[data-slot=message-avatar]]:[grid-row:1] [&[data-role=user]_[data-slot=message-body]]:[grid-column:2] [&[data-role=user]_[data-slot=message-body]]:[grid-row:1] [&[data-role=user]_[data-slot=message-meta]]:[justify-content:flex-end] [&[data-role=user]_[data-slot=message-block]]:[margin-left:auto] [&[data-role=user]_[data-slot=message-block]:not([data-link-only])]:[border-color:transparent] [&[data-role=user]_[data-slot=message-block]:not([data-link-only])]:[background:#d6e9ff] [&[data-whisper=true][data-role=user]_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#c4b5fd] [&[data-whisper=true][data-role=user]_[data-slot=message-block]:not([data-link-only])]:[background:#f3e8ff] [&[data-role=user]_[data-slot=message-block][data-link-only]]:[background:transparent] [&[data-role=user]_[data-slot=message-block][data-link-only]]:[justify-items:end] [&[data-role=user]_[data-slot=message-block-shell]]:[margin-left:auto] [&[data-role=user]_[data-slot=event-block]]:[margin-left:auto] [&[data-role=user]_[data-slot=artifact-block]]:[margin-left:auto]`}
     >
-      {props.selectionMode ? (
-        <label className={"[position:absolute] [left:2px] [top:8px] [display:grid] [width:22px] [height:22px] [place-items:center] [cursor:pointer]"}>
-          <input className={"[width:16px] [height:16px] [accent-color:var(--primary)]"} type="checkbox" checked={props.selected} onChange={props.onToggleSelected} aria-label="选择消息" />
-        </label>
-      ) : null}
+      <div data-slot="message-select" className={"[grid-column:1] [grid-row:1] [width:22px]"}>
+        {props.selectionMode && !isRemoved ? (
+          <label className={"[display:grid] [width:22px] [height:22px] [place-items:center] [margin-top:8px] [cursor:pointer]"}>
+            <input className={"[width:16px] [height:16px] [accent-color:var(--primary)]"} type="checkbox" checked={props.selected} onChange={props.onToggleSelected} aria-label="选择消息" />
+          </label>
+        ) : null}
+      </div>
       {isUserMessage ? (
         <>
           {messageBody}
@@ -839,6 +885,7 @@ function MessageActionBar(props: {
 function MessageMoreMenu(props: {
   messageId: string;
   message: Message;
+  selectionMode: boolean;
   onClose: () => void;
   onContinue: () => void;
   onSummarize: () => void;
@@ -850,7 +897,9 @@ function MessageMoreMenu(props: {
   onSelect: () => void;
 }) {
   const isUser = props.message.role === "user";
+  const canRecallMessage = isLocalUserMessage(props.message);
   const isAssistant = props.message.role === "assistant";
+  const isRemoved = isRemovedMessage(props.message);
   const menuRef = useRef<HTMLDivElement>(null);
   const [menuStyle, setMenuStyle] = useState<CSSProperties>({ visibility: "hidden" });
 
@@ -935,14 +984,14 @@ function MessageMoreMenu(props: {
       role="menu"
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <MenuButton icon={<CheckSquare size={14} />} label="多选" onClick={() => void run(props.onSelect)} />
+      {!isRemoved ? <MenuButton icon={<CheckSquare size={14} />} label="多选" onClick={() => void run(props.onSelect)} /> : null}
       {isAssistant ? <MenuButton icon={<RotateCcw size={14} />} label="继续追问" onClick={() => void run(props.onContinue)} /> : null}
       <MenuButton icon={<BrainCircuit size={14} />} label="总结" onClick={() => void run(props.onSummarize)} />
       {isAssistant ? <MenuButton icon={<BrainCircuit size={14} />} label="查看思考过程" onClick={() => void run(props.onViewThinking)} /> : null}
       <MenuButton icon={<Copy size={14} />} label="复制消息链接" onClick={(event) => void run(() => props.onCopyLink({ x: event.clientX, y: event.clientY }))} />
-      {isUser ? <MenuButton icon={<Edit3 size={14} />} label="编辑并重新回复" onClick={() => void run(props.onEdit)} /> : null}
-      {isUser ? <MenuButton icon={<RotateCcw size={14} />} label="撤回" danger onClick={() => void run(props.onRecall)} /> : null}
-      <MenuButton icon={<Trash2 size={14} />} label="删除" danger onClick={() => void run(props.onDelete)} />
+      {canRecallMessage ? <MenuButton icon={<Edit3 size={14} />} label="编辑并重新回复" onClick={() => void run(props.onEdit)} /> : null}
+      {canRecallMessage && !props.selectionMode ? <MenuButton icon={<RotateCcw size={14} />} label="撤回" danger onClick={() => void run(props.onRecall)} /> : null}
+      {!props.selectionMode ? <MenuButton icon={<Trash2 size={14} />} label="删除" danger onClick={() => void run(props.onDelete)} /> : null}
     </div>,
     document.body,
   );
@@ -953,8 +1002,6 @@ function BulkMessageToolbar(props: {
   onCopy: (position: CopyTipPosition) => void;
   onQuote: () => void;
   onSummarize: () => void;
-  onSendToApp: () => void;
-  onSendToAgent: () => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
@@ -968,8 +1015,6 @@ function BulkMessageToolbar(props: {
       <ToolbarButton label="复制" onClick={(event) => props.onCopy({ x: event.clientX, y: event.clientY })} />
       <ToolbarButton label="引用" onClick={props.onQuote} />
       <ToolbarButton label="总结" onClick={props.onSummarize} />
-      <ToolbarButton label="发给应用" onClick={props.onSendToApp} />
-      <ToolbarButton label="发给 Agent" onClick={props.onSendToAgent} />
       <ToolbarButton label="删除" danger onClick={props.onDelete} />
       <div className={"[flex:1_1_auto]"} />
       <IconAction title="退出多选" onClick={() => props.onClose()}><X size={14} /></IconAction>

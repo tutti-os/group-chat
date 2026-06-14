@@ -242,6 +242,14 @@ function migrate(database: DatabaseSync) {
       FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_private_tasks_conversation ON private_tasks(conversation_id, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS hidden_messages (
+      message_id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      hidden_at TEXT NOT NULL,
+      FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_hidden_messages_conversation ON hidden_messages(conversation_id);
   `);
 
   ensureColumn(database, "messages", "mentions", "TEXT NOT NULL DEFAULT '[]'");

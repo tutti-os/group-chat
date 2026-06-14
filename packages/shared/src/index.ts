@@ -310,6 +310,7 @@ export type StreamEventType =
   | "participant.updated"
   | "message.created"
   | "message.updated"
+  | "message.hidden"
   | "message_block.created"
   | "message_block.updated"
   | "artifact.created"
@@ -470,6 +471,11 @@ export interface UpdateMessageRequest {
   status?: Extract<MessageStatus, "deleted" | "recalled">;
 }
 
+export interface HideMessageResponse {
+  messageId: Id;
+  hidden: true;
+}
+
 export interface UploadArtifactRequest {
   filename: string;
   mimeType: string;
@@ -499,6 +505,10 @@ export const defaultReplyPolicy: ReplyPolicy = {
   maxRounds: 1,
   mentionFollowupRounds: 1,
 };
+
+export function isLocalUserMessage(message: Pick<Message, "role">): boolean {
+  return message.role === "user";
+}
 
 export function isMessageVisibleToParticipant(message: Message, participantId: string) {
   if (message.visibility !== "whisper") return true;
