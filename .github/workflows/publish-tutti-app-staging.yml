@@ -3,10 +3,6 @@ name: Publish Tutti App Staging
 on:
   workflow_dispatch:
     inputs:
-      release_version:
-        description: Optional release version override. Defaults to the automatic manifest patch bump.
-        required: false
-        type: string
       publish_catalog:
         description: Whether to publish the staging App Center catalog after this release.
         required: false
@@ -19,7 +15,7 @@ on:
         default: false
 
 permissions:
-  contents: write
+  contents: read
   id-token: write
 
 jobs:
@@ -30,7 +26,6 @@ jobs:
       package_command: pnpm package:tutti
       package_dir: build/tutti-app/package
       icon_path: build/tutti-app/package/icon.svg
-      release_version: ${{ inputs.release_version || '' }}
       runner: macos-latest
       pnpm_version: 10.11.0
       aws_region: ${{ vars.TUTTI_APP_RELEASES_STAGING_AWS_REGION || vars.TUTTI_APP_RELEASES_AWS_REGION }}
