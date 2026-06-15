@@ -35,7 +35,7 @@ import {
   type CliCommandError,
   type CliCommandOutput,
 } from "./domains/tutti-cli.js";
-import { isReferenceSearchError, searchAppReferences } from "./domains/tutti-references.js";
+import { isReferenceListError, listAppReferences } from "./domains/tutti-references.js";
 import { EventHub } from "./ws/event-hub.js";
 
 const webDist = process.env.GROUP_CHAT_WEB_DIST
@@ -85,9 +85,9 @@ server.post<{ Body: unknown }>("/tutti/cli/artifacts/get", async (request, reply
   sendCliOutput(reply, getArtifactCliOutput(chat.bootstrap(), normalizeCliEnvelope(request.body))),
 );
 
-server.post<{ Body: unknown }>("/tutti/references/search", async (request, reply) => {
-  const output = searchAppReferences(chat.bootstrap(), request.body ?? {});
-  if (isReferenceSearchError(output)) return reply.code(400).send(output);
+server.post<{ Body: unknown }>("/tutti/references/list", async (request, reply) => {
+  const output = listAppReferences(chat.bootstrap(), request.body ?? {});
+  if (isReferenceListError(output)) return reply.code(400).send(output);
   return output;
 });
 
@@ -387,6 +387,7 @@ server.setNotFoundHandler((request, reply) => {
   if (
     request.raw.url?.startsWith("/api/") ||
     request.raw.url?.startsWith("/tutti/cli/") ||
+    request.raw.url?.startsWith("/tutti/references/") ||
     request.raw.url?.startsWith("/nextop/cli/") ||
     request.raw.url?.startsWith("/local-assets/")
   ) {

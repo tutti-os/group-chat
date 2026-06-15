@@ -273,13 +273,6 @@ export interface AppFileReferenceLocation {
   path: string;
 }
 
-export interface AppReferenceSearchRequest {
-  query?: string;
-  limit?: number;
-  cursor?: string;
-  kinds?: AppReferenceKind[];
-}
-
 export type AppReference = AppFileReference;
 
 export interface AppFileReference {
@@ -293,9 +286,38 @@ export interface AppFileReference {
   score?: number;
 }
 
-export interface AppReferenceSearchResponse {
-  references: AppReference[];
-  nextCursor?: string;
+export interface AppReferenceListTimeRange {
+  fromMs?: number;
+  toMs?: number;
+}
+
+export interface AppReferenceListRequest {
+  parentGroupId?: string | null;
+  filterText?: string | null;
+  limit?: number;
+  cursor?: string | null;
+  kinds?: AppReferenceKind[];
+  timeRange?: AppReferenceListTimeRange | null;
+}
+
+export interface AppReferenceGroup {
+  type: "group";
+  id: string;
+  displayName: string;
+  description?: string | null;
+  referenceCount: number;
+}
+
+export interface AppReferenceListReferenceItem {
+  type: "reference";
+  reference: AppReference;
+}
+
+export type AppReferenceListItem = AppReferenceGroup | AppReferenceListReferenceItem;
+
+export interface AppReferenceListResponse {
+  items: AppReferenceListItem[];
+  nextCursor?: string | null;
 }
 
 export type StreamEventType =

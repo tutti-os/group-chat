@@ -81,19 +81,43 @@ test("Tutti CLI handlers expose public conversation data only", async (t) => {
   );
   assert.equal(artifacts.body.value.warnings[0].omittedWhisperArtifactCount, 1);
 
-  const references = await postJson(server.baseUrl, "/tutti/references/search", {
-    query: "public",
+  const emptyRecentRoom = await postJson(server.baseUrl, "/api/rooms", {
+    title: "Empty recent room",
+  });
+  assert.equal(emptyRecentRoom.status, 200);
+
+  const rootReferences = await postJson(server.baseUrl, "/tutti/references/list", {
+    limit: 50,
+    kinds: ["file"],
+  });
+  assert.equal(rootReferences.status, 200);
+  const roomGroup = rootReferences.body.items.find(
+    (item) => item.type === "group" && item.id === list.body.value.conversations[0].roomId,
+  );
+  assert.ok(roomGroup);
+  assert.equal(roomGroup.referenceCount, 1);
+  const emptyRoomGroup = rootReferences.body.items.find(
+    (item) => item.type === "group" && item.id === emptyRecentRoom.body.room.id,
+  );
+  assert.ok(emptyRoomGroup);
+  assert.equal(emptyRoomGroup.referenceCount, 0);
+  assert.ok(rootReferences.body.items.indexOf(roomGroup) < rootReferences.body.items.indexOf(emptyRoomGroup));
+
+  const references = await postJson(server.baseUrl, "/tutti/references/list", {
+    parentGroupId: roomGroup.id,
+    filterText: "public",
     limit: 5,
     kinds: ["file"],
   });
   assert.equal(references.status, 200);
   assert.deepEqual(
-    references.body.references.map((reference) => reference.displayName),
+    references.body.items.map((item) => item.reference.displayName),
     ["public.txt"],
   );
-  assert.equal(references.body.references[0].kind, "file");
-  assert.equal(references.body.references[0].location.type, "app-data-relative");
-  assert.match(references.body.references[0].location.path, /^rooms\/[^/]+\/uploads\/[^/]+\.txt$/);
+  assert.equal(references.body.items[0].type, "reference");
+  assert.equal(references.body.items[0].reference.kind, "file");
+  assert.equal(references.body.items[0].reference.location.type, "app-data-relative");
+  assert.match(references.body.items[0].reference.location.path, /^rooms\/[^/]+\/uploads\/[^/]+\.txt$/);
 
   const bodyOnlyMessage = await postJson(server.baseUrl, `/api/conversations/${conversationId}/messages`, {
     content: "body-only-reference-search-token",
@@ -102,13 +126,14 @@ test("Tutti CLI handlers expose public conversation data only", async (t) => {
   });
   assert.equal(bodyOnlyMessage.status, 200);
 
-  const bodyOnlyReferences = await postJson(server.baseUrl, "/tutti/references/search", {
-    query: "body-only-reference-search-token",
+  const bodyOnlyReferences = await postJson(server.baseUrl, "/tutti/references/list", {
+    parentGroupId: roomGroup.id,
+    filterText: "body-only-reference-search-token",
     limit: 5,
     kinds: ["file"],
   });
   assert.equal(bodyOnlyReferences.status, 200);
-  assert.deepEqual(bodyOnlyReferences.body.references, []);
+  assert.deepEqual(bodyOnlyReferences.body.items, []);
 
   const hiddenArtifact = await postJson(server.baseUrl, "/tutti/cli/artifacts/get", {
     input: { "artifact-id": whisperArtifact.body.artifact.id },
