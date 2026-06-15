@@ -29,7 +29,7 @@ jobs:
           script: |
             const org = context.repo.owner;
             const repo = context.repo.repo;
-            const teamSlug = 'tutti-official';
+            const teamSlug = 'tutti-rd';
             const statusContext = 'external-pr-review-gate';
             const pr = context.payload.pull_request;
             const author = pr.user.login;
