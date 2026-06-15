@@ -1,0 +1,64 @@
+name: Request external PR review
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - ready_for_review
+      - synchronize
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  request-review:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Request official team review for external PRs
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const org = context.repo.owner;
+            const repo = context.repo.repo;
+            const teamSlug = 'tutti-official';
+            const pr = context.payload.pull_request;
+            const author = pr.user.login;
+
+            let isOfficial = false;
+            try {
+              const membership = await github.rest.teams.getMembershipForUserInOrg({
+                org,
+                team_slug: teamSlug,
+                username: author,
+              });
+              isOfficial = membership.data.state === 'active';
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+            }
+
+            if (isOfficial) {
+              core.info(`${author} is in ${org}/${teamSlug}; no review request needed.`);
+              return;
+            }
+
+            try {
+              await github.rest.pulls.requestReviewers({
+                owner: org,
+                repo,
+                pull_number: pr.number,
+                team_reviewers: [teamSlug],
+              });
+              core.info(`Requested ${org}/${teamSlug} review for PR from ${author}.`);
+            } catch (error) {
+              if (error.status === 422) {
+                core.info(`Review request already exists or cannot be added: ${error.message}`);
+                return;
+              }
+              throw error;
+            }
