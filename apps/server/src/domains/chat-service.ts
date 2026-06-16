@@ -166,7 +166,7 @@ export class ChatService {
       conversationId,
       payload: { participant },
     });
-    const systemMessage = this.emitSystemNotice(conversation, `${participant.displayName} 加入了群聊`);
+    const systemMessage = this.emitSystemNotice(conversation, `${participant.displayName} joined the room`);
     return { participant, systemMessage };
   }
 
@@ -489,7 +489,7 @@ export class ChatService {
       if (!result?.message) return null;
       this.repo.deletePendingRepliesForMessage(messageId);
       await this.cancelRunsForTriggerMessage(messageId);
-      this.repo.touchConversation(conversation.id, "消息已撤回");
+      this.repo.touchConversation(conversation.id, "Message recalled");
       this.events.emit({
         type: "message.updated",
         roomId: conversation.roomId,
@@ -1250,8 +1250,8 @@ export class ChatService {
         participant,
         visibleReply,
         errorText: nextRunEventSortOrder > 0
-          ? "Agent 执行结束，但未返回文本回复。"
-          : "Agent 未返回任何内容。",
+          ? "Agent execution finished without a text reply."
+          : "Agent returned no content.",
         visibility: userMessage.visibility,
         createRunEvent,
         emitBlockUpdated,
@@ -1485,16 +1485,16 @@ export class ChatService {
 
   private formatRunFailureMessage(error: unknown) {
     const raw = (error instanceof Error ? error.message : String(error)).trim();
-    if (!raw) return "Agent 执行失败。";
+    if (!raw) return "Agent execution failed.";
     if (/SIGTERM|timed?\s*out|timeout|AbortError|aborted|time.?limit/i.test(raw)) {
-      return "Agent 执行超时或已被中断。";
+      return "Agent execution timed out or was interrupted.";
     }
     if (/local-agent command exited/i.test(raw)) {
       const detail = raw.replace(/^local-agent command exited with /, "").trim();
-      return detail ? `Agent 执行异常退出：${detail}` : "Agent 执行异常退出。";
+      return detail ? `Agent exited abnormally: ${detail}` : "Agent exited abnormally.";
     }
-    if (/^Agent (执行|未)/.test(raw)) return raw;
-    return `Agent 执行失败：${raw}`;
+    if (/^Agent (执行|未|execution|returned|finished|exited)/i.test(raw)) return raw;
+    return `Agent execution failed: ${raw}`;
   }
 
   private publishAssistantFailure(params: {

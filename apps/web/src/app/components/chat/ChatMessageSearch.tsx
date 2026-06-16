@@ -3,6 +3,7 @@ import { Search, X } from "lucide-react";
 import type { Message } from "@group-chat/shared";
 import { formatShortDate } from "../../formatting.js";
 import { messageSenderLabel } from "../../chat-links.js";
+import { attachmentLabel, useTranslation } from "../../i18n/index.js";
 
 export function ChatMessageSearch(props: {
   open: boolean;
@@ -10,6 +11,7 @@ export function ChatMessageSearch(props: {
   onClose: () => void;
   onFocusMessage: (messageId: string) => void;
 }) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -67,15 +69,15 @@ export function ChatMessageSearch(props: {
         <input
           ref={inputRef}
           value={query}
-          aria-label="搜索聊天记录"
-          placeholder="搜索聊天记录"
+          aria-label={t("messageSearch.aria")}
+          placeholder={t("messageSearch.placeholder")}
           onChange={(event) => setQuery(event.target.value)}
         />
         {query ? (
           <button
             type="button"
             className={"[display:inline-grid] [width:24px] [height:24px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000008]"}
-            aria-label="清空搜索"
+            aria-label={t("messageSearch.clear")}
             onClick={() => setQuery("")}
           >
             <X size={14} />
@@ -84,9 +86,9 @@ export function ChatMessageSearch(props: {
       </div>
       <div className={"[max-height:min(360px,_calc(100vh_-_180px))] [overflow-y:auto] [display:grid] [gap:4px]"}>
         {!normalizedQuery ? (
-          <div className={"[padding:18px_8px] [color:var(--muted)] [font-size:12px] [text-align:center]"}>输入关键词搜索当前会话消息</div>
+          <div className={"[padding:18px_8px] [color:var(--muted)] [font-size:12px] [text-align:center]"}>{t("messageSearch.hint")}</div>
         ) : results.length === 0 ? (
-          <div className={"[padding:18px_8px] [color:var(--muted)] [font-size:12px] [text-align:center]"}>没有找到匹配的消息</div>
+          <div className={"[padding:18px_8px] [color:var(--muted)] [font-size:12px] [text-align:center]"}>{t("messageSearch.noResults")}</div>
         ) : (
           results.map((message) => (
             <button
@@ -105,7 +107,7 @@ export function ChatMessageSearch(props: {
                 <span className={"[flex:0_0_auto] [color:var(--muted)] [font-size:11px]"}>{formatShortDate(message.createdAt)}</span>
               </span>
               <span className={"[overflow:hidden] [color:var(--muted)] [font-size:12px] [line-height:1.45] [text-overflow:ellipsis] [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical]"}>
-                {highlightQuery(message.content.trim() || "[附件]", normalizedQuery)}
+                {highlightQuery(message.content.trim() || attachmentLabel(), normalizedQuery)}
               </span>
             </button>
           ))

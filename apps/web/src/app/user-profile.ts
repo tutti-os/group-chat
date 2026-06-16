@@ -1,3 +1,5 @@
+import { t } from "./i18n/index.js";
+
 export type AvatarPresetId =
   | "saiyan-01" | "saiyan-02" | "saiyan-03" | "saiyan-04" | "saiyan-05"
   | "saiyan-06" | "saiyan-07" | "saiyan-08" | "saiyan-09" | "saiyan-10"
@@ -16,29 +18,25 @@ export const AVATAR_PRESET_IDS: AvatarPresetId[] = [
   "saiyan-11", "saiyan-12", "saiyan-13", "saiyan-14", "saiyan-15",
 ];
 
-export const AVATAR_PRESET_LABELS: Record<AvatarPresetId, string> = {
-  "saiyan-01": "金发战士",
-  "saiyan-02": "蓝发战士",
-  "saiyan-03": "红发战士",
-  "saiyan-04": "绿发战士",
-  "saiyan-05": "紫发战士",
-  "saiyan-06": "粉发战士",
-  "saiyan-07": "银发战士",
-  "saiyan-08": "橙发战士",
-  "saiyan-09": "棕发战士",
-  "saiyan-10": "青发战士",
-  "saiyan-11": "黄绿战士",
-  "saiyan-12": "深紫战士",
-  "saiyan-13": "黄金战士",
-  "saiyan-14": "靛蓝战士",
-  "saiyan-15": "赤橙战士",
-};
+export function avatarPresetLabel(preset: AvatarPresetId): string {
+  return t(`avatarPreset.${preset}`);
+}
 
+export function defaultUserProfile(): LocalUserProfile {
+  return {
+    displayName: t("common.me"),
+    avatarPreset: "saiyan-01",
+    customAvatarUrl: null,
+    bio: t("settings.account.defaultBio"),
+  };
+}
+
+/** Static fallback for SSR / pre-i18n bootstrap. Prefer {@link defaultUserProfile} at runtime. */
 export const DEFAULT_USER_PROFILE: LocalUserProfile = {
-  displayName: "我",
+  displayName: "Me",
   avatarPreset: "saiyan-01",
   customAvatarUrl: null,
-  bio: "本地优先的 Agent 群聊工作区。",
+  bio: "Local-first agent group chat workspace.",
 };
 
 const STORAGE_KEY = "group-chat:user-profile";
@@ -62,13 +60,14 @@ function normalizePreset(value: unknown): AvatarPresetId {
   return DEFAULT_USER_PROFILE.avatarPreset;
 }
 
-const LEGACY_DEFAULT_DISPLAY_NAMES = new Set(["Group Chat"]);
+const LEGACY_DEFAULT_DISPLAY_NAMES = new Set(["Group Chat", "Me", "我"]);
 
 function normalizeDisplayName(value: unknown) {
-  if (typeof value !== "string") return DEFAULT_USER_PROFILE.displayName;
+  const fallback = defaultUserProfile().displayName;
+  if (typeof value !== "string") return fallback;
   const trimmed = value.trim();
   if (!trimmed || LEGACY_DEFAULT_DISPLAY_NAMES.has(trimmed)) {
-    return DEFAULT_USER_PROFILE.displayName;
+    return fallback;
   }
   return trimmed;
 }
@@ -77,7 +76,7 @@ export function loadUserProfile(): LocalUserProfile {
   if (typeof window === "undefined") return DEFAULT_USER_PROFILE;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_USER_PROFILE;
+    if (!raw) return defaultUserProfile();
     const parsed = JSON.parse(raw) as Partial<LocalUserProfile>;
     const profile: LocalUserProfile = {
       displayName: normalizeDisplayName(parsed.displayName),
@@ -85,7 +84,7 @@ export function loadUserProfile(): LocalUserProfile {
       customAvatarUrl: typeof parsed.customAvatarUrl === "string" && parsed.customAvatarUrl.startsWith("data:image/")
         ? parsed.customAvatarUrl
         : null,
-      bio: typeof parsed.bio === "string" ? parsed.bio : DEFAULT_USER_PROFILE.bio,
+      bio: typeof parsed.bio === "string" ? parsed.bio : defaultUserProfile().bio,
     };
     const legacyName = typeof parsed.displayName === "string" ? parsed.displayName.trim() : "";
     if (legacyName && LEGACY_DEFAULT_DISPLAY_NAMES.has(legacyName)) {
@@ -93,7 +92,7 @@ export function loadUserProfile(): LocalUserProfile {
     }
     return profile;
   } catch {
-    return DEFAULT_USER_PROFILE;
+    return defaultUserProfile();
   }
 }
 

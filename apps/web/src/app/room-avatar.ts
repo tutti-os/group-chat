@@ -1,3 +1,5 @@
+import { t } from "./i18n/index.js";
+
 export const ROOM_AVATAR_EMOJIS = [
   "💬",
   "🤖",
@@ -65,14 +67,14 @@ const ROOM_AVATAR_MAX_BYTES = 512 * 1024;
 
 export async function readRoomAvatarImageFile(file: File): Promise<string> {
   if (!file.type.startsWith("image/")) {
-    throw new Error("请选择图片文件");
+    throw new Error(t("upload.pickImage"));
   }
   if (file.size > ROOM_AVATAR_MAX_BYTES) {
-    throw new Error("图片不能超过 512KB");
+    throw new Error(t("upload.imageTooLarge512kb"));
   }
   return await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(reader.error ?? new Error("读取图片失败"));
+    reader.onerror = () => reject(reader.error ?? new Error(t("upload.readFailed")));
     reader.onload = () => resolve(String(reader.result ?? ""));
     reader.readAsDataURL(file);
   });

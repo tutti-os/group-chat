@@ -12,6 +12,7 @@ import type {
 import { DEFAULT_PARTICIPANT_LISTEN_MODE, uniqueParticipantDisplayNameInRoom } from "@group-chat/shared";
 import { runtimeStatusSummary } from "../../runtime.js";
 import { resolveAgentAvatar } from "../../identity-avatar.js";
+import { useTranslation } from "../../i18n/index.js";
 import { AgentAvatar } from "../ui/AgentAvatar.js";
 import { RoomAvatarUploadButton } from "../ui/RoomAvatarUploadButton.js";
 import { AgentManageForm } from "./AgentManageForm.js";
@@ -43,6 +44,7 @@ export function AgentProfileDialog(props: {
   onToggleMute: (participantId: string, muted: boolean) => Promise<unknown>;
   onRemoveParticipant?: (participantId: string) => Promise<unknown>;
 }) {
+  const { t } = useTranslation();
   const panelRef = useRef<HTMLDivElement | null>(null);
   const participant = props.participant;
   const setupIdentity = props.setupIdentity ?? null;
@@ -105,6 +107,7 @@ export function AgentProfileDialog(props: {
   });
   const removed = !isAddMode && participant?.status === "removed";
   const muted = !isAddMode && participant?.status === "muted";
+  const displayName = previewDisplayName || formParticipant.displayName;
 
   const toggleMute = async () => {
     if (!participant || mutePending) return;
@@ -128,17 +131,17 @@ export function AgentProfileDialog(props: {
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label={`${previewDisplayName || formParticipant.displayName} 设置`}
+        aria-label={t("agentProfile.settingsAria", { name: displayName })}
         className={"[display:flex] [width:min(680px,_calc(100vw_-_32px))] [max-height:min(720px,_calc(100vh_-_32px))] [flex-direction:column] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:20px] [background:var(--panel)] [box-shadow:0_24px_80px_rgb(0_0_0_/_24%)] max-[760px]:[width:calc(100vw_-_28px)] max-[760px]:[max-height:calc(100vh_-_28px)]"}
         onPointerDown={(event) => event.stopPropagation()}
       >
         <div className={"[display:flex] [flex:0_0_auto] [align-items:center] [justify-content:space-between] [gap:12px] [padding:16px_18px] [border-bottom:1px_solid_var(--border)]"}>
           <div className={"[display:flex] [min-width:0] [flex:1_1_auto] [align-items:center] [gap:10px]"}>
             {removed ? (
-              <AgentAvatar title={previewDisplayName || formParticipant.displayName} avatar={headerAvatar.avatar} provider={headerAvatar.provider} size={40} />
+              <AgentAvatar title={displayName} avatar={headerAvatar.avatar} provider={headerAvatar.provider} size={40} />
             ) : (
               <RoomAvatarUploadButton
-                title={previewDisplayName || formParticipant.displayName}
+                title={displayName}
                 avatar={headerAvatar.avatar}
                 provider={headerAvatar.provider}
                 size={40}
@@ -152,11 +155,11 @@ export function AgentProfileDialog(props: {
             )}
             <div className={"[min-width:0]"}>
               <h3 className={"[margin:0] [overflow:hidden] [font-size:16px] [font-weight:720] [line-height:1.2] [text-overflow:ellipsis] [white-space:nowrap]"}>
-                {previewDisplayName || formParticipant.displayName}
+                {displayName}
               </h3>
               {isAddMode ? (
                 <p className={"[margin:3px_0_0] [color:var(--muted)] [font-size:12px] [line-height:1.35]"}>
-                  配置完成后保存，即可加入此群
+                  {t("agentProfile.saveToJoin")}
                 </p>
               ) : (
                 <p className={"[margin:3px_0_0] [color:var(--muted)] [font-size:12px] [line-height:1.35]"}>
@@ -169,17 +172,17 @@ export function AgentProfileDialog(props: {
               <div className={"[display:flex] [flex-wrap:wrap] [gap:6px] [margin-top:6px]"}>
                 {isAddMode ? (
                   <span className={"[display:inline-flex] [height:20px] [align-items:center] [border-radius:999px] [padding:0_7px] [color:#2563eb] [background:#eff6ff] [font-size:10px] [font-weight:700]"}>
-                    待添加
+                    {t("agentProfile.pendingAdd")}
                   </span>
                 ) : null}
                 {removed ? (
                   <span className={"[display:inline-flex] [height:20px] [align-items:center] [border-radius:999px] [padding:0_7px] [color:#6b7280] [background:#f3f4f6] [font-size:10px] [font-weight:700]"}>
-                    已移出群聊
+                    {t("agentProfile.removedFromRoom")}
                   </span>
                 ) : null}
                 {muted ? (
                   <span className={"[display:inline-flex] [height:20px] [align-items:center] [border-radius:999px] [padding:0_7px] [color:#b45309] [background:#fef3c7] [font-size:10px] [font-weight:700]"}>
-                    已静音
+                    {t("composer.muted")}
                   </span>
                 ) : null}
               </div>
@@ -195,13 +198,13 @@ export function AgentProfileDialog(props: {
                 onClick={() => void toggleMute()}
               >
                 {muted ? <Mic size={14} /> : <MicOff size={14} />}
-                {muted ? "解除静音" : "静音"}
+                {muted ? t("agentProfile.unmute") : t("agentProfile.mute")}
               </button>
             ) : null}
             <button
               type="button"
               className={"[display:inline-grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012]"}
-              aria-label="关闭"
+              aria-label={t("common.close")}
               onClick={props.onClose}
             >
               <X size={16} />

@@ -13,6 +13,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AgentRun, AgentRunEvent, Participant } from "@group-chat/shared";
+import { formatRunEventStatus, useTranslation } from "../../i18n/index.js";
 
 type DisplayItem =
   | { kind: "thinking"; content: string; streaming: boolean }
@@ -27,6 +28,7 @@ export function AgentRunPanel(props: {
   onClose: () => void;
   onFocusMessage?: (messageId: string) => void;
 }) {
+  const { t } = useTranslation();
   const panelRef = useRef<HTMLElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);
@@ -62,13 +64,13 @@ export function AgentRunPanel(props: {
 
   if (!props.open || !props.run) return null;
 
-  const participantName = props.participant?.displayName ?? "Agent";
+  const participantName = props.participant?.displayName ?? t("common.agent");
 
   return (
     <aside
       ref={panelRef}
       className={"[position:absolute] [top:56px] [right:0] [bottom:0] [z-index:37] [display:grid] [width:min(400px,_calc(100vw_-_24px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border)] [background:var(--panel)] [box-shadow:-18px_0_40px_rgb(0_0_0_/_8%)]"}
-      aria-label="Agent 执行过程"
+      aria-label={t("runPanel.aria")}
     >
       <header className={"[display:grid] [grid-template-columns:minmax(0,_1fr)_auto] [align-items:center] [gap:8px] [border-bottom:1px_solid_var(--border)] [padding:14px] [background:#ffffff]"}>
         <span className={"[display:grid] [gap:3px] [min-width:0]"}>
@@ -81,13 +83,13 @@ export function AgentRunPanel(props: {
             <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{participantName}</span>
           </strong>
           <small className={"[color:var(--muted)] [font-size:12px]"}>
-            {props.running ? "Agent 正在思考与执行..." : "Agent 执行已完成"}
+            {props.running ? t("runPanel.running") : t("runPanel.completed")}
           </small>
         </span>
         <button
           type="button"
           className={"[display:grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [&:focus-visible]:[outline:none]"}
-          aria-label="关闭执行过程"
+          aria-label={t("runPanel.close")}
           onClick={props.onClose}
         >
           <X size={16} />
@@ -108,7 +110,7 @@ export function AgentRunPanel(props: {
             className={"[justify-self:start] [height:30px] [border:0] [border-radius:8px] [padding:0_12px] [color:#ffffff] [background:#111827] [font-size:12px] [font-weight:700] [&:hover]:[background:#1f2937]"}
             onClick={() => props.onFocusMessage?.(props.run!.assistantMessageId!)}
           >
-            定位到回复消息
+            {t("runPanel.jumpToReply")}
           </button>
         ) : null}
 
@@ -117,12 +119,12 @@ export function AgentRunPanel(props: {
             {props.running ? (
               <>
                 <LoaderCircle size={22} className={"animate-spin"} />
-                <p className={"[margin:0]"}>等待 Agent 开始...</p>
+                <p className={"[margin:0]"}>{t("runPanel.waiting")}</p>
               </>
             ) : (
               <>
                 <Bot size={22} />
-                <p className={"[margin:0]"}>这次执行没有记录过程事件。</p>
+                <p className={"[margin:0]"}>{t("runPanel.noEvents")}</p>
               </>
             )}
           </div>
@@ -137,7 +139,7 @@ export function AgentRunPanel(props: {
               >
                 <div className={"[display:flex] [align-items:center] [gap:6px] [color:var(--muted)] [font-size:12px] [font-weight:700]"}>
                   <BrainCircuit size={15} />
-                  <span>{item.streaming ? "思考中" : "思考过程"}</span>
+                  <span>{item.streaming ? t("thinkingPanel.thinkingInProgress") : t("thinkingPanel.thinkingProcess")}</span>
                 </div>
                 <div className={"message-prose [max-height:280px] [overflow:auto] [color:#404040] [font-size:12px] [line-height:1.6]"}>
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.content || " "}</ReactMarkdown>
@@ -171,7 +173,7 @@ export function AgentRunPanel(props: {
               <section key={event.id} className={"[display:grid] [gap:6px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:10px_12px] [background:#ffffff] [font-size:12px]"}>
                 <div className={"[display:flex] [align-items:center] [gap:6px] [font-weight:700] [color:var(--text)]"}>
                   <FileText size={15} />
-                  <strong>写入文件</strong>
+                  <strong>{t("runPanel.writeFile")}</strong>
                 </div>
                 <pre className={"[margin:0] [overflow:auto] [white-space:pre-wrap] [color:#404040] [font-size:11px] [line-height:1.5]"}>{path}</pre>
               </section>
@@ -181,7 +183,7 @@ export function AgentRunPanel(props: {
           if (event.type === "status") {
             return (
               <p key={event.id} className={"[margin:0] [color:var(--muted)] [font-size:12px] [line-height:1.5]"}>
-                {event.content || "状态更新"}
+                {event.content || t("runPanel.statusUpdate")}
               </p>
             );
           }
@@ -193,7 +195,7 @@ export function AgentRunPanel(props: {
             >
               <div className={"[display:flex] [align-items:center] [gap:6px] [font-weight:700]"}>
                 <AlertCircle size={15} />
-                <strong>{event.type === "stderr" ? "运行时输出" : "执行错误"}</strong>
+                <strong>{event.type === "stderr" ? t("runPanel.runtimeOutput") : t("runPanel.execError")}</strong>
               </div>
               {event.content ? <pre className={"[margin:0] [overflow:auto] [white-space:pre-wrap] [font-size:11px] [line-height:1.5]"}>{event.content}</pre> : null}
             </section>
@@ -231,12 +233,4 @@ function groupRunEvents(events: AgentRunEvent[]): DisplayItem[] {
   }
   flushThinking();
   return items;
-}
-
-function formatRunEventStatus(event: AgentRunEvent) {
-  if (event.type === "tool_call" && event.status === "streaming") return "执行中";
-  if (event.type === "tool_call" && event.status === "success") return "已调用";
-  if (event.type === "tool_result" && event.status === "success") return "已完成";
-  if (event.status === "error") return "失败";
-  return event.status;
 }

@@ -1,11 +1,12 @@
 import type { Message, ParticipantListenMode } from "@group-chat/shared";
+import { t } from "./i18n/index.js";
 
 export function formatMessageStatus(status: Message["status"]) {
   if (status === "success") return "";
   if (status === "streaming") return "";
-  if (status === "pending") return "等待中";
-  if (status === "error") return "失败";
-  if (status === "cancelled") return "已取消";
+  if (status === "pending") return t("message.status.pending");
+  if (status === "error") return t("message.status.error");
+  if (status === "cancelled") return t("message.status.cancelled");
   return status;
 }
 
@@ -16,9 +17,9 @@ export function listenModeLabel(mode: ParticipantListenMode) {
 }
 
 export function listenModeTitle(mode: ParticipantListenMode) {
-  if (mode === "active") return "Active";
-  if (mode === "passive") return "Passive";
-  return "Adaptive";
+  if (mode === "active") return t("listenMode.active");
+  if (mode === "passive") return t("listenMode.passive");
+  return t("listenMode.adaptive");
 }
 
 export function formatShortDate(value: string) {

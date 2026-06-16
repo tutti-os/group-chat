@@ -29,6 +29,7 @@ import {
   summaryLinkLabel,
 } from "../../chat-links.js";
 import { isMessageGroupBreak, MESSAGE_GROUP_IDLE_MS } from "../../message-group-breaks.js";
+import { attachmentLabel, t, translateAgentError, translateSystemNotice, useTranslation } from "../../i18n/index.js";
 
 const COLLAPSED_MESSAGE_CHAR_LIMIT = 800;
 const COPY_TIP_OFFSET_PX = 8;
@@ -98,6 +99,7 @@ export function MessageTimeline(props: {
   onViewThinking: (message: Message) => void;
   onRegisterScrollPreserver?: (preserver: { capture: () => void } | null) => void;
 }) {
+  useTranslation();
   const scrollRef = useRef<HTMLElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const copyTipTimerRef = useRef<number | null>(null);
@@ -285,7 +287,7 @@ export function MessageTimeline(props: {
   const copyMessages = async (messages: Message[], position: CopyTipPosition) => {
     const text = messages
       .filter((message) => message.status !== "deleted" && message.status !== "recalled")
-      .map((message) => `${messageSenderLabel(message, props.allParticipants, props.identities, props.userProfile.displayName)}: ${message.content.trim() || "[附件]"}`)
+      .map((message) => `${messageSenderLabel(message, props.allParticipants, props.identities, props.userProfile.displayName)}: ${message.content.trim() || attachmentLabel()}`)
       .join("\n");
     await copyTextToClipboard(text);
     showCopyTip(position);
@@ -497,8 +499,8 @@ export function MessageTimeline(props: {
         <button
           type="button"
           className={"[position:fixed] [z-index:40] [right:28px] [bottom:112px] [display:grid] [width:52px] [height:52px] [place-items:center] [border:1px_solid_var(--border)] [border-radius:999px] [color:var(--text)] [background:#fffffff2] [box-shadow:0_12px_34px_rgb(0_0_0_/_14%)] [backdrop-filter:blur(10px)] [cursor:pointer] hover:[background:#ffffff] focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:2px] max-[760px]:[right:18px] max-[760px]:[bottom:96px]"}
-          aria-label="回到最新消息"
-          title="回到最新消息"
+          aria-label={t("messageActions.jumpToLatest")}
+          title={t("messageActions.jumpToLatest")}
           onClick={scrollToBottom}
         >
           <ChevronsDown size={22} />
@@ -548,7 +550,7 @@ export function MessageTimeline(props: {
               images: summaryImages,
             })
               .then(() => showCopyTip(position))
-              .catch(() => window.alert("复制失败，请检查浏览器剪贴板权限"));
+              .catch(() => window.alert(t("app.copyFailed")));
           }}
           onBackToSource={() => {
             const messageId = props.openBackgroundTask?.sourceMessageId;
@@ -569,7 +571,7 @@ export function MessageTimeline(props: {
             transform: "translate(-50%, -100%)",
           }}
         >
-          已复制
+          {t("common.copied")}
         </div>
       ) : null}
       <AttachmentPreviewDialog preview={preview} onClose={() => setPreview(null)} />
@@ -582,23 +584,23 @@ function EmptyTimelineState(props: { participantsCount: number; onOpenMembers: (
   return (
     <div className={"[display:grid] [min-height:100%] [place-items:center] [padding:28px] [text-align:center]"}>
       <div className={"[display:grid] [max-width:460px] [gap:14px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:28px] [background:#ffffff99] [&_h3]:[margin:0] [&_h3]:[color:var(--text)] [&_h3]:[font-size:18px] [&_h3]:[font-weight:700] [&_p]:[margin:0] [&_p]:[color:var(--muted)] [&_p]:[font-size:13px] [&_p]:[line-height:1.6]"}>
-        <h3>{noAgents ? "当前房间还没有 Agent" : "开始第一轮协作"}</h3>
+        <h3>{noAgents ? t("timeline.emptyNoAgentsTitle") : t("timeline.emptyStartTitle")}</h3>
         <p>
           {noAgents
-            ? "添加 Agent 后，他们才能根据你的消息自动回复。"
-            : "可以直接输入需求，也可以 @ 某个 Agent 指定回复者。"}
+            ? t("timeline.emptyNoAgentsHint")
+            : t("timeline.emptyStartHint")}
         </p>
         <div className={"[display:flex] [flex-wrap:wrap] [justify-content:center] [gap:8px] [&_span]:[border:1px_solid_var(--border)] [&_span]:[border-radius:999px] [&_span]:[padding:5px_10px] [&_span]:[color:var(--tag-agent-text)] [&_span]:[background:#ffffff] [&_span]:[font-size:12px]"}>
-          <span>帮我分析这个需求</span>
-          <span>给我一版产品方案</span>
-          <span>@所有人 一起讨论</span>
+          <span>{t("timeline.suggestionAnalyze")}</span>
+          <span>{t("timeline.suggestionProductPlan")}</span>
+          <span>{t("timeline.suggestionDiscussAll")}</span>
         </div>
         <button
           type="button"
           className={"[justify-self:center] [height:36px] [border:0] [border-radius:6px] [padding:0_14px] [color:#ffffff] [background:var(--primary)] [font-size:13px] [font-weight:650] [&:hover]:[background:var(--accent)]"}
           onClick={() => props.onOpenMembers(noAgents ? { startAdding: true } : undefined)}
         >
-          {noAgents ? "添加 Agent" : "管理 Agent"}
+          {noAgents ? t("timeline.addAgent") : t("timeline.manageAgents")}
         </button>
       </div>
     </div>
@@ -684,10 +686,10 @@ function hasVisibleConversationContent(blocks: MessageBlock[]) {
 function resolveAssistantFailureText(message: Message, blocks: MessageBlock[], agentRuns: AgentRun[]) {
   if (message.role !== "assistant" || message.status !== "error") return null;
   const messageText = message.content.trim();
-  if (messageText) return messageText;
+  if (messageText) return translateAgentError(messageText);
   const run = message.runId ? agentRuns.find((item) => item.id === message.runId) ?? null : null;
   const runError = run?.error?.trim();
-  if (runError) return /^Agent (执行|未)/.test(runError) ? runError : `Agent 执行失败：${runError}`;
+  if (runError) return translateAgentError(runError);
   const blockText = blocks.find((block) => block.content.trim())?.content.trim();
   return blockText || null;
 }
@@ -710,7 +712,7 @@ function resolveReferencedMessage(
   const quoteText = compactComparableText(legacyQuote.content);
   return [...candidates].reverse().find((candidate) => {
     const senderMatches = messageSenderLabel(candidate, participants, identities) === legacyQuote.sender || candidate.senderName === legacyQuote.sender;
-    const candidateText = compactComparableText(candidate.content || "[附件]");
+    const candidateText = compactComparableText(candidate.content || attachmentLabel());
     return senderMatches && (candidateText.includes(quoteText) || quoteText.includes(candidateText.slice(0, 40)));
   }) ?? null;
 }
@@ -742,11 +744,11 @@ function resolveWhisperFooterLabel(
     const participant = mention?.participantId
       ? allParticipants.find((item) => item.id === mention.participantId) ?? null
       : null;
-    const name = participant?.displayName?.trim() || mention?.displayNameSnapshot?.trim() || "Agent";
-    return { label: `给 ${name} 的悄悄话`, variant: "user" };
+    const name = participant?.displayName?.trim() || mention?.displayNameSnapshot?.trim() || t("common.agent");
+    return { label: t("timeline.whisperTo", { name }), variant: "user" };
   }
   if (message.role === "assistant" && isWhisper) {
-    return { label: "只对我可见", variant: "agent" };
+    return { label: t("timeline.visibleToMeOnly"), variant: "agent" };
   }
   return null;
 }
@@ -805,7 +807,7 @@ function SystemNoticeRow(props: { message: Message }) {
       className={"[display:flex] [justify-content:center] [margin:6px_0_14px] [padding:0_20px]"}
     >
       <span className={"[inline-flex] [max-width:min(560px,_100%)] [align-items:center] [justify-content:center] [border-radius:999px] [padding:4px_12px] [color:var(--muted)] [background:#00000008] [font-size:12px] [line-height:18px] [text-align:center]"}>
-        {text}
+        {translateSystemNotice(text)}
       </span>
     </div>
   );
@@ -890,8 +892,8 @@ function MessageRow(props: {
       data-profile-trigger="message-avatar"
       type="button"
       className={"[position:relative] [display:inline-grid] [flex:0_0_auto] [width:34px] [height:34px] [overflow:hidden] [border:0] [border-radius:999px] [padding:0] [background:transparent] [cursor:pointer] [transition:transform_0.12s_ease] [&:hover]:[transform:translateY(-1px)] [&:focus-visible]:[outline:2px_solid_var(--accent)] [&:focus-visible]:[outline-offset:2px]"}
-      title="查看我的资料"
-      aria-label="查看我的资料"
+      title={t("messageActions.viewProfile")}
+      aria-label={t("messageActions.viewProfile")}
       onMouseDown={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -916,8 +918,8 @@ function MessageRow(props: {
       data-slot="message-avatar"
       type="button"
       className={"[position:relative] [display:inline-flex] [flex:0_0_auto] [align-items:center] [justify-content:center] [width:34px] [height:34px] [border:0] [padding:0] [background:transparent] [cursor:pointer] [transition:transform_0.12s_ease] [&:hover]:[transform:translateY(-1px)] [&:focus-visible]:[outline:2px_solid_var(--accent)] [&:focus-visible]:[outline-offset:2px]"}
-      title={`查看 ${props.participant.displayName}`}
-      aria-label={`查看 ${props.participant.displayName} 的 Agent 信息`}
+      title={t("messageActions.viewParticipant", { name: props.participant.displayName })}
+      aria-label={t("messageActions.viewAgentInfo", { name: props.participant.displayName })}
       onClick={() => props.onOpenAgentProfile(props.participant!)}
     >
       <MessageSenderAvatar
@@ -984,7 +986,7 @@ function MessageRow(props: {
                   type="button"
                   className={"group [display:inline-flex] [align-items:center] [border:0] [padding:0] [color:var(--muted)] [background:transparent] [font-size:12px] [font-weight:550] [line-height:20px] [cursor:pointer] [transition:color_0.12s_ease] hover:![color:#2563eb] focus-visible:![color:#2563eb] focus-visible:[outline:none]"}
                   title={`@${props.participant.displayName}`}
-                  aria-label={`在输入框中 @${props.participant.displayName}`}
+                  aria-label={t("messageActions.mentionInComposer", { name: props.participant.displayName })}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => props.onMentionParticipant(props.participant!)}
                 >
@@ -1083,7 +1085,7 @@ function MessageRow(props: {
       >
         {!isRemoved ? (
           <label className={"[display:grid] [width:16px] [height:16px] [place-items:center] [cursor:pointer]"}>
-            <input className={"[width:16px] [height:16px] [accent-color:var(--primary)]"} type="checkbox" checked={props.selected} onChange={props.onToggleSelected} aria-label="选择消息" />
+            <input className={"[width:16px] [height:16px] [accent-color:var(--primary)]"} type="checkbox" checked={props.selected} onChange={props.onToggleSelected} aria-label={t("messageActions.selectMessage")} />
           </label>
         ) : null}
       </div>
@@ -1144,14 +1146,14 @@ function MessageActionBar(props: {
           : { top: 0, left: 0, visibility: "hidden" }),
         ...(props.menuOpen ? { zIndex: MESSAGE_ACTION_BAR_Z_INDEX } : {}),
       }}
-      aria-label="消息操作"
+      aria-label={t("messageActions.menu")}
       onMouseEnter={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <IconAction title="回复" onClick={props.onReply}><Reply size={14} /></IconAction>
-      <IconAction title="复制" onClick={(event) => props.onCopy({ x: event.clientX, y: event.clientY })}><Copy size={14} /></IconAction>
+      <IconAction title={t("common.reply")} onClick={props.onReply}><Reply size={14} /></IconAction>
+      <IconAction title={t("common.copy")} onClick={(event) => props.onCopy({ x: event.clientX, y: event.clientY })}><Copy size={14} /></IconAction>
       <IconAction
-        title="更多"
+        title={t("common.more")}
         onClick={(event) => {
           const anchor = event.currentTarget.closest('[data-slot="message-actions"]');
           if (anchor instanceof HTMLElement) props.onOpenMenu(anchor);
@@ -1245,14 +1247,14 @@ function MessageMoreMenu(props: {
       role="menu"
       onPointerDown={(event) => event.stopPropagation()}
     >
-      {!isRemoved ? <MenuButton icon={<CheckSquare size={14} />} label="多选" onClick={() => void run(props.onSelect)} /> : null}
-      {isAssistant ? <MenuButton icon={<RotateCcw size={14} />} label="继续追问" onClick={() => void run(props.onContinue)} /> : null}
-      <MenuButton icon={<BrainCircuit size={14} />} label="总结" onClick={() => void run(props.onSummarize)} />
-      {isAssistant ? <MenuButton icon={<BrainCircuit size={14} />} label="查看思考过程" onClick={() => void run(props.onViewThinking)} /> : null}
-      <MenuButton icon={<Copy size={14} />} label="复制消息链接" onClick={(event) => void run(() => props.onCopyLink({ x: event.clientX, y: event.clientY }))} />
-      {canRecallMessage ? <MenuButton icon={<Edit3 size={14} />} label="编辑并重新回复" onClick={() => void run(props.onEdit)} /> : null}
-      {canRecallMessage && !props.selectionMode ? <MenuButton icon={<RotateCcw size={14} />} label="撤回" danger onClick={() => void run(props.onRecall)} /> : null}
-      {!props.selectionMode ? <MenuButton icon={<Trash2 size={14} />} label="删除" danger onClick={() => void run(props.onDelete)} /> : null}
+      {!isRemoved ? <MenuButton icon={<CheckSquare size={14} />} label={t("messageActions.select")} onClick={() => void run(props.onSelect)} /> : null}
+      {isAssistant ? <MenuButton icon={<RotateCcw size={14} />} label={t("messageActions.continue")} onClick={() => void run(props.onContinue)} /> : null}
+      <MenuButton icon={<BrainCircuit size={14} />} label={t("messageActions.summarize")} onClick={() => void run(props.onSummarize)} />
+      {isAssistant ? <MenuButton icon={<BrainCircuit size={14} />} label={t("messageActions.viewThinking")} onClick={() => void run(props.onViewThinking)} /> : null}
+      <MenuButton icon={<Copy size={14} />} label={t("messageActions.copyLink")} onClick={(event) => void run(() => props.onCopyLink({ x: event.clientX, y: event.clientY }))} />
+      {canRecallMessage ? <MenuButton icon={<Edit3 size={14} />} label={t("messageActions.editResend")} onClick={() => void run(props.onEdit)} /> : null}
+      {canRecallMessage && !props.selectionMode ? <MenuButton icon={<RotateCcw size={14} />} label={t("messageActions.recall")} danger onClick={() => void run(props.onRecall)} /> : null}
+      {!props.selectionMode ? <MenuButton icon={<Trash2 size={14} />} label={t("common.delete")} danger onClick={() => void run(props.onDelete)} /> : null}
     </div>,
     document.body,
   );
@@ -1270,15 +1272,15 @@ function BulkMessageToolbar(props: {
     <div
       className={"[position:absolute] [inset:0] [z-index:20] [display:flex] [align-items:center] [gap:8px] [overflow-x:auto] [border-top:1px_solid_var(--border)] [padding:8px_16px] [background:var(--panel)] [box-shadow:0_-8px_24px_rgb(0_0_0_/_6%)] max-[760px]:[padding-inline:12px]"}
       role="toolbar"
-      aria-label="多选操作"
+      aria-label={t("messageActions.bulkToolbar")}
     >
-      <span className={"[flex-shrink:0] [padding:0_4px] [color:var(--muted)] [font-size:13px] [font-weight:700]"}>已选 {props.count} 条</span>
-      <ToolbarButton label="复制" onClick={(event) => props.onCopy({ x: event.clientX, y: event.clientY })} />
-      <ToolbarButton label="引用" onClick={props.onQuote} />
-      <ToolbarButton label="总结" onClick={props.onSummarize} />
-      <ToolbarButton label="删除" danger onClick={props.onDelete} />
+      <span className={"[flex-shrink:0] [padding:0_4px] [color:var(--muted)] [font-size:13px] [font-weight:700]"}>{t("messageActions.selectedCount", { count: props.count })}</span>
+      <ToolbarButton label={t("common.copy")} onClick={(event) => props.onCopy({ x: event.clientX, y: event.clientY })} />
+      <ToolbarButton label={t("messageActions.quote")} onClick={props.onQuote} />
+      <ToolbarButton label={t("messageActions.summarize")} onClick={props.onSummarize} />
+      <ToolbarButton label={t("common.delete")} danger onClick={props.onDelete} />
       <div className={"[flex:1_1_auto]"} />
-      <IconAction title="退出多选" onClick={() => props.onClose()}><X size={14} /></IconAction>
+      <IconAction title={t("messageActions.exitSelection")} onClick={() => props.onClose()}><X size={14} /></IconAction>
     </div>
   );
 }
@@ -1299,17 +1301,17 @@ function SummaryAgentPicker(props: {
       return right.sortOrder - left.sortOrder;
     });
   const preview = props.messages.length > 1
-    ? `引用 ${props.messages.length} 条消息 · ${compactInline(props.messages[0]?.content || "[附件]")}`
-    : compactInline(props.messages[0]?.content || "[附件]");
+    ? t("messageActions.quotePreview", { count: props.messages.length, preview: compactInline(props.messages[0]?.content || attachmentLabel()) })
+    : compactInline(props.messages[0]?.content || attachmentLabel());
   return (
-    <div className={"[position:fixed] [inset:0] [z-index:90] [display:grid] [place-items:center] [padding:24px] [background:rgb(15_23_42_/_34%)]"} role="dialog" aria-modal="true" aria-label="选择总结 Agent">
+    <div className={"[position:fixed] [inset:0] [z-index:90] [display:grid] [place-items:center] [padding:24px] [background:rgb(15_23_42_/_34%)]"} role="dialog" aria-modal="true" aria-label={t("messageActions.pickSummaryAgent")}>
       <div className={"[display:grid] [width:min(420px,_calc(100vw_-_40px))] [gap:12px] [border:1px_solid_var(--border)] [border-radius:18px] [padding:16px] [background:var(--panel)] [box-shadow:0_24px_70px_rgb(0_0_0_/_22%)]"}>
         <header className={"[display:grid] [grid-template-columns:minmax(0,_1fr)_30px] [align-items:center] [gap:10px]"}>
           <span className={"[display:grid] [gap:3px]"}>
-            <strong className={"[font-size:15px] [font-weight:750] [color:var(--text)]"}>选择一个 Agent 来总结</strong>
+            <strong className={"[font-size:15px] [font-weight:750] [color:var(--text)]"}>{t("messageActions.pickAgentTitle")}</strong>
             <small className={"[color:var(--muted)] [font-size:12px]"}>{preview}</small>
           </span>
-          <button type="button" className={"[display:grid] [width:30px] [height:30px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:#00000008]"} aria-label="关闭" onClick={props.onClose}>
+          <button type="button" className={"[display:grid] [width:30px] [height:30px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:#00000008]"} aria-label={t("common.close")} onClick={props.onClose}>
             <X size={15} />
           </button>
         </header>
@@ -1335,7 +1337,7 @@ function SummaryAgentPicker(props: {
             </button>
             );
           }) : (
-            <p className={"[margin:0] [color:var(--muted)] [font-size:13px]"}>当前房间没有可用 Agent。</p>
+            <p className={"[margin:0] [color:var(--muted)] [font-size:13px]"}>{t("messageActions.noAgentsAvailable")}</p>
           )}
         </div>
       </div>
@@ -1358,31 +1360,33 @@ function SummaryPanel(props: {
   const isMultiSource = props.task.sourceMessageIds.length > 1;
   const sourcePreview = isMultiSource
     ? props.task.sourcePreview
-    : sourceMessage?.content || props.task.sourcePreview || "[附件]";
+    : sourceMessage?.content || props.task.sourcePreview || attachmentLabel();
   return (
-    <aside className={"[position:fixed] [top:56px] [right:0] [bottom:0] [z-index:70] [display:grid] [width:min(420px,_calc(100vw_-_28px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border)] [background:var(--panel)] [box-shadow:-18px_0_50px_rgb(0_0_0_/_14%)]"} aria-label="总结侧边栏">
+    <aside className={"[position:fixed] [top:56px] [right:0] [bottom:0] [z-index:70] [display:grid] [width:min(420px,_calc(100vw_-_28px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border)] [background:var(--panel)] [box-shadow:-18px_0_50px_rgb(0_0_0_/_14%)]"} aria-label={t("messageActions.summarySidebar")}>
       <header className={"[display:grid] [grid-template-columns:minmax(0,_1fr)_auto] [align-items:center] [gap:8px] [border-bottom:1px_solid_var(--border)] [padding:14px] [background:#ffffff]"}>
         <span className={"[display:grid] [gap:2px] [min-width:0]"}>
-          <strong className={"[color:var(--text)] [font-size:15px] [font-weight:750]"}>消息总结</strong>
+          <strong className={"[color:var(--text)] [font-size:15px] [font-weight:750]"}>{t("messageActions.messageSummary")}</strong>
           <small className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap] [color:var(--muted)] [font-size:12px]"}>
-            {props.task.participantName} 总结 {isMultiSource ? `${props.task.sourceMessageIds.length} 条消息` : sourceMessage ? messageSenderLabel(sourceMessage, props.allParticipants, props.identities) : "消息"}
+            {isMultiSource
+              ? t("messageActions.summaryByMulti", { name: props.task.participantName, count: props.task.sourceMessageIds.length })
+              : t("messageActions.summaryBySingle", { name: props.task.participantName })}
           </small>
         </span>
-        <button type="button" className={"[display:grid] [width:30px] [height:30px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:#00000008]"} aria-label="关闭总结" onClick={props.onClose}>
+        <button type="button" className={"[display:grid] [width:30px] [height:30px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:#00000008]"} aria-label={t("messageActions.closeSummary")} onClick={props.onClose}>
           <X size={15} />
         </button>
       </header>
       <div className={"[min-height:0] [overflow:auto] [padding:14px] [display:grid] [align-content:start] [gap:12px]"}>
         <section className={"[display:grid] [gap:8px] [border:1px_solid_var(--border)] [border-radius:12px] [padding:10px] [background:#f8fafc]"}>
           <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:8px]"}>
-            <strong className={"[font-size:12px] [font-weight:750] [color:var(--muted)]"}>{isMultiSource ? "原消息" : "原消息"}</strong>
+            <strong className={"[font-size:12px] [font-weight:750] [color:var(--muted)]"}>{t("summary.htmlSource")}</strong>
             {props.task.sourceMessageId ? (
               <button
                 type="button"
                 className={"[height:28px] [border:0] [border-radius:8px] [padding:0_10px] [color:#ffffff] [background:#111827] [font-size:12px] [font-weight:700] [white-space:nowrap]"}
                 onClick={props.onBackToSource}
               >
-                回到原文
+                {t("messageActions.backToSource")}
               </button>
             ) : null}
           </div>
@@ -1397,24 +1401,24 @@ function SummaryPanel(props: {
         </section>
         <section className={"[display:grid] [gap:8px]"}>
           <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:8px]"}>
-            <strong className={"[font-size:12px] [font-weight:750] [color:var(--muted)]"}>{loading ? "正在总结..." : "总结结果"}</strong>
+            <strong className={"[font-size:12px] [font-weight:750] [color:var(--muted)]"}>{loading ? t("messageActions.summarizing") : t("messageActions.summaryResult")}</strong>
             {!loading && summaryContent ? (
               <button
                 type="button"
                 className={"[height:28px] [border:0] [border-radius:8px] [padding:0_10px] [color:var(--text)] [background:#00000008] [font-size:12px] [font-weight:650]"}
                 onClick={(event) => props.onCopy({ x: event.clientX, y: event.clientY })}
               >
-                复制
+                {t("common.copy")}
               </button>
             ) : null}
           </div>
           <div className={"message-prose [min-height:160px] [border:1px_solid_var(--border)] [border-radius:12px] [padding:12px] [background:#ffffff] [color:var(--text)] [font-size:13px] [line-height:1.65]"}>
             {props.task.status === "failed" ? (
-              <p className={"[margin:0] [color:var(--danger)]"}>{props.task.error || "总结失败"}</p>
+              <p className={"[margin:0] [color:var(--danger)]"}>{props.task.error ? translateAgentError(props.task.error) : t("messageActions.summaryFailed")}</p>
             ) : summaryContent ? (
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{summaryContent}</ReactMarkdown>
             ) : (
-              <p className={"[margin:0] [color:var(--muted)]"}>等待 Agent 返回总结...</p>
+              <p className={"[margin:0] [color:var(--muted)]"}>{t("messageActions.waitingSummary")}</p>
             )}
           </div>
         </section>
@@ -1426,7 +1430,7 @@ function SummaryPanel(props: {
 function DeletedMessageBubble(props: { status: Message["status"] }) {
   return (
     <div data-slot="message-block" className={"[width:fit-content] [max-width:100%] [border:1px_dashed_var(--border)] [border-radius:4px_6px_6px_4px] [padding:9px_12px] [color:var(--muted)] [background:#00000004] [font-size:13px] [font-style:italic]"}>
-      {props.status === "recalled" ? "这条消息已撤回" : "这条消息已删除"}
+      {props.status === "recalled" ? t("messageActions.messageRecalled") : t("messageActions.messageDeleted")}
     </div>
   );
 }
@@ -1441,7 +1445,7 @@ function ReferencedMessagePreview(props: {
     <button
       type="button"
       className={"[display:block] [width:fit-content] [max-width:100%] [margin-bottom:6px] [border:0] [border-left:3px_solid_#c6d1e3] [border-radius:4px] [padding:3px_8px] [color:#7b8494] [background:#00000006] [font-size:13px] [line-height:20px] [text-align:left] [cursor:pointer] hover:[background:#0000000a]"}
-      title="查看被引用的原文"
+      title={t("messageActions.viewQuotedOriginal")}
       onMouseDown={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => {
@@ -1451,7 +1455,7 @@ function ReferencedMessagePreview(props: {
       }}
     >
       <span className={"[display:block] [max-width:min(460px,_100%)] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>
-        回复 {messageSenderLabel(props.message, props.participants, props.identities)}: {compactInline(props.message.content || "[附件]")}
+        {t("messageActions.replyTo", { sender: messageSenderLabel(props.message, props.participants, props.identities), content: compactInline(props.message.content || attachmentLabel()) })}
       </span>
     </button>
   );
@@ -1477,8 +1481,8 @@ function ReferencedMessagePanel(props: {
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [border-bottom:1px_solid_var(--border)] [padding:16px_18px] [background:#ffffff]"}>
-          <strong className={"[font-size:15px] [font-weight:760] [color:var(--text)]"}>详情页</strong>
-          <button type="button" className={"[display:grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--muted)] [background:#00000008] hover:[color:var(--text)]"} aria-label="关闭详情页" onClick={props.onClose}>
+          <strong className={"[font-size:15px] [font-weight:760] [color:var(--text)]"}>{t("messageActions.detailPanel")}</strong>
+          <button type="button" className={"[display:grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--muted)] [background:#00000008] hover:[color:var(--text)]"} aria-label={t("messageActions.closeDetail")} onClick={props.onClose}>
             <X size={15} />
           </button>
         </header>
@@ -1550,7 +1554,7 @@ function DetailMessageCard(props: {
           className={"[height:30px] [border:0] [border-radius:9px] [padding:0_10px] [color:#ffffff] [background:#111827] [font-size:12px] [font-weight:700] [white-space:nowrap]"}
           onClick={props.onBackToMessage}
         >
-          回到原文
+          {t("messageActions.backToSource")}
         </button>
       </div>
       {isRemoved ? (
@@ -1655,7 +1659,7 @@ function compactInline(content: string) {
 }
 
 function compactComparableText(content: string) {
-  return compactInline(content).replace(/^>\s*回复\s+[^:：]+[:：]\s*/, "").toLowerCase();
+  return compactInline(content).replace(/^>\s*(?:回复|Reply)\s+[^:：]+[:：]\s*/, "").toLowerCase();
 }
 
 function restoreTimelineScroll(container: HTMLElement, scrollTop: number) {
@@ -1701,8 +1705,8 @@ function compareMessageBlocks(left: MessageBlock, right: MessageBlock) {
 function RuntimeEventGroup(props: { blocks: MessageBlock[]; artifacts: Artifact[]; onOpenArtifact: (artifact: Artifact) => void }) {
   const failedCount = props.blocks.filter((block) => block.status === "error").length;
   const label = failedCount
-    ? `${props.blocks.length} 条运行细节 · ${failedCount} 条失败`
-    : `${props.blocks.length} 条运行细节`;
+    ? t("messageActions.runtimeDetailsFailed", { count: props.blocks.length, failed: failedCount })
+    : t("messageActions.runtimeDetails", { count: props.blocks.length });
   return (
     <details className={"[width:fit-content] [max-width:100%] [margin-top:6px] [color:var(--muted)] [&_summary]:[display:inline-flex] [&_summary]:[height:28px] [&_summary]:[align-items:center] [&_summary]:[gap:7px] [&_summary]:[border-radius:999px] [&_summary]:[padding:0_10px] [&_summary]:[background:#00000008] [&_summary]:[cursor:pointer] [&_summary]:[list-style:none] [&_summary]:[font-size:12px] [&_summary]:[font-weight:650] [&_summary::-webkit-details-marker]:[display:none] [&[open]_summary]:[margin-bottom:6px]"}>
       <summary>
@@ -1983,7 +1987,9 @@ function ReplyQuotePreview(props: { quotes: Array<{ sender: string; content: str
   if (!firstQuote) return null;
   return (
     <div className={"[display:block] [max-width:100%] [margin-bottom:8px] [border-left:3px_solid_#c6d1e3] [padding-left:10px] [color:#7b8494] [font-size:13px] [line-height:20px] [white-space:nowrap] [overflow:hidden] [text-overflow:ellipsis]"}>
-      {props.quotes.length > 1 ? `引用 ${props.quotes.length} 条消息 · ${firstQuote.sender}: ${firstQuote.content}` : `回复 ${firstQuote.sender}: ${firstQuote.content}`}
+      {props.quotes.length > 1
+        ? t("messageActions.quotePreview", { count: props.quotes.length, preview: `${firstQuote.sender}: ${firstQuote.content}` })
+        : t("messageActions.replyTo", { sender: firstQuote.sender, content: firstQuote.content })}
     </div>
   );
 }
@@ -2004,12 +2010,12 @@ function SummaryLinkCard(props: {
   const conversation = task ? props.conversations.find((item) => item.id === task.conversationId) ?? null : null;
   const room = conversation ? props.rooms.find((item) => item.id === conversation.roomId) ?? null : null;
   const preview = task
-    ? compactInline(task.content || task.sourcePreview || "[附件]")
+    ? compactInline(task.content || task.sourcePreview || attachmentLabel())
     : fetchState === "loading"
-      ? "正在加载总结..."
+      ? t("messageActions.loadingSummary")
       : fetchState === "failed"
-        ? "这条总结不存在或已被移除"
-        : "正在加载总结...";
+        ? t("messageActions.summaryMissing")
+        : t("messageActions.loadingSummary");
 
   useEffect(() => {
     if (task || fetchState !== "idle" || !props.onEnsureSummaryTask) return;
@@ -2033,7 +2039,7 @@ function SummaryLinkCard(props: {
         {preview}
       </span>
       <span className={"[display:flex] [align-items:center] [gap:6px] [color:var(--muted)] [font-size:11px] [line-height:1.3]"}>
-        <span>{room?.title || conversation?.title || "未知会话"}</span>
+        <span>{room?.title || conversation?.title || t("common.unknownConversation")}</span>
         {task ? <span>{task.participantName}</span> : null}
         {task ? <span>{formatMessageTime(task.updatedAt)}</span> : null}
       </span>
@@ -2063,13 +2069,13 @@ function MessageLinkCard(props: {
     >
       <span className={"[display:flex] [align-items:center] [gap:5px] [color:#2563eb] [font-size:12px] [font-weight:700] [line-height:1.3]"}>
         <Reply size={13} />
-        <span>{message ? `来自 ${messageSenderLabel(message, props.participants)} 的消息链接` : "消息链接"}</span>
+        <span>{message ? t("composer.messageLinkFrom", { sender: messageSenderLabel(message, props.participants) }) : t("composer.messageLink")}</span>
       </span>
       <span className={"[display:block] [overflow:hidden] [color:var(--text)] [font-size:13px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>
-        {message ? compactInline(message.content || "[附件]") : "这条消息暂时不在本地快照中"}
+        {message ? compactInline(message.content || attachmentLabel()) : t("messageActions.messageNotInSnapshot")}
       </span>
       <span className={"[display:flex] [align-items:center] [gap:6px] [color:var(--muted)] [font-size:11px] [line-height:1.3]"}>
-        <span>{room?.title || conversation?.title || "未知会话"}</span>
+        <span>{room?.title || conversation?.title || t("common.unknownConversation")}</span>
         {participant ? <span>{participant.displayName}</span> : null}
         {message ? <span>{formatMessageTime(message.createdAt)}</span> : null}
       </span>
@@ -2094,7 +2100,7 @@ function CollapsibleMessageContent(props: { content: string; tightSpacing?: bool
           className={"[justify-self:start] [border:0] [padding:0] [color:#2563eb] [background:transparent] [font-size:12px] [font-weight:650] [cursor:pointer] hover:[text-decoration:underline]"}
           onClick={() => setExpanded((current) => !current)}
         >
-          {expanded ? "收起" : "展开"}
+          {expanded ? t("common.collapse") : t("common.expand")}
         </button>
       ) : null}
     </div>
@@ -2125,22 +2131,22 @@ function extractLeadingReplyQuote(content: string) {
   const quoteLines = lines.slice(0, bodyStartIndex);
   if (!quoteLines.length || quoteLines.some((line) => !line.startsWith(">"))) return null;
   const quotes = quoteLines
-    .map((line) => line.replace(/^>\s?/, "").match(/^回复\s+([^:：]+)[:：]\s*(.*)$/))
+    .map((line) => line.replace(/^>\s?/, "").match(/^(?:回复|Reply)\s+([^:：]+)[:：]\s*(.*)$/))
     .filter((match): match is RegExpMatchArray => Boolean(match))
     .map((match) => ({
-      sender: match[1]?.trim() || "消息",
+      sender: match[1]?.trim() || t("common.message"),
       content: (match[2] ?? "").replace(/\s+/g, " ").trim(),
     }));
   if (quotes.length !== quoteLines.length) return null;
   const quoteText = quoteLines
     .map((line) => line.replace(/^>\s?/, ""))
     .join(" ")
-    .replace(/^回复\s+([^:：]+)[:：]\s*/, "")
+    .replace(/^(?:回复|Reply)\s+([^:：]+)[:：]\s*/, "")
     .replace(/\s+/g, " ")
     .trim();
   const body = lines.slice(bodyStartIndex + 1).join("\n").trimStart();
   return {
-    sender: quotes[0]?.sender ?? "消息",
+    sender: quotes[0]?.sender ?? t("common.message"),
     content: quoteText,
     quotes,
     body,
@@ -2181,7 +2187,7 @@ function ArtifactBlock(props: { artifact: Artifact; onOpen: () => void }) {
       data-slot="artifact-block"
       className={"[display:grid] [width:min(520px,_100%)] [min-height:88px] [grid-template-columns:56px_minmax(0,_1fr)] [align-items:center] [gap:16px] [margin-top:8px] [border:1px_solid_var(--border)] [border-radius:12px] [padding:16px_20px] [color:var(--text)] [background:#ffffff] [cursor:pointer] [box-shadow:0_1px_2px_rgb(0_0_0_/_3%)] [transition:border-color_0.12s_ease,_background-color_0.12s_ease,_box-shadow_0.12s_ease] hover:[border-color:#d4d4d8] hover:[background:#fbfbfc] hover:[box-shadow:0_4px_14px_rgb(0_0_0_/_6%)] focus-visible:[outline:none] focus-visible:[border-color:var(--border-strong)]"}
       onClick={props.onOpen}
-      title={canPreviewInApp(props.artifact.mimeType, props.artifact.filename) ? "应用内预览" : "用系统默认应用打开"}
+      title={canPreviewInApp(props.artifact.mimeType, props.artifact.filename) ? t("messageActions.previewInApp") : t("messageActions.openWithSystemApp")}
     >
       <span className={"[position:relative] [display:grid] [width:50px] [height:58px] [place-items:center] [border-radius:7px] [color:#ffffff] [background:#8d96a3] [box-shadow:inset_0_0_0_1px_rgb(255_255_255_/_20%)] before:[content:''] before:[position:absolute] before:[right:0] before:[top:0] before:[width:16px] before:[height:16px] before:[clip-path:polygon(0_0,_100%_100%,_100%_0)] before:[background:#c8ced6]"}>
         <FileText size={25} strokeWidth={2.1} />

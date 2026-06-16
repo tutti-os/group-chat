@@ -1,11 +1,13 @@
 import { formatUnreadCount } from "../../conversation-read-state.js";
 import { UNREAD_FEATURE_ENABLED } from "../../feature-flags.js";
+import { useTranslation } from "../../i18n/index.js";
 
 export function UnreadBadge(props: {
   count: number;
   className?: string;
   size?: "sm" | "md";
 }) {
+  const { t } = useTranslation();
   if (!UNREAD_FEATURE_ENABLED) return null;
   const label = formatUnreadCount(props.count);
   if (!label) return null;
@@ -15,7 +17,7 @@ export function UnreadBadge(props: {
   return (
     <span
       className={`[position:absolute] [display:inline-grid] [place-items:center] [border:2px_solid_var(--panel)] [border-radius:999px] [color:#ffffff] [background:#ef4444] [font-weight:700] [line-height:1] [pointer-events:none] [box-shadow:0_1px_4px_rgb(239_68_68_/_35%)] ${size === "sm" ? "[top:-4px] [left:-4px] [min-width:16px] [height:16px] [padding:0_4px] [font-size:10px]" : "[top:-6px] [right:-6px] [left:auto] [min-width:18px] [height:18px] [padding:0_5px] [font-size:11px]"} ${compact ? "" : "[width:16px]"} ${props.className ?? ""}`}
-      aria-label={`${props.count} 条未读消息`}
+      aria-label={t("unread.count", { count: props.count })}
     >
       {label}
     </span>

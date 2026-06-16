@@ -1,4 +1,5 @@
 import { AlertCircle } from "lucide-react";
+import { useTranslation } from "../../i18n/index.js";
 
 export function DeleteMessageConfirmDialog(props: {
   count: number;
@@ -6,6 +7,8 @@ export function DeleteMessageConfirmDialog(props: {
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const { t } = useTranslation();
+
   return (
     <div
       className={"[position:fixed] [inset:0] [z-index:80] [display:grid] [place-items:center] [padding:24px] [background:rgb(15_23_42_/_52%)]"}
@@ -31,10 +34,10 @@ export function DeleteMessageConfirmDialog(props: {
           </div>
           <div className={"[min-width:0]"}>
             <h3 id="delete-message-title" className={"[margin:0] [color:var(--text)] [font-size:16px] [font-weight:720] [line-height:1.35]"}>
-              确定删除消息？
+              {t("deleteMessage.title")}
             </h3>
             <p id="delete-message-desc" className={"[margin:10px_0_0] [color:var(--muted)] [font-size:13px] [line-height:1.55]"}>
-              删除的消息将从你的会话记录中消失，但仍对会话内其他人可见
+              {t("deleteMessage.desc")}
             </p>
           </div>
         </div>
@@ -45,7 +48,7 @@ export function DeleteMessageConfirmDialog(props: {
             disabled={props.deleting}
             onClick={props.onCancel}
           >
-            取消
+            {t("common.cancel")}
           </button>
           <button
             type="button"
@@ -53,7 +56,7 @@ export function DeleteMessageConfirmDialog(props: {
             disabled={props.deleting}
             onClick={props.onConfirm}
           >
-            {props.deleting ? "删除中..." : "删除"}
+            {props.deleting ? t("deleteMessage.deleting") : t("common.delete")}
           </button>
         </div>
       </div>

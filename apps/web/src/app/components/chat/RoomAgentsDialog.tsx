@@ -6,6 +6,7 @@ import {
   type Participant,
   type RuntimeProfile,
 } from "@group-chat/shared";
+import { useTranslation } from "../../i18n/index.js";
 import { AgentManageCard } from "./AgentManageCard.js";
 
 export function RoomAgentsDialog(props: {
@@ -19,6 +20,7 @@ export function RoomAgentsDialog(props: {
   onOpenParticipant: (participant: Participant) => void;
   onStartAddAgent: () => void;
 }) {
+  const { t } = useTranslation();
   const [recentlyAddedParticipantIds, setRecentlyAddedParticipantIds] = useState<Set<string>>(() => new Set());
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const { onClose } = props;
@@ -70,20 +72,20 @@ export function RoomAgentsDialog(props: {
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="群 Agent 管理"
+        aria-label={t("roomAgents.title")}
         className={"[display:flex] [width:min(680px,_calc(100vw_-_32px))] [max-height:min(720px,_calc(100vh_-_32px))] [flex-direction:column] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:20px] [background:var(--panel)] [box-shadow:0_24px_80px_rgb(0_0_0_/_24%)] max-[760px]:[width:calc(100vw_-_28px)] max-[760px]:[max-height:calc(100vh_-_28px)]"}
         onPointerDown={(event) => event.stopPropagation()}
       >
         <div className={"[display:flex] [flex:0_0_auto] [align-items:flex-start] [justify-content:space-between] [gap:12px] [padding:16px_18px] [border-bottom:1px_solid_var(--border)]"}>
           <div className={"[min-width:0] [&_h3]:[margin:0] [&_h3]:[font-size:16px] [&_h3]:[font-weight:720] [&_h3]:[line-height:1.2] [&_span]:[display:block] [&_span]:[margin-top:3px] [&_span]:[color:var(--muted)] [&_span]:[font-size:12px]"}>
-            <h3>群 Agent</h3>
-            <span>{agents.length} 个 Agent 在此群</span>
+            <h3>{t("roomAgents.title")}</h3>
+            <span>{t("roomAgents.count", { count: agents.length })}</span>
           </div>
           <button
             className={"[display:inline-grid] [flex-shrink:0] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [&:focus-visible]:[outline:none]"}
             type="button"
-            aria-label="关闭群 Agent 管理"
-            title="关闭"
+            aria-label={t("roomAgents.closeDialog")}
+            title={t("common.close")}
             onClick={onClose}
           >
             <X size={16} />
@@ -94,23 +96,23 @@ export function RoomAgentsDialog(props: {
           <button
             className={"[display:inline-flex] [width:100%] [height:42px] [align-items:center] [justify-content:center] [gap:8px] [border:1px_solid_#93c5fd] [border-radius:12px] [padding:0_16px] [font-size:14px] [font-weight:650] [color:#1d4ed8] [background:#eff6ff] [transition:background-color_0.12s_ease,_border-color_0.12s_ease] [&:hover:not(:disabled)]:[border-color:#60a5fa] [&:hover:not(:disabled)]:[background:#dbeafe] [&:focus-visible]:[outline:none] [&:focus-visible]:[box-shadow:0_0_0_3px_#bfdbfe] [&_svg]:[color:#2563eb]"}
             type="button"
-            aria-label="在群里添加 Agent"
+            aria-label={t("roomAgents.addAgent")}
             onClick={props.onStartAddAgent}
           >
             <Plus size={18} strokeWidth={2.25} />
-            <span>添加 Agent</span>
+            <span>{t("roomAgents.addAgentButton")}</span>
           </button>
 
           {agents.length === 0 ? (
             <div className={"[display:grid] [gap:10px] [border:1px_dashed_var(--border)] [border-radius:12px] [padding:24px_14px] [color:var(--muted)] [background:#ffffff99] [font-size:13px] [line-height:1.5] [text-align:center] [&_strong]:[color:var(--text)] [&_strong]:[font-size:14px]"}>
-              <strong>此群还没有 Agent</strong>
-              <span>添加 Agent 后即可开始群聊协作。</span>
+              <strong>{t("roomAgents.emptyTitle")}</strong>
+              <span>{t("roomAgents.emptyHint")}</span>
             </div>
           ) : null}
 
           {agents.length > 0 ? (
             <h4 className={"[margin:4px_0_0] [color:var(--muted)] [font-size:12px] [font-weight:700] [line-height:1.2]"}>
-              已在群里的agent
+              {t("roomAgents.inRoom")}
             </h4>
           ) : null}
 

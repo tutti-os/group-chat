@@ -3,6 +3,7 @@ import { BrainCircuit, Bot, ChevronDown, ChevronUp, Ear, LoaderCircle, X } from 
 import { backgroundTaskLabel, backgroundTaskStatusLabel, type AgentRunTaskItem, type BackgroundTask } from "../../background-tasks.js";
 import { WHISPER_FEATURE_ENABLED } from "../../feature-flags.js";
 import { truncateMiddle } from "../../formatting.js";
+import { useTranslation } from "../../i18n/index.js";
 
 const EXECUTING_RUN_CHIP_WIDTH_PX = 200;
 
@@ -17,12 +18,13 @@ export function BackgroundTaskBar(props: {
   onDismissAgentRun: (runId: string) => void;
   className?: string;
 }) {
+  const { t } = useTranslation();
   if (props.tasks.length === 0 && props.agentRuns.length === 0) return null;
 
   return (
     <div
       className={`[display:grid] [width:100%] [box-sizing:border-box] [gap:0] [border-top:1px_solid_var(--border)] [background:var(--panel)] [box-shadow:0_-8px_24px_rgb(0_0_0_/_4%)] ${props.className ?? ""}`}
-      aria-label="临时任务栏"
+      aria-label={t("taskBar.panel")}
     >
       {props.tasks.length > 0 ? (
         <div
@@ -46,7 +48,7 @@ export function BackgroundTaskBar(props: {
               <button
                 type="button"
                 className={"[display:grid] [flex:0_0_auto] [width:22px] [height:22px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [cursor:pointer] hover:[color:var(--text)] hover:[background:#00000008]"}
-                aria-label="关闭任务"
+                aria-label={t("taskBar.closeTask")}
                 onClick={() => props.onDismissTask(task.id)}
               >
                 <X size={12} />
@@ -73,6 +75,7 @@ function ExecutingRunsPanel(props: {
   onOpenAgentRun: (runId: string) => void;
   onDismissAgentRun: (runId: string) => void;
 }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [pendingDismissRunId, setPendingDismissRunId] = useState<string | null>(null);
 
@@ -84,20 +87,20 @@ function ExecutingRunsPanel(props: {
 
   return (
     <section
-      aria-label="Agent 执行中"
+      aria-label={t("taskBar.executingCount", { count: props.agentRuns.length })}
       className={"[position:relative] [width:calc(100%-32px)] [max-width:960px] [margin:6px_auto_4px] [border:1px_solid_#dbeafe] [border-radius:12px] [background:linear-gradient(180deg,_#eff6ff_0%,_#eef2ff_100%)] max-[760px]:[width:calc(100%-24px)] max-[760px]:[margin:5px_auto_4px]"}
     >
       <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:8px] [padding:8px_10px_8px_12px]"}>
         <div className={"[display:inline-flex] [min-width:0] [flex:1_1_auto] [align-items:center] [gap:6px] [color:#1e3a8a] [font-size:12px] [font-weight:650]"}>
           <LoaderCircle size={14} className={"[flex:0_0_auto] animate-spin"} />
           <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>
-            {props.agentRuns.length} 个 Agent 执行中
+            {t("taskBar.executingCount", { count: props.agentRuns.length })}
           </span>
         </div>
         <button
           type="button"
           className={"[display:grid] [flex:0_0_auto] [width:24px] [height:24px] [place-items:center] [border:0] [border-radius:6px] [color:#475569] [background:#ffffff99] [cursor:pointer] hover:[color:#1e293b] hover:[background:#ffffff]"}
-          aria-label={expanded ? "收起执行中列表" : "展开执行中列表"}
+          aria-label={expanded ? t("taskBar.collapse") : t("taskBar.expand")}
           aria-expanded={expanded}
           onClick={() => setExpanded((current) => !current)}
         >
@@ -134,7 +137,7 @@ function ExecutingRunsPanel(props: {
                     <button
                       type="button"
                       className={"[display:grid] [width:22px] [height:22px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [cursor:pointer] hover:[color:var(--text)] hover:[background:#00000008]"}
-                      aria-label="取消任务"
+                      aria-label={t("taskBar.cancelTask")}
                       onClick={() => setPendingDismissRunId(run.id)}
                     >
                       <X size={12} />
@@ -150,7 +153,7 @@ function ExecutingRunsPanel(props: {
                       className={"[height:22px] [border:0] [border-radius:999px] [padding:0_8px] [color:var(--muted)] [background:transparent] [font-size:11px] [font-weight:650] [cursor:pointer] hover:[color:var(--text)] hover:[background:#00000008]"}
                       onClick={() => setPendingDismissRunId(null)}
                     >
-                      取消
+                      {t("common.cancel")}
                     </button>
                     <button
                       type="button"
@@ -160,7 +163,7 @@ function ExecutingRunsPanel(props: {
                         void props.onDismissAgentRun(run.id);
                       }}
                     >
-                      确认
+                      {t("common.confirm")}
                     </button>
                   </div>
                 ) : null}
@@ -174,7 +177,8 @@ function ExecutingRunsPanel(props: {
 }
 
 function AgentExecutingLabel(props: { participantName: string }) {
-  const suffix = " 执行中";
+  const { t } = useTranslation();
+  const suffix = t("taskBar.executingSuffix");
   const measureRef = useRef<HTMLSpanElement>(null);
   const [displayName, setDisplayName] = useState(props.participantName.trim());
 
@@ -214,7 +218,7 @@ function AgentExecutingLabel(props: { participantName: string }) {
     const observer = new ResizeObserver(update);
     observer.observe(node);
     return () => observer.disconnect();
-  }, [props.participantName]);
+  }, [props.participantName, suffix]);
 
   return (
     <span

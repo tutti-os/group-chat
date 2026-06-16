@@ -1,5 +1,6 @@
 import { FileText, X } from "lucide-react";
 import type { Ref } from "react";
+import { useTranslation } from "../../i18n/index.js";
 
 export interface AttachmentPreview {
   title: string;
@@ -14,6 +15,7 @@ export function AttachmentPreviewDialog(props: {
   onClose: () => void;
   overlayRef?: Ref<HTMLDivElement>;
 }) {
+  const { t } = useTranslation();
   if (!props.preview) return null;
   const isImage = props.preview.mimeType.startsWith("image/");
   const isVideo = props.preview.mimeType.startsWith("video/");
@@ -35,7 +37,7 @@ export function AttachmentPreviewDialog(props: {
           <button
             type="button"
             className={"[display:inline-grid] [width:34px] [height:34px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012]"}
-            aria-label="关闭预览"
+            aria-label={t("preview.close")}
             onClick={props.onClose}
           >
             <X size={16} />
@@ -52,13 +54,13 @@ export function AttachmentPreviewDialog(props: {
               playsInline
             />
           ) : props.preview.loading ? (
-            <div className={"[display:grid] [min-height:260px] [place-items:center] [color:var(--muted)] [font-size:13px]"}>正在加载预览...</div>
+            <div className={"[display:grid] [min-height:260px] [place-items:center] [color:var(--muted)] [font-size:13px]"}>{t("preview.loading")}</div>
           ) : typeof props.preview.text === "string" ? (
             <pre className={"[min-height:260px] [margin:0] [overflow:auto] [border:1px_solid_var(--border)] [border-radius:12px] [padding:14px] [color:var(--text)] [background:#ffffff] [font-size:13px] [line-height:1.6] [white-space:pre-wrap]"}>{props.preview.text || " "}</pre>
           ) : (
             <div className={"[display:grid] [min-height:260px] [place-items:center] [gap:8px] [color:var(--muted)] [font-size:13px] [text-align:center]"}>
               <FileText size={24} />
-              <span>此文件类型不支持应用内预览</span>
+              <span>{t("preview.unsupported")}</span>
             </div>
           )}
         </div>

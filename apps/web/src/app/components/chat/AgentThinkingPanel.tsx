@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AgentRunEvent } from "@group-chat/shared";
 import type { ProcessSection } from "../../agent-thinking.js";
+import { formatRunEventStatus, formatRunEventTypeLabel, useTranslation } from "../../i18n/index.js";
 
 export function AgentThinkingPanel(props: {
   open: boolean;
@@ -11,6 +12,7 @@ export function AgentThinkingPanel(props: {
   sections: ProcessSection[];
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const panelRef = useRef<HTMLElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const streaming = props.sections.some(
@@ -50,7 +52,7 @@ export function AgentThinkingPanel(props: {
     <aside
       ref={panelRef}
       className={"[position:absolute] [top:56px] [right:0] [bottom:0] [z-index:37] [display:grid] [width:min(400px,_calc(100vw_-_24px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border)] [background:var(--panel)] [box-shadow:-18px_0_40px_rgb(0_0_0_/_8%)]"}
-      aria-label="Agent 思考过程"
+      aria-label={t("thinkingPanel.aria")}
     >
       <header className={"[display:grid] [grid-template-columns:minmax(0,_1fr)_auto] [align-items:center] [gap:8px] [border-bottom:1px_solid_var(--border)] [padding:14px] [background:#ffffff]"}>
         <span className={"[display:grid] [gap:3px] [min-width:0]"}>
@@ -63,13 +65,13 @@ export function AgentThinkingPanel(props: {
             <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{props.participantName}</span>
           </strong>
           <small className={"[color:var(--muted)] [font-size:12px]"}>
-            {streaming ? "Agent 正在思考..." : "思考与执行过程"}
+            {streaming ? t("thinkingPanel.thinking") : t("thinkingPanel.process")}
           </small>
         </span>
         <button
           type="button"
           className={"[display:grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [&:focus-visible]:[outline:none]"}
-          aria-label="关闭思考过程"
+          aria-label={t("thinkingPanel.close")}
           onClick={props.onClose}
         >
           <X size={16} />
@@ -83,8 +85,8 @@ export function AgentThinkingPanel(props: {
         {props.sections.length === 0 ? (
           <div className={"[display:grid] [place-items:center] [gap:10px] [padding:40px_12px] [color:var(--muted)] [font-size:13px] [text-align:center]"}>
             <BrainCircuit size={22} />
-            <p className={"[margin:0]"}>这条消息没有记录思考或执行过程。</p>
-            <p className={"[margin:0] [font-size:12px]"}>部分 Agent 运行时不会暴露内部推理，只会记录工具调用。</p>
+            <p className={"[margin:0]"}>{t("thinkingPanel.emptyTitle")}</p>
+            <p className={"[margin:0] [font-size:12px]"}>{t("thinkingPanel.emptyHint")}</p>
           </div>
         ) : null}
         {props.sections.map((section) => {
@@ -100,10 +102,10 @@ export function AgentThinkingPanel(props: {
                 <BrainCircuit size={15} />
                 <span>
                   {section.streaming
-                    ? "思考中"
+                    ? t("thinkingPanel.thinkingInProgress")
                     : section.kind === "thinking" || section.kind === "reasoning"
-                      ? "思考过程"
-                      : "推理块"}
+                      ? t("thinkingPanel.thinkingProcess")
+                      : t("thinkingPanel.reasoningBlock")}
                 </span>
               </div>
               <div className={"message-prose [overflow:auto] [color:#404040] [font-size:12px] [line-height:1.6]"}>
@@ -127,16 +129,7 @@ function RunEventSection(props: { event: AgentRunEvent }) {
     ) : (
       <FileText size={15} />
     );
-  const label =
-    props.event.type === "tool_call"
-      ? toolName ?? "工具调用"
-      : props.event.type === "tool_result"
-        ? toolName ?? "工具结果"
-        : props.event.type === "status"
-          ? "状态"
-          : props.event.type === "stderr"
-            ? "错误输出"
-            : props.event.type;
+  const label = formatRunEventTypeLabel(props.event, toolName);
 
   return (
     <section
@@ -154,12 +147,4 @@ function RunEventSection(props: { event: AgentRunEvent }) {
       ) : null}
     </section>
   );
-}
-
-function formatRunEventStatus(event: AgentRunEvent) {
-  if (event.type === "tool_call" && event.status === "streaming") return "执行中";
-  if (event.type === "tool_call" && event.status === "success") return "已调用";
-  if (event.type === "tool_result" && event.status === "success") return "已完成";
-  if (event.status === "error") return "失败";
-  return event.status;
 }

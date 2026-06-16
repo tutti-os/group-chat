@@ -1,4 +1,5 @@
 import type { Message, Participant, PrivateTaskSnapshot, PrivateTaskType } from "@group-chat/shared";
+import { t } from "./i18n/index.js";
 
 export interface BackgroundTask extends PrivateTaskSnapshot {
   panelOpen: boolean;
@@ -155,17 +156,19 @@ export function mergeBackgroundTask(current: BackgroundTask, snapshot: PrivateTa
 
 export function backgroundTaskLabel(task: BackgroundTask) {
   if (task.type === "summary") {
-    const countLabel = task.sourceMessageIds.length > 1 ? `${task.sourceMessageIds.length}条 · ` : "";
-    return `总结 · ${countLabel}${task.participantName}`;
+    const countPrefix = task.sourceMessageIds.length > 1
+      ? t("task.summaryCountPrefix", { count: task.sourceMessageIds.length })
+      : "";
+    return t("task.summaryLabel", { countPrefix, name: task.participantName });
   }
-  return `Agent · ${task.participantName}`;
+  return t("task.agentLabel", { name: task.participantName });
 }
 
 export function backgroundTaskStatusLabel(task: BackgroundTask) {
-  if (task.status === "running") return "进行中";
-  if (task.status === "completed") return "已完成";
-  if (task.status === "failed") return "失败";
-  return "已取消";
+  if (task.status === "running") return t("task.statusRunning");
+  if (task.status === "completed") return t("task.statusCompleted");
+  if (task.status === "failed") return t("task.statusFailed");
+  return t("task.statusCancelled");
 }
 
 const DISMISSED_TASK_IDS_KEY = "group-chat:dismissed-private-task-ids";

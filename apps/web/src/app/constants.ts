@@ -1,14 +1,15 @@
-import type { ReasoningEffort, ReplyMode, SpeakingOrder } from "@group-chat/shared";
+import type { ParticipantListenMode, ReasoningEffort, ReplyMode, SpeakingOrder } from "@group-chat/shared";
+import { t } from "./i18n/index.js";
 
 export const roleDescriptionPresets = [
   {
     id: "custom",
-    name: "自定义",
+    name: "custom",
     description: "",
   },
   {
     id: "product-manager",
-    name: "产品经理",
+    name: "product-manager",
     description: `You are a senior product manager agent.
 
 Your job is to turn ambiguous ideas into clear product direction. Start by identifying the user, the problem, the intended outcome, and the constraints. When requirements are incomplete, make reasonable assumptions and state them explicitly.
@@ -23,7 +24,7 @@ Prefer concise product specs, decision notes, user stories, acceptance criteria,
   },
   {
     id: "designer",
-    name: "设计师",
+    name: "designer",
     description: `You are a senior product designer agent.
 
 Your job is to shape usable, polished, and coherent user experiences. Think through the user's context, the primary workflow, hierarchy of information, interaction states, and how the interface should feel in repeated use.
@@ -38,7 +39,7 @@ Prefer concrete UI recommendations, annotated component behavior, interaction ru
   },
   {
     id: "developer",
-    name: "开发",
+    name: "developer",
     description: `You are a senior software engineer agent.
 
 Your job is to design and implement robust technical solutions that fit the existing codebase. Read the surrounding patterns before proposing changes, keep the implementation scoped, and call out risks early.
@@ -53,7 +54,7 @@ Prefer concrete implementation steps, code-level reasoning, failure modes, and v
   },
   {
     id: "qa-tester",
-    name: "测试",
+    name: "qa-tester",
     description: `You are a senior QA tester agent.
 
 Your job is to protect product quality by finding ambiguity, regressions, edge cases, and gaps in verification. Think like a user, a tester, and a system under stress.
@@ -68,7 +69,7 @@ Prefer structured test plans, bug reports, risk matrices, and concise verificati
   },
   {
     id: "marketer",
-    name: "市场",
+    name: "marketer",
     description: `You are a senior marketing strategist agent.
 
 Your job is to connect the product's value to the right audience with clear positioning, credible messaging, and measurable go-to-market plans. Ground recommendations in user segments, buying triggers, and competitive context.
@@ -83,35 +84,56 @@ Prefer positioning briefs, messaging frameworks, campaign plans, and measurement
   },
 ];
 
+export function roleDescriptionPresetLabel(presetId: string) {
+  const key = `rolePreset.${presetId}`;
+  const translated = t(key);
+  return translated === key ? presetId : translated;
+}
+
 export const defaultRoleDescription = "You are a helpful local agent in this room.";
-export const reasoningEffortOptions: Array<{ value: "" | ReasoningEffort; label: string; description: string }> = [
-  { value: "", label: "自动", description: "使用运行时默认设置" },
-  { value: "low", label: "Fast", description: "更快响应，适合简单任务" },
-  { value: "medium", label: "Balanced", description: "速度与质量平衡" },
-  { value: "high", label: "Deep", description: "更深入推理" },
-  { value: "xhigh", label: "Max", description: "最大程度深度思考" },
-];
+
+export function getReasoningEffortOptions(): Array<{ value: "" | ReasoningEffort; label: string; description: string }> {
+  return [
+    { value: "", label: t("reasoning.auto"), description: t("reasoning.autoDesc") },
+    { value: "low", label: t("reasoning.low"), description: t("reasoning.lowDesc") },
+    { value: "medium", label: t("reasoning.medium"), description: t("reasoning.mediumDesc") },
+    { value: "high", label: t("reasoning.high"), description: t("reasoning.highDesc") },
+    { value: "xhigh", label: t("reasoning.xhigh"), description: t("reasoning.xhighDesc") },
+  ];
+}
 
 export function reasoningEffortLabel(value: ReasoningEffort | null | undefined) {
-  if (!value) return "自动";
-  return reasoningEffortOptions.find((option) => option.value === value)?.label ?? value;
+  if (!value) return t("reasoning.auto");
+  return getReasoningEffortOptions().find((option) => option.value === value)?.label ?? value;
 }
 
 export function reasoningModeFieldLabel(value: "" | ReasoningEffort) {
-  const option = reasoningEffortOptions.find((item) => item.value === value);
-  if (!value || !option?.description) return "推理模式";
-  return `推理模式（${option.description}）`;
+  const option = getReasoningEffortOptions().find((item) => item.value === value);
+  if (!value || !option?.description) return t("reasoning.mode");
+  return t("reasoning.modeWithDesc", { desc: option.description });
 }
 
-export const replyModeOptions: Array<{ value: ReplyMode; label: string }> = [
-  { value: "auto", label: "自动判断" },
-  { value: "all", label: "全部" },
-  { value: "mentioned", label: "点名" },
-  { value: "selected", label: "手动" },
-];
+export function getReplyModeOptions(): Array<{ value: ReplyMode; label: string }> {
+  return [
+    { value: "auto", label: t("replyMode.auto") },
+    { value: "all", label: t("replyMode.all") },
+    { value: "mentioned", label: t("replyMode.mentioned") },
+    { value: "selected", label: t("replyMode.selected") },
+  ];
+}
 
-export const speakingOrderOptions: Array<{ value: SpeakingOrder; label: string }> = [
-  { value: "sequential", label: "顺序" },
-  { value: "parallel", label: "并行" },
-  { value: "random", label: "随机" },
-];
+export function getSpeakingOrderOptions(): Array<{ value: SpeakingOrder; label: string }> {
+  return [
+    { value: "sequential", label: t("speakingOrder.sequential") },
+    { value: "parallel", label: t("speakingOrder.parallel") },
+    { value: "random", label: t("speakingOrder.random") },
+  ];
+}
+
+export function getEngagementOptions(): Array<{ value: ParticipantListenMode; label: string; description: string }> {
+  return [
+    { value: "passive", label: t("engagement.passive"), description: t("engagement.passiveDesc") },
+    { value: "adaptive", label: t("engagement.adaptive"), description: t("engagement.adaptiveDesc") },
+    { value: "active", label: t("engagement.active"), description: t("engagement.activeDesc") },
+  ];
+}

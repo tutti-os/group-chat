@@ -1,6 +1,7 @@
 import type { Artifact, Message, Participant, PrivateTaskSnapshot, Identity } from "@group-chat/shared";
 import type { BackgroundTask } from "./background-tasks.js";
 import { loadUserProfile } from "./user-profile.js";
+import { attachmentLabel, t } from "./i18n/index.js";
 
 export const SUMMARY_LINK_MIME = "text/x-group-chat-summary-link";
 const SUMMARY_LINK_CLIPBOARD_KEY = "group-chat:summary-link";
@@ -78,7 +79,7 @@ export function resolveMessageAgentParticipant(
 export function resolveLocalUserDisplayName(explicitName?: string | null) {
   const explicit = explicitName?.trim();
   if (explicit) return explicit;
-  return loadUserProfile().displayName.trim() || "我";
+  return loadUserProfile().displayName.trim() || t("common.me");
 }
 
 const LEGACY_USER_SENDER_NAMES = new Set(["You", "Group Chat", "我"]);
@@ -122,7 +123,7 @@ export function messageSenderLabel(
 }
 
 export function summaryLinkLabel(task: Pick<PrivateTaskSnapshot, "participantName"> | null | undefined) {
-  return task ? `来自 ${task.participantName} 的消息总结` : "消息总结";
+  return task ? t("summary.fromParticipant", { name: task.participantName }) : t("summary.title");
 }
 
 export function resolveSourceMessages(task: Pick<BackgroundTask, "sourceMessageIds" | "sourceMessage">, messages: Message[]) {
@@ -151,19 +152,20 @@ export function formatSummaryPlainText(input: {
   participants: Participant[];
   images: Artifact[];
 }) {
-  const parts = [`【消息总结】${input.task.participantName}`, ""];
-  parts.push("【原消息】");
+  const attachment = attachmentLabel();
+  const parts = [t("summary.plainHeader", { name: input.task.participantName }), ""];
+  parts.push(t("summary.plainSource"));
   if (input.sourceMessages.length) {
     for (const message of input.sourceMessages) {
-      parts.push(`- ${messageSenderLabel(message, input.participants)}: ${compactInline(message.content || "[附件]")}`);
+      parts.push(`- ${messageSenderLabel(message, input.participants)}: ${compactInline(message.content || attachment)}`);
     }
   } else {
-    parts.push(`- ${compactInline(input.task.sourcePreview || "[附件]")}`);
+    parts.push(`- ${compactInline(input.task.sourcePreview || attachment)}`);
   }
   if (input.images.length) {
-    parts.push("", "【图片】", ...input.images.map((artifact) => `- ${artifact.filename}: ${artifact.publicUrl}`));
+    parts.push("", t("summary.plainImages"), ...input.images.map((artifact) => `- ${artifact.filename}: ${artifact.publicUrl}`));
   }
-  parts.push("", "【总结】", input.task.content.trim() || "总结生成中");
+  parts.push("", t("summary.plainResult"), input.task.content.trim() || t("summary.generating"));
   return parts.join("\n");
 }
 
@@ -173,28 +175,29 @@ export function formatSummaryHtml(input: {
   participants: Participant[];
   images: Artifact[];
 }) {
-  const blocks = [`<h3>消息总结 - ${escapeHtml(input.task.participantName)}</h3>`, "<h4>原消息</h4>"];
+  const attachment = attachmentLabel();
+  const blocks = [`<h3>${escapeHtml(t("summary.title"))} - ${escapeHtml(input.task.participantName)}</h3>`, `<h4>${escapeHtml(t("summary.htmlSource"))}</h4>`];
   if (input.sourceMessages.length) {
     blocks.push(
       "<ul>",
       ...input.sourceMessages.map(
         (message) =>
-          `<li><strong>${escapeHtml(messageSenderLabel(message, input.participants))}</strong>: ${escapeHtml(compactInline(message.content || "[附件]"))}</li>`,
+          `<li><strong>${escapeHtml(messageSenderLabel(message, input.participants))}</strong>: ${escapeHtml(compactInline(message.content || attachment))}</li>`,
       ),
       "</ul>",
     );
   } else {
-    blocks.push(`<p>${escapeHtml(compactInline(input.task.sourcePreview || "[附件]"))}</p>`);
+    blocks.push(`<p>${escapeHtml(compactInline(input.task.sourcePreview || attachment))}</p>`);
   }
   if (input.images.length) {
     blocks.push(
-      "<h4>图片</h4>",
+      `<h4>${escapeHtml(t("summary.htmlImages"))}</h4>`,
       ...input.images.map(
         (artifact) => `<figure><img src="${escapeHtml(artifact.publicUrl)}" alt="${escapeHtml(artifact.filename)}" /><figcaption>${escapeHtml(artifact.filename)}</figcaption></figure>`,
       ),
     );
   }
-  blocks.push("<h4>总结</h4>", `<pre>${escapeHtml(input.task.content.trim() || "总结生成中")}</pre>`);
+  blocks.push(`<h4>${escapeHtml(t("summary.htmlResult"))}</h4>`, `<pre>${escapeHtml(input.task.content.trim() || t("summary.generating"))}</pre>`);
   return blocks.join("");
 }
 

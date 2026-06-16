@@ -1,10 +1,6 @@
 import type { ParticipantListenMode } from "@group-chat/shared";
-
-const engagementOptions: Array<{ value: ParticipantListenMode; label: string; description: string }> = [
-  { value: "passive", label: "被@", description: "通常只在被点名或手动选择时回复" },
-  { value: "adaptive", label: "自适应", description: "根据消息内容判断是否接话" },
-  { value: "active", label: "积极", description: "更主动参与房间讨论" },
-];
+import { getEngagementOptions } from "../../constants.js";
+import { useTranslation } from "../../i18n/index.js";
 
 export function EngagementPicker(props: {
   value: ParticipantListenMode;
@@ -13,12 +9,14 @@ export function EngagementPicker(props: {
   layout?: "compact" | "comfortable";
   onChange: (listenMode: ParticipantListenMode) => void;
 }) {
+  const { t } = useTranslation();
+  const engagementOptions = getEngagementOptions();
   const current = engagementOptions.find((option) => option.value === props.value) ?? engagementOptions[0]!;
   const comfortable = props.layout === "comfortable";
   if (props.readOnly) {
     return (
       <label className={"[display:grid] [gap:5px] [&_span]:[color:#525252] [&_span]:[font-size:12px] [&_span]:[font-weight:650]"}>
-        <span>积极性</span>
+        <span>{t("engagement.title")}</span>
         <input
           value={current.label}
           readOnly
@@ -32,12 +30,12 @@ export function EngagementPicker(props: {
     <div className={comfortable ? "[display:grid] [gap:12px]" : "[display:grid] [gap:6px]"}>
       {comfortable ? (
         <div className={"[display:grid] [gap:4px]"}>
-          <span className={"[color:#525252] [font-size:12px] [font-weight:650]"}>积极性</span>
+          <span className={"[color:#525252] [font-size:12px] [font-weight:650]"}>{t("engagement.title")}</span>
           <p className={"[margin:0] [color:var(--muted)] [font-size:12px] [line-height:1.55]"}>{current.description}</p>
         </div>
       ) : (
         <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:8px]"}>
-          <span className={"[color:#525252] [font-size:12px] [font-weight:650]"}>积极性</span>
+          <span className={"[color:#525252] [font-size:12px] [font-weight:650]"}>{t("engagement.title")}</span>
           <small className={"[color:var(--muted)] [font-size:12px]"}>{current.description}</small>
         </div>
       )}
@@ -53,7 +51,7 @@ export function EngagementPicker(props: {
             key={option.value}
             type="button"
             aria-pressed={props.value === option.value}
-            aria-label={`${option.label} 积极性 ${props.subjectName}`}
+            aria-label={t("engagement.optionAria", { label: option.label, name: props.subjectName })}
             className={props.value === option.value ? "![color:#ffffff] ![background:#171717] [box-shadow:0_1px_6px_rgb(0_0_0_/_18%)]" : ""}
             onClick={() => props.onChange(option.value)}
           >

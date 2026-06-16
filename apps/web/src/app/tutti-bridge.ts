@@ -12,14 +12,27 @@ export interface TuttiWorkspaceAppBridge {
   files?: {
     open(input: TuttiWorkspaceAppOpenFileRequest): Promise<void>;
   };
-  appContext?: {
-    get(): Promise<{ workspaceId?: string }>;
-  };
+  appContext?: TuttiWorkspaceAppContext;
+}
+
+export interface TuttiWorkspaceAppContext {
+  get?(): Promise<{ workspaceId?: string; locale?: string; language?: string }>;
+  getLocale?(): Promise<string>;
+  subscribe?(listener: (context: { locale?: string; language?: string } | null) => void): () => void;
+  onLocaleChanged?(listener: (locale: string) => void): () => void;
+  locale?: string;
+  language?: string;
+}
+
+export function readTuttiAppContextValue(): TuttiWorkspaceAppContext | null {
+  if (typeof window === "undefined") return null;
+  return window.tutti?.appContext ?? window.tuttiAppContext ?? null;
 }
 
 declare global {
   interface Window {
     tutti?: TuttiWorkspaceAppBridge;
+    tuttiAppContext?: TuttiWorkspaceAppContext;
   }
 }
 
@@ -34,7 +47,7 @@ export async function tryOpenArtifactInTutti(artifact: Artifact): Promise<boolea
   }
 
   try {
-    const context = bridge.appContext ? await bridge.appContext.get() : null;
+    const context = bridge.appContext?.get ? await bridge.appContext.get() : null;
     if (!context?.workspaceId) {
       return false;
     }

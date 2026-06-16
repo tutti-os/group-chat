@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { Camera } from "lucide-react";
 import { readAvatarUpload } from "../../avatar-upload.js";
+import { useTranslation } from "../../i18n/index.js";
 import type { AvatarPresetId } from "../../user-profile.js";
 import { UserAvatar, type UserAvatarSize } from "./UserAvatar.js";
 
@@ -11,6 +12,7 @@ export function AvatarUploadButton(props: {
   onUpload: (customAvatarUrl: string) => void;
   className?: string;
 }) {
+  const { t } = useTranslation();
   const size = props.size ?? 58;
   const uploadRef = useRef<HTMLInputElement | null>(null);
   const iconSize = size <= 40 ? 18 : size <= 48 ? 20 : 24;
@@ -21,7 +23,7 @@ export function AvatarUploadButton(props: {
       const customAvatarUrl = await readAvatarUpload(file);
       props.onUpload(customAvatarUrl);
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "上传失败");
+      window.alert(error instanceof Error ? error.message : t("upload.failed"));
     }
   };
 
@@ -30,8 +32,8 @@ export function AvatarUploadButton(props: {
       <button
         type="button"
         className={`group [position:relative] [display:inline-grid] [border:0] [border-radius:999px] [padding:0] [background:transparent] [cursor:pointer] ${props.className ?? ""}`}
-        aria-label="点击上传头像"
-        title="点击上传头像"
+        aria-label={t("upload.clickAvatar")}
+        title={t("upload.clickAvatar")}
         onClick={() => uploadRef.current?.click()}
       >
         <UserAvatar size={size} preset={props.preset} customAvatarUrl={props.customAvatarUrl} />

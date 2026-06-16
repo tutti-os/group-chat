@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ImageUp, X } from "lucide-react";
 import type { Room, UpdateRoomRequest } from "@group-chat/shared";
 import { isRoomImageAvatar, readRoomAvatarImageFile, ROOM_AVATAR_EMOJIS } from "../../room-avatar.js";
+import { useTranslation } from "../../i18n/index.js";
 import { RoomAvatar } from "../ui/RoomAvatar.js";
 
 export function RoomSettingsDialog(props: {
@@ -10,6 +11,7 @@ export function RoomSettingsDialog(props: {
   onPreviewChange?: (input: UpdateRoomRequest) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [title, setTitle] = useState(props.room.title);
   const [avatar, setAvatar] = useState<string | null>(props.room.avatar);
   const [saving, setSaving] = useState(false);
@@ -56,7 +58,7 @@ export function RoomSettingsDialog(props: {
       syncPreview(title, dataUrl);
       setUploadError(null);
     } catch (error) {
-      setUploadError(error instanceof Error ? error.message : "上传图片失败");
+      setUploadError(error instanceof Error ? error.message : t("upload.failed"));
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
@@ -89,7 +91,7 @@ export function RoomSettingsDialog(props: {
   return (
     <section
       className={"[position:fixed] [inset:0] [z-index:60] [display:grid] [place-items:center] [background:rgb(0_0_0_/_46%)]"}
-      aria-label="群设置"
+      aria-label={t("roomSettings.title")}
       onClick={closeDialog}
     >
       <div
@@ -99,20 +101,20 @@ export function RoomSettingsDialog(props: {
         <button
           type="button"
           className={"[position:absolute] [top:16px] [right:16px] [z-index:2] [display:inline-grid] [width:34px] [height:34px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000008]"}
-          aria-label="关闭"
+          aria-label={t("common.close")}
           onClick={closeDialog}
         >
           <X size={18} />
         </button>
         <div className={"[padding:28px_24px_22px]"}>
-          <h3 className={"[margin:0] [color:var(--text)] [font-size:18px] [font-weight:760]"}>群设置</h3>
-          <p className={"[margin:6px_0_0] [color:var(--muted)] [font-size:12px] [line-height:1.5]"}>修改群头像和群名称，变更会同步到会话列表。</p>
+          <h3 className={"[margin:0] [color:var(--text)] [font-size:18px] [font-weight:760]"}>{t("roomSettings.title")}</h3>
+          <p className={"[margin:6px_0_0] [color:var(--muted)] [font-size:12px] [line-height:1.5]"}>{t("roomSettings.desc")}</p>
         </div>
         <div className={"[display:grid] [justify-items:center] [gap:10px] [padding:0_24px_18px]"}>
           <button
             type="button"
             className={"[display:grid] [justify-items:center] [gap:8px] [border:0] [padding:0] [background:transparent] [cursor:pointer] [&:hover]:[opacity:0.92]"}
-            aria-label="上传本地图片作为群头像"
+            aria-label={t("roomSettings.uploadAvatar")}
             onClick={pickLocalAvatar}
           >
             <span className={"[position:relative] [display:inline-grid]"}>
@@ -123,7 +125,7 @@ export function RoomSettingsDialog(props: {
             </span>
           </button>
           <div className={"[display:flex] [align-items:center] [justify-content:center]"}>
-            <span className={"[color:var(--muted)] [font-size:12px]"}>选择群头像</span>
+            <span className={"[color:var(--muted)] [font-size:12px]"}>{t("roomSettings.pickAvatar")}</span>
           </div>
           {uploadError ? <span className={"[color:var(--danger)] [font-size:12px]"}>{uploadError}</span> : null}
           <input
@@ -140,7 +142,7 @@ export function RoomSettingsDialog(props: {
                 <button
                   key={emoji}
                   type="button"
-                  aria-label={`选择 ${emoji} 作为群头像`}
+                  aria-label={t("roomSettings.pickEmojiAvatar", { emoji })}
                   aria-pressed={selected}
                   className={selected ? "![border-color:#171717] ![background:#f7f7f8] [box-shadow:0_0_0_2px_#17171722]" : ""}
                   onClick={() => {
@@ -155,12 +157,12 @@ export function RoomSettingsDialog(props: {
             })}
           </div>
           {isRoomImageAvatar(avatar) ? (
-            <span className={"[color:var(--muted)] [font-size:11px]"}>已选择本地图片，保存后生效</span>
+            <span className={"[color:var(--muted)] [font-size:11px]"}>{t("roomSettings.localImageHint")}</span>
           ) : null}
         </div>
         <div className={"[display:grid] [gap:8px] [padding:0_24px_24px] [&_label]:[display:grid] [&_label]:[gap:8px] [&_label_>_span]:[color:#5f6368] [&_label_>_span]:[font-size:12px] [&_label_>_span]:[font-weight:680] [&_input]:[width:100%] [&_input]:[height:44px] [&_input]:[border:1px_solid_var(--border-strong)] [&_input]:[border-radius:12px] [&_input]:[padding:0_13px] [&_input]:[color:var(--text)] [&_input]:[background:#f7f7f8] [&_input]:[outline:none] [&_input]:[font-size:13px]"}>
           <label>
-            <span>群名称</span>
+            <span>{t("roomSettings.roomName")}</span>
             <input
               value={title}
               maxLength={64}
@@ -175,7 +177,7 @@ export function RoomSettingsDialog(props: {
         </div>
         <div className={"[display:flex] [justify-content:flex-end] [gap:8px] [padding:0_24px_24px] [&_button]:[display:inline-flex] [&_button]:[align-items:center] [&_button]:[justify-content:center] [&_button]:[height:36px] [&_button]:[border:0] [&_button]:[border-radius:12px] [&_button]:[padding:0_14px] [&_button]:[font-size:13px] [&_button]:[font-weight:650]"}>
           <button type="button" className={"[color:var(--text)] [background:#00000008] [&:hover]:[background:#00000012]"} onClick={closeDialog}>
-            取消
+            {t("common.cancel")}
           </button>
           <button
             type="button"
@@ -183,7 +185,7 @@ export function RoomSettingsDialog(props: {
             disabled={saving || !title.trim()}
             onClick={() => void save()}
           >
-            {saving ? "保存中..." : "保存"}
+            {saving ? t("common.saving") : t("common.save")}
           </button>
         </div>
       </div>

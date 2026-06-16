@@ -1,6 +1,7 @@
+import type { RefObject, ReactNode } from "react";
 import { Settings } from "lucide-react";
-import type { ReactNode, RefObject } from "react";
 import type { LocalUserProfile } from "../../user-profile.js";
+import { useTranslation } from "../../i18n/index.js";
 import { ProfileMenu } from "../settings/ProfileMenu.js";
 import { UnreadBadge } from "../ui/UnreadBadge.js";
 import { UserAvatar } from "../ui/UserAvatar.js";
@@ -53,6 +54,7 @@ export function AppNavRail(props: {
   onCloseProfileMenu: () => void;
   totalUnreadCount?: number;
 }) {
+  const { t } = useTranslation();
   return (
     <aside className={"[position:relative] [display:flex] [flex-direction:column] [align-items:center] [gap:8px] [padding:12px_10px] [border-right:1px_solid_var(--border)] [background:var(--panel)] max-[760px]:[display:none]"}>
       <div className={"[position:relative] [margin-bottom:10px]"}>
@@ -85,8 +87,8 @@ export function AppNavRail(props: {
 
       <NavIconButton
         active
-        title="消息"
-        ariaLabel="消息"
+        title={t("nav.messages")}
+        ariaLabel={t("nav.messages")}
         colorful
         unreadCount={props.totalUnreadCount}
       >
@@ -95,7 +97,7 @@ export function AppNavRail(props: {
 
       <div className={"[flex:1_1_auto]"} />
 
-      <NavIconButton active={false} title="设置" ariaLabel="设置" onClick={props.onOpenSettings}>
+      <NavIconButton active={false} title={t("nav.settings")} ariaLabel={t("nav.settings")} onClick={props.onOpenSettings}>
         <Settings size={20} />
       </NavIconButton>
     </aside>

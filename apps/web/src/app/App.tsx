@@ -66,6 +66,7 @@ import {
 import { applyEvent, applyRoomUpdate, emptyState, normalizeSnapshot, removeActiveRun, removeDeletedRoom, removeHiddenMessages, upsert, upsertIdentity, upsertMany, upsertMessage, upsertParticipant, type AppState } from "./state.js";
 import { backgroundTaskFromSnapshot, createOptimisticBackgroundTask, createPendingAgentReplyTargets, enrichBackgroundTask, isPendingAgentRunId, loadDismissedBackgroundTaskIds, loadLocalTaskBarTaskIds, mergeBackgroundTask, pendingAgentReplyKey, removeLocalTaskBarTaskId, saveDismissedBackgroundTaskIds, addLocalTaskBarTaskId, type AgentRunTaskItem, type BackgroundTask, type PendingAgentReplyTarget } from "./background-tasks.js";
 import { resolveAgentProfileParticipant, resolveMessageAgentParticipant, resolveMessageSenderLabel, messageSenderLabel } from "./chat-links.js";
+import { attachmentLabel, t } from "./i18n/index.js";
 import { collectMessageProcess } from "./agent-thinking.js";
 import { UNREAD_FEATURE_ENABLED } from "./feature-flags.js";
 
@@ -363,14 +364,14 @@ export function App() {
   const agentRunTasks: AgentRunTaskItem[] = useMemo(() => {
     const runTasks = currentActiveRuns.map((run) => {
       const visibility = resolveAgentRunVisibility(run, currentMessages);
-      const participantName = currentParticipants.find((participant) => participant.id === run.participantId)?.displayName ?? "Agent";
+      const participantName = currentParticipants.find((participant) => participant.id === run.participantId)?.displayName ?? t("common.agent");
       return {
         id: run.id,
         type: "agent-run" as const,
         conversationId: run.conversationId,
         participantName,
         status: "running" as const,
-        preview: `${participantName} 执行中`,
+        preview: t("app.executingPreview", { name: participantName }),
         visibility,
       };
     });
@@ -389,7 +390,7 @@ export function App() {
         conversationId: pending.conversationId,
         participantName: pending.participantName,
         status: "running" as const,
-        preview: `${pending.participantName} 执行中`,
+        preview: t("app.executingPreview", { name: pending.participantName }),
         visibility: pending.visibility,
       }));
     return [...optimisticTasks, ...runTasks];
@@ -484,7 +485,7 @@ export function App() {
   const onCreateRoom = async () => {
     const result = await createRoom({
       title: nextDefaultRoomTitle(state.rooms),
-      description: "新的 AI 群聊房间",
+      description: t("app.newRoomDescription"),
     });
     const bundle = result as { room: Room; conversation: Conversation; participants?: Participant[] };
     setState((current) => ({
@@ -497,7 +498,7 @@ export function App() {
   };
 
   const onDeleteRoom = async (room: Room, conversation: Conversation) => {
-    const ok = window.confirm(`Delete chat "${conversation.title}"? Historical messages and local files will be removed.`);
+    const ok = window.confirm(t("app.deleteChatConfirm", { title: conversation.title }));
     if (!ok) return;
     try {
       await deleteRoom(room.id);
@@ -585,7 +586,7 @@ export function App() {
   const onUpdateParticipant = async (participantId: string, input: UpdateParticipantRequest) => {
     const result = (await updateParticipant(participantId, input)) as { participant: Participant | null };
     if (!result.participant) {
-      throw new Error("无法更新 Agent 配置");
+      throw new Error(t("app.updateAgentFailed"));
     }
     setState((current) => ({
       ...current,
@@ -645,7 +646,7 @@ export function App() {
   const onUpdateIdentity = async (identityId: string, input: UpdateIdentityRequest) => {
     const result = (await updateIdentity(identityId, input)) as { identity: Identity | null };
     if (!result.identity) {
-      throw new Error("Agent 不存在或保存失败");
+      throw new Error(t("app.agentSaveFailed"));
     }
     setState((current) => ({
       ...current,
@@ -677,7 +678,7 @@ export function App() {
     try {
       await cancelRun(runId);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "取消任务失败";
+      const message = error instanceof Error ? error.message : t("app.cancelTaskFailed");
       if (!/not found|404/i.test(message)) {
         window.alert(message);
         return;
@@ -692,7 +693,7 @@ export function App() {
     const task = backgroundTasks.find((item) => item.id === taskId);
     if (!task) return;
     if (task.status === "running") {
-      const confirmed = window.confirm("这个任务还在进行中，确定要取消并移除吗？");
+      const confirmed = window.confirm(t("app.cancelRunningTaskConfirm"));
       if (!confirmed) return;
       void cancelPrivateTask(taskId);
     }
@@ -766,7 +767,7 @@ export function App() {
           return [...current.filter((task) => task.id !== taskId), nextTask];
         });
       } catch (error) {
-        window.alert(error instanceof Error ? error.message : "无法开始总结");
+        window.alert(error instanceof Error ? error.message : t("app.summaryStartFailed"));
       }
     },
     [state.messageBlocks, state.artifacts],
@@ -775,7 +776,7 @@ export function App() {
   const openMessageLink = (messageId: string) => {
     const message = state.messages.find((item) => item.id === messageId);
     if (!message) {
-      window.alert("没有找到这条消息，可能已经不在本地快照中。");
+      window.alert(t("app.summaryNotFound"));
       return;
     }
     setCurrentConversationId(message.conversationId);
@@ -836,7 +837,7 @@ export function App() {
   const openSummaryLink = useCallback(async (taskId: string) => {
     const task = await ensureBackgroundTask(taskId);
     if (!task) {
-      window.alert("没有找到这条总结，可能已被移除。");
+      window.alert(t("app.summaryTaskMissing"));
       return;
     }
     if (task.conversationId !== currentConversationId) {
@@ -972,7 +973,7 @@ export function App() {
         .map((message) => ({
           messageId: message.id,
           sender: messageSenderLabel(message, state.participants, state.identities, userProfile.displayName),
-          content: message.content.trim() || "[附件]",
+          content: message.content.trim() || attachmentLabel(),
         }));
       if (quotes.length === 1) {
         setComposerRequest((current) => ({
@@ -1101,7 +1102,7 @@ export function App() {
   }, [currentConversationId, markConversationRead, state.messages, state.ready]);
 
   if (!state.ready) {
-    return <div className={"[display:grid] [height:100vh] [place-items:center] [color:var(--muted)] [font-size:13px]"}>Loading group-chat...</div>;
+    return <div className={"[display:grid] [height:100vh] [place-items:center] [color:var(--muted)] [font-size:13px]"}>{t("app.loading")}</div>;
   }
 
   const shellStyle = {
@@ -1146,8 +1147,8 @@ export function App() {
           <button
             type="button"
             className={"[position:relative] [z-index:20] [width:3px] [min-width:3px] [height:100vh] [border:0] [padding:0] [background:var(--border)] [cursor:col-resize] [transition:background-color_0.12s_ease] hover:[background:var(--border-strong)] focus-visible:[outline:none] focus-visible:[background:var(--border-strong)] max-[760px]:[display:none]"}
-            aria-label="拖拽调整会话列表和聊天窗口宽度"
-            title="拖拽调整窗口大小"
+            aria-label={t("app.resizeHandle")}
+            title={t("app.resizeTitle")}
             onPointerDown={startConversationSidebarResize}
           />
 
@@ -1316,7 +1317,7 @@ export function App() {
                   }}
                   onRecallMessage={(message) => {
                     if (!isLocalUserMessage(message)) return Promise.resolve();
-                    if (!window.confirm("确定撤回这条消息吗？撤回后 Agent 不会再回复这条消息。")) return Promise.resolve();
+                    if (!window.confirm(t("app.recallConfirm"))) return Promise.resolve();
                     timelineScrollPreserverRef.current?.capture();
                     return onUpdateMessage(message.id, { status: "recalled" });
                   }}
@@ -1388,8 +1389,8 @@ export function App() {
                   <span className={"[display:grid] [width:58px] [height:58px] [place-items:center] [border-radius:16px] [color:#ffffff] [background:var(--primary)]"}>
                     <Bot size={30} />
                   </span>
-                  <strong className={"[color:var(--text)] [font-size:17px] [font-weight:760]"}>选择一个协同频道</strong>
-                  <p>从左侧进入会话，或新建房间启动一组 Agent 协同。</p>
+                  <strong className={"[color:var(--text)] [font-size:17px] [font-weight:760]"}>{t("app.selectChannel")}</strong>
+                  <p>{t("app.emptyChannelHint")}</p>
                 </div>
               </div>
             )}
@@ -1452,7 +1453,7 @@ function ReconnectingBanner() {
   return (
     <div className={"[position:absolute] [top:56px] [left:50%] [z-index:28] [display:inline-flex] [transform:translateX(-50%)] [align-items:center] [gap:6px] [border:1px_solid_var(--border)] [border-radius:999px] [padding:5px_10px] [color:var(--muted)] [background:#fffffff2] [box-shadow:var(--shadow-soft)] [font-size:12px] [font-weight:650]"}>
       <Loader2 size={13} className={"animate-spin"} aria-hidden />
-      <span>自动重连中...</span>
+      <span>{t("app.reconnecting")}</span>
     </div>
   );
 }
@@ -1476,24 +1477,25 @@ function formatMessagesForComposer(messages: Message[], mode: "quote" | "summary
     .filter((message) => message.status !== "deleted" && message.status !== "recalled")
     .map((message) => {
       const sender = messageSenderLabel(message);
-      return `> ${sender}: ${message.content.trim() || "[附件]"}`;
+      return `> ${sender}: ${message.content.trim() || attachmentLabel()}`;
     });
-  if (mode === "summary") return `请总结并处理以下消息：\n\n${lines.join("\n")}\n`;
-  if (mode === "send-to-app") return `请把以下对话整理后发送给应用：\n\n${lines.join("\n")}\n`;
-  if (mode === "send-to-agent") return `请把以下对话整理后发送给 Agent：\n\n${lines.join("\n")}\n`;
+  const content = `${lines.join("\n")}\n`;
+  if (mode === "summary") return t("app.summaryComposerPrompt", { content });
+  if (mode === "send-to-app") return t("app.sendToAppPrompt", { content });
+  if (mode === "send-to-agent") return t("app.sendToAgentPrompt", { content });
   return `${lines.join("\n")}\n\n`;
 }
 
 function formatSummarySourcePreview(messages: Message[]) {
-  const firstContent = messages[0]?.content.replace(/\s+/g, " ").trim().slice(0, 120) || "[附件]";
+  const firstContent = messages[0]?.content.replace(/\s+/g, " ").trim().slice(0, 120) || attachmentLabel();
   if (messages.length <= 1) return firstContent;
-  return `引用 ${messages.length} 条消息 · ${firstContent}`;
+  return t("messageActions.quotePreview", { count: messages.length, preview: firstContent });
 }
 
 function formatSummaryRequest(messages: Message[], blocks: AppState["messageBlocks"], artifacts: AppState["artifacts"]) {
   const lines = messages.map((message) => {
     const sender = messageSenderLabel(message);
-    return `- ${sender}: ${message.content.trim() || "[附件]"}`;
+    return `- ${sender}: ${message.content.trim() || attachmentLabel()}`;
   });
   const messageArtifacts = messages.flatMap((message) =>
     blocks
@@ -1505,16 +1507,16 @@ function formatSummaryRequest(messages: Message[], blocks: AppState["messageBloc
       .filter((artifact): artifact is NonNullable<typeof artifact> => Boolean(artifact)),
   );
   const attachmentText = messageArtifacts.length
-    ? `\n附件：\n${messageArtifacts.map((artifact) => `- ${artifact.filename} (${artifact.mimeType}) ${artifact.textPreview ? `预览：${artifact.textPreview.slice(0, 500)}` : ""}`).join("\n")}`
+    ? `\n${t("app.attachmentsHeader")}\n${messageArtifacts.map((artifact) => `- ${artifact.filename} (${artifact.mimeType}) ${artifact.textPreview ? t("app.attachmentPreview", { preview: artifact.textPreview.slice(0, 500) }) : ""}`).join("\n")}`
     : "";
 
   return [
     messages.length > 1
-      ? `请总结下面这 ${messages.length} 条消息，提炼关键结论、行动项和需要关注的信息。`
-      : "请总结下面这条消息，提炼关键结论、行动项和需要关注的信息。",
-    "只输出总结结果，不要复述这条指令。",
+      ? t("app.summaryPromptMulti", { count: messages.length })
+      : t("app.summaryPromptSingle"),
+    t("app.summaryPromptFooter"),
     "",
-    "消息内容：",
+    t("app.summaryPromptHeader"),
     ...lines,
     attachmentText,
   ].join("\n");
@@ -1523,8 +1525,8 @@ function formatSummaryRequest(messages: Message[], blocks: AppState["messageBloc
 function nextDefaultRoomTitle(rooms: Room[]) {
   let maxNumber = 0;
   for (const room of rooms) {
-    const match = room.title.match(/AI 讨论室\s*(\d+)/);
+    const match = room.title.match(/(?:AI 讨论室|AI Room)\s*(\d+)/);
     if (match) maxNumber = Math.max(maxNumber, Number(match[1]));
   }
-  return `AI 讨论室 ${maxNumber + 1}`;
+  return t("app.defaultRoomTitle", { number: maxNumber + 1 });
 }
