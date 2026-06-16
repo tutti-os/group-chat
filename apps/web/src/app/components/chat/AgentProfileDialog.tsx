@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, Mic, MicOff, X } from "lucide-react";
+import { Mic, MicOff, X } from "lucide-react";
 import type {
   AddParticipantRequest,
+  CreateIdentityRequest,
   Identity,
   LocalAgentProviderStatus,
   Participant,
@@ -28,7 +29,11 @@ export function AgentProfileDialog(props: {
   onClose: () => void;
   onSaved?: () => void;
   onRemoved?: () => void;
-  onOpenIdentity?: (identityId: string) => void;
+  onCreateIdentity?: (input: CreateIdentityRequest) => Promise<{ identity: Identity }>;
+  onUpdateIdentity?: (
+    identityId: string,
+    input: CreateIdentityRequest,
+  ) => Promise<{ identity: Identity | null }>;
   onMention: (participant: Participant) => void;
   onAddParticipant?: (
     conversationId: string,
@@ -88,20 +93,15 @@ export function AgentProfileDialog(props: {
 
   if (!formParticipant) return null;
 
+  const activeIdentity = props.identity ?? setupIdentity;
+
   const selectedRuntime =
     props.runtimeProfiles.find((profile) => profile.id === formParticipant.runtimeProfileId) ?? props.runtimeProfile;
-  const displayAvatar = avatar ?? props.identity?.icon ?? setupIdentity?.icon ?? null;
+  const displayAvatar = avatar ?? activeIdentity?.icon ?? null;
   const headerAvatar = resolveAgentAvatar({
     avatar: displayAvatar,
-    icon: props.identity?.icon ?? setupIdentity?.icon,
+    icon: activeIdentity?.icon,
     runtimeProfile: selectedRuntime,
-  });
-  const identityAvatar = resolveAgentAvatar({
-    icon: props.identity?.icon,
-    runtimeProfile:
-      props.identity?.defaultRuntimeProfileId
-        ? props.runtimeProfiles.find((profile) => profile.id === props.identity!.defaultRuntimeProfileId) ?? null
-        : null,
   });
   const removed = !isAddMode && participant?.status === "removed";
   const muted = !isAddMode && participant?.status === "muted";
@@ -184,22 +184,6 @@ export function AgentProfileDialog(props: {
                 ) : null}
               </div>
             </div>
-            {props.identity && props.onOpenIdentity ? (
-              <>
-                <ChevronRight size={16} className={"[flex-shrink:0] [color:#cbd5e1]"} aria-hidden />
-                <button
-                  type="button"
-                  className={"[display:inline-flex] [flex-shrink:0] [max-width:min(200px,_42vw)] [align-items:center] [gap:6px] [border:1px_solid_var(--border)] [border-radius:999px] [padding:4px_10px_4px_4px] [color:var(--text)] [background:#f8fafc] [font-size:12px] [font-weight:650] [white-space:nowrap] [cursor:pointer] [transition:background-color_0.12s_ease,_border-color_0.12s_ease] [&:hover]:[background:#eff6ff] [&:hover]:[border-color:#bfdbfe] [&:focus-visible]:[outline:none] [&:focus-visible]:[box-shadow:0_0_0_3px_#2563eb22]"}
-                  onClick={() => props.onOpenIdentity?.(props.identity!.id)}
-                  title={`查看全局 Agent「${props.identity.name}」`}
-                >
-                  <AgentAvatar title={props.identity.name} avatar={identityAvatar.avatar} provider={identityAvatar.provider} size={32} />
-                  <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis]"}>
-                    来自 {props.identity.name}
-                  </span>
-                </button>
-              </>
-            ) : null}
           </div>
 
           <div className={"[display:flex] [flex:0_0_auto] [align-items:center] [gap:6px]"}>
@@ -230,8 +214,9 @@ export function AgentProfileDialog(props: {
             key={isAddMode ? `add:${setupIdentity?.id}` : formParticipant.id}
             mode={isAddMode ? "add" : "edit"}
             participant={formParticipant}
-            identity={props.identity ?? setupIdentity}
+            identity={activeIdentity}
             runtimeProfile={props.runtimeProfile}
+            runtimeProfiles={props.runtimeProfiles}
             localAgentProviders={props.localAgentProviders}
             showRemove={props.showRemove}
             readOnly={removed}
@@ -239,6 +224,8 @@ export function AgentProfileDialog(props: {
             conversationId={props.conversationId ?? undefined}
             onDisplayNameChange={setPreviewDisplayName}
             onMention={props.onMention}
+            onCreateIdentity={props.onCreateIdentity}
+            onUpdateIdentity={props.onUpdateIdentity}
             onAddParticipant={props.onAddParticipant}
             onUpdateParticipant={props.onUpdateParticipant}
             onRemoveParticipant={props.onRemoveParticipant}

@@ -139,6 +139,8 @@ export interface RuntimeProfile {
 export interface LocalAgentProviderModel {
   id: string;
   label: string;
+  description?: string;
+  supportedReasoningEfforts?: ReasoningEffort[];
 }
 
 export interface LocalAgentProviderStatus {
@@ -150,6 +152,8 @@ export interface LocalAgentProviderStatus {
   version: string;
   configDir?: string;
   models: LocalAgentProviderModel[];
+  defaultModelId?: string;
+  defaultReasoningEffort?: ReasoningEffort | null;
   reason?: string;
 }
 

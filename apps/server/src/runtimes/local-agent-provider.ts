@@ -16,6 +16,7 @@ import {
 import type { LocalAgentProviderStatus } from "@group-chat/shared";
 import { buildEffectiveRoleDescription } from "../domains/agent-instructions.js";
 import { participantWorkspaceRoot } from "../local/paths.js";
+import { enrichLocalAgentProviderStatus } from "./local-agent-config-catalog.js";
 import { acpPromptFromLocalAgentInput } from "./local-agent-acp.js";
 import { buildLocalAgentInput, decodeLocalAgentStdout, localToolBaseUrl } from "./local-agent-protocol.js";
 import type { RuntimeProvider, RuntimeReplyContext, RuntimeStreamEvent } from "./runtime-provider.js";
@@ -83,7 +84,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
     const detections = await this.localAgentRuntime.detect();
     return detections.map(({ provider, displayName, result }) => {
       const available = Boolean(result && result.supported !== false);
-      return {
+      const status: LocalAgentProviderStatus = {
         provider,
         displayName,
         available,
@@ -94,9 +95,16 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
         models: (result?.models ?? []).map((model) => ({
           id: model.id,
           label: model.label,
+          ...("description" in model && typeof model.description === "string"
+            ? { description: model.description }
+            : {}),
+          ...("supportedReasoningEfforts" in model && Array.isArray(model.supportedReasoningEfforts)
+            ? { supportedReasoningEfforts: model.supportedReasoningEfforts }
+            : {}),
         })),
         reason: available ? undefined : localAgentUnavailableReason(displayName, result),
       };
+      return enrichLocalAgentProviderStatus(status);
     });
   }
 

@@ -1,5 +1,5 @@
 import { Info, RefreshCw, Terminal } from "lucide-react";
-import type { LocalAgentProviderStatus, RuntimeProfile } from "@group-chat/shared";
+import type { LocalAgentProviderStatus, ReasoningEffort, RuntimeProfile } from "@group-chat/shared";
 
 export function defaultIdentityNameForRuntime(
   profile: RuntimeProfile | null,
@@ -55,6 +55,32 @@ export function listRuntimeModels(
   if (detected.length) return detected;
   if (profile.model) return [{ id: profile.model, label: profile.model }];
   return [];
+}
+
+export function preferredRuntimeModelId(
+  profile: RuntimeProfile | null,
+  localAgentProviders: LocalAgentProviderStatus[],
+) {
+  const options = listRuntimeModels(profile, localAgentProviders);
+  const provider = localAgentStatus(profile, localAgentProviders);
+  const preferred = provider?.defaultModelId ?? profile?.model ?? "";
+  if (preferred && options.some((option) => option.id === preferred)) return preferred;
+  return options[0]?.id ?? "";
+}
+
+export function listRuntimeReasoningOptions(
+  profile: RuntimeProfile | null,
+  localAgentProviders: LocalAgentProviderStatus[],
+  modelId: string,
+  allOptions: Array<{ value: "" | ReasoningEffort; label: string; description: string }>,
+) {
+  const provider = localAgentStatus(profile, localAgentProviders);
+  const model = provider?.models.find((item) => item.id === modelId);
+  const supported = model?.supportedReasoningEfforts;
+  if (!supported?.length) return allOptions;
+  const allowed = new Set<ReasoningEffort>(supported);
+  const filtered = allOptions.filter((option) => option.value === "" || allowed.has(option.value));
+  return filtered.length > 1 ? filtered : allOptions;
 }
 
 function isCanonicalLocalAgentProfile(profile: RuntimeProfile) {
