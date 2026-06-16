@@ -4,13 +4,13 @@ import type { LocalUserProfile } from "../../user-profile.js";
 import { ProfileMenu } from "../settings/ProfileMenu.js";
 import { UnreadBadge } from "../ui/UnreadBadge.js";
 import { UserAvatar } from "../ui/UserAvatar.js";
-import { AgentsNavIcon, ChatsNavIcon } from "./NavSectionIcons.js";
+import { ChatsNavIcon } from "./NavSectionIcons.js";
 
 function NavIconButton(props: {
   active: boolean;
   title: string;
   ariaLabel: string;
-  onClick: () => void;
+  onClick?: () => void;
   unreadCount?: number;
   colorful?: boolean;
   children: ReactNode;
@@ -43,8 +43,6 @@ function NavIconButton(props: {
 }
 
 export function AppNavRail(props: {
-  activeSection: "chats" | "team";
-  onSectionChange: (section: "chats" | "team") => void;
   profileMenuOpen: boolean;
   onToggleProfileMenu: () => void;
   onOpenSettings: () => void;
@@ -86,24 +84,13 @@ export function AppNavRail(props: {
       </div>
 
       <NavIconButton
-        active={props.activeSection === "chats"}
+        active
         title="消息"
         ariaLabel="消息"
         colorful
         unreadCount={props.totalUnreadCount}
-        onClick={() => props.onSectionChange("chats")}
       >
-        <ChatsNavIcon active={props.activeSection === "chats"} />
-      </NavIconButton>
-
-      <NavIconButton
-        active={props.activeSection === "team"}
-        title="角色"
-        ariaLabel="角色"
-        colorful
-        onClick={() => props.onSectionChange("team")}
-      >
-        <AgentsNavIcon active={props.activeSection === "team"} />
+        <ChatsNavIcon active />
       </NavIconButton>
 
       <div className={"[flex:1_1_auto]"} />

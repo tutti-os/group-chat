@@ -49,3 +49,12 @@ export function fileToBase64(file: File) {
     reader.readAsDataURL(file);
   });
 }
+
+export function truncateMiddle(text: string, maxLength: number, ellipsis = "...") {
+  const normalized = text.trim();
+  if (maxLength <= ellipsis.length || normalized.length <= maxLength) return normalized;
+  const keep = maxLength - ellipsis.length;
+  const headLength = Math.ceil(keep / 2);
+  const tailLength = Math.floor(keep / 2);
+  return `${normalized.slice(0, headLength)}${ellipsis}${normalized.slice(-tailLength)}`;
+}

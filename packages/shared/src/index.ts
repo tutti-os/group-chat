@@ -139,6 +139,8 @@ export interface RuntimeProfile {
 export interface LocalAgentProviderModel {
   id: string;
   label: string;
+  description?: string;
+  supportedReasoningEfforts?: ReasoningEffort[];
 }
 
 export interface LocalAgentProviderStatus {
@@ -150,6 +152,8 @@ export interface LocalAgentProviderStatus {
   version: string;
   configDir?: string;
   models: LocalAgentProviderModel[];
+  defaultModelId?: string;
+  defaultReasoningEffort?: ReasoningEffort | null;
   reason?: string;
 }
 
@@ -618,4 +622,43 @@ export function enrichAgentRun(run: AgentRun, messages: Message[]): AgentRun {
 
 export function enrichAgentRuns(runs: AgentRun[], messages: Message[]): AgentRun[] {
   return runs.map((run) => enrichAgentRun(run, messages));
+}
+
+export function isMentionAllTrigger(mentions: Array<Pick<MentionTarget, "mentionType">>) {
+  return mentions.some((mention) => mention.mentionType === "all");
+}
+
+export function resolveMentionSpeakingOrder(
+  order: SpeakingOrder,
+  mentions: Array<Pick<MentionTarget, "mentionType" | "participantId">>,
+): SpeakingOrder {
+  if (isMentionAllTrigger(mentions)) return "parallel";
+  const participantMentions = mentions.filter((mention) => mention.mentionType === "participant");
+  const uniqueParticipantIds = new Set(participantMentions.map((mention) => mention.participantId));
+  if (uniqueParticipantIds.size > 1) return "parallel";
+  return order;
+}
+
+export function uniqueDisplayName(baseName: string, takenLowercase: Iterable<string>): string {
+  const base = baseName.trim() || "Agent";
+  const taken = new Set(takenLowercase);
+  if (!taken.has(base.toLowerCase())) return base;
+  let index = 2;
+  while (taken.has(`${base} ${index}`.toLowerCase())) {
+    index += 1;
+  }
+  return `${base} ${index}`;
+}
+
+export function uniqueParticipantDisplayNameInRoom(
+  baseName: string,
+  participants: Array<Pick<Participant, "id" | "displayName" | "kind" | "status">>,
+  options?: { excludeParticipantId?: string | null },
+): string {
+  const taken = participants
+    .filter((participant) => participant.kind === "ai" && participant.status !== "removed")
+    .filter((participant) => !options?.excludeParticipantId || participant.id !== options.excludeParticipantId)
+    .map((participant) => participant.displayName.trim().toLowerCase())
+    .filter(Boolean);
+  return uniqueDisplayName(baseName, taken);
 }

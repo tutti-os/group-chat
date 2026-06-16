@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check } from "lucide-react";
 import type {
   AddParticipantRequest,
+  CreateIdentityRequest,
   Identity,
   LocalAgentProviderStatus,
   Participant,
@@ -9,23 +10,43 @@ import type {
   RuntimeProfile,
   UpdateParticipantRequest,
 } from "@group-chat/shared";
-import { DEFAULT_PARTICIPANT_LISTEN_MODE } from "@group-chat/shared";
-import { getIdentityRoleLabel } from "../../identity-role.js";
-import { reasoningEffortOptions, reasoningModeFieldLabel } from "../../constants.js";
-import { listRuntimeModels } from "../../runtime.js";
+import { DEFAULT_PARTICIPANT_LISTEN_MODE, uniqueParticipantDisplayNameInRoom } from "@group-chat/shared";
+import { roleDescriptionPresets, reasoningEffortOptions, reasoningModeFieldLabel } from "../../constants.js";
+import { isNewAgentDraft } from "../../identity-draft.js";
+import {
+  getConfiguredIdentityRoleDescription,
+  matchRolePresetId,
+  normalizeRoleDescriptionForEditor,
+} from "../../identity-role.js";
+import {
+  listCanonicalRuntimeProfiles,
+  listRuntimeModels,
+  listRuntimeReasoningOptions,
+  localAgentStatus,
+  preferredRuntimeModelId,
+  resolveCanonicalRuntimeProfile,
+  runtimeOptionLabel,
+} from "../../runtime.js";
 
 export function AgentManageForm(props: {
   mode?: "add" | "edit";
   participant: Participant;
   identity: Identity | null;
   runtimeProfile: RuntimeProfile | null;
+  runtimeProfiles: RuntimeProfile[];
   localAgentProviders: LocalAgentProviderStatus[];
   showRemove?: boolean;
   readOnly?: boolean;
   avatar: string | null;
   conversationId?: string;
+  roomParticipants?: Participant[];
   onDisplayNameChange?: (displayName: string) => void;
   onMention: (participant: Participant) => void;
+  onCreateIdentity?: (input: CreateIdentityRequest) => Promise<{ identity: Identity }>;
+  onUpdateIdentity?: (
+    identityId: string,
+    input: CreateIdentityRequest,
+  ) => Promise<{ identity: Identity | null }>;
   onAddParticipant?: (
     conversationId: string,
     input: AddParticipantRequest,
@@ -35,57 +56,154 @@ export function AgentManageForm(props: {
   onSaved?: () => void;
   onRemoved?: () => void;
 }) {
-  const { participant, identity, runtimeProfile } = props;
+  const { participant, identity } = props;
   const isAddMode = props.mode === "add";
+  const isNewIdentity = isNewAgentDraft(identity);
+  const readOnly = props.readOnly ?? false;
+
   const [displayName, setDisplayName] = useState(participant.displayName);
   const [roomInstructions, setRoomInstructions] = useState(participant.roomInstructions);
-  const [model, setModel] = useState(runtimeProfile?.model ?? "");
-  const [reasoningEffort, setReasoningEffort] = useState<"" | ReasoningEffort>(participant.reasoningEffort ?? "");
+  const [runtimeProfileId, setRuntimeProfileId] = useState(
+    () => participant.runtimeProfileId ?? identity?.defaultRuntimeProfileId ?? "",
+  );
+  const [model, setModel] = useState(props.runtimeProfile?.model ?? "");
+  const [reasoningEffort, setReasoningEffort] = useState<"" | ReasoningEffort>(
+    participant.reasoningEffort ?? identity?.defaultReasoningEffort ?? "",
+  );
+  const [roleDescription, setRoleDescription] = useState(() => normalizeRoleDescriptionForEditor(identity));
+  const [selectedRolePresetId, setSelectedRolePresetId] = useState(() =>
+    matchRolePresetId(normalizeRoleDescriptionForEditor(identity)),
+  );
+  const [showRoomInstructionsEditor, setShowRoomInstructionsEditor] = useState(
+    () => Boolean(participant.roomInstructions.trim()),
+  );
   const [saving, setSaving] = useState(false);
 
+  const runtimeOptions = useMemo(
+    () => listCanonicalRuntimeProfiles(props.runtimeProfiles),
+    [props.runtimeProfiles],
+  );
+  const selectedRuntime =
+    props.runtimeProfiles.find((profile) => profile.id === runtimeProfileId)
+    ?? props.runtimeProfiles.find((profile) => profile.id === identity?.defaultRuntimeProfileId)
+    ?? props.runtimeProfile;
+  const canonicalRuntime = resolveCanonicalRuntimeProfile(selectedRuntime ?? null, props.runtimeProfiles);
+  const modelOptions = listRuntimeModels(selectedRuntime ?? null, props.localAgentProviders);
+  const reasoningOptions = listRuntimeReasoningOptions(
+    selectedRuntime ?? null,
+    props.localAgentProviders,
+    model,
+    reasoningEffortOptions,
+  );
+  const providerStatus = localAgentStatus(selectedRuntime ?? null, props.localAgentProviders);
   const skillIds = identity?.skillIds ?? [];
-  const modelOptions = listRuntimeModels(runtimeProfile, props.localAgentProviders);
-  const readOnly = props.readOnly ?? false;
-  const globalRoleLabel = getIdentityRoleLabel(identity);
+  const hasRoomInstructions = Boolean(roomInstructions.trim());
+  const showRoomInstructions = hasRoomInstructions || (!readOnly && showRoomInstructionsEditor);
 
   useEffect(() => {
     setDisplayName(participant.displayName);
-    setModel(runtimeProfile?.model ?? "");
-    setReasoningEffort(participant.reasoningEffort ?? "");
     setRoomInstructions(participant.roomInstructions);
-  }, [identity, participant, runtimeProfile]);
+    setRuntimeProfileId(participant.runtimeProfileId ?? identity?.defaultRuntimeProfileId ?? "");
+    setModel(props.runtimeProfile?.model ?? "");
+    setReasoningEffort(participant.reasoningEffort ?? identity?.defaultReasoningEffort ?? "");
+    const nextRoleDescription = normalizeRoleDescriptionForEditor(identity);
+    setRoleDescription(nextRoleDescription);
+    setSelectedRolePresetId(matchRolePresetId(nextRoleDescription));
+    setShowRoomInstructionsEditor(Boolean(participant.roomInstructions.trim()));
+  }, [identity, participant, props.runtimeProfile]);
+
+  useEffect(() => {
+    if (!selectedRuntime) return;
+    const nextModel = preferredRuntimeModelId(selectedRuntime, props.localAgentProviders);
+    setModel(nextModel);
+    const nextProvider = localAgentStatus(selectedRuntime, props.localAgentProviders);
+    if (nextProvider?.defaultReasoningEffort) {
+      setReasoningEffort(nextProvider.defaultReasoningEffort);
+    }
+  }, [props.localAgentProviders, runtimeProfileId, selectedRuntime]);
+
+  useEffect(() => {
+    if (!reasoningOptions.some((option) => option.value === reasoningEffort)) {
+      const providerDefault = providerStatus?.defaultReasoningEffort ?? "";
+      setReasoningEffort(
+        reasoningOptions.some((option) => option.value === providerDefault) ? providerDefault : "",
+      );
+    }
+  }, [model, providerStatus?.defaultReasoningEffort, reasoningEffort, reasoningOptions]);
 
   const mention = () => {
     props.onMention(participant);
     props.onSaved?.();
   };
 
+  const buildIdentityPayload = (): CreateIdentityRequest => ({
+    name: displayName.trim() || identity?.name || "Agent",
+    icon: props.avatar ?? identity?.icon ?? "",
+    systemPrompt: roleDescription,
+    stylePrompt: "",
+    defaultRuntimeProfileId: canonicalRuntime?.id ?? (runtimeProfileId || null),
+    defaultListenMode: DEFAULT_PARTICIPANT_LISTEN_MODE,
+    defaultReasoningEffort: reasoningEffort || null,
+    model: model || undefined,
+  });
+
   const save = async () => {
     setSaving(true);
     try {
-      const payload: UpdateParticipantRequest = {
-        displayName,
+      let activeIdentity = identity;
+      const resolvedDisplayName = props.roomParticipants
+        ? uniqueParticipantDisplayNameInRoom(
+          displayName.trim() || identity?.name || "Agent",
+          props.roomParticipants,
+        )
+        : displayName.trim() || identity?.name || "Agent";
+      const identityPayload = {
+        ...buildIdentityPayload(),
+        name: resolvedDisplayName,
+      };
+
+      if (isNewIdentity) {
+        if (!props.onCreateIdentity) throw new Error("无法创建 Agent，请关闭后重试");
+        const result = await props.onCreateIdentity(identityPayload);
+        activeIdentity = result.identity;
+      } else if (activeIdentity && props.onUpdateIdentity) {
+        const identityChanged =
+          activeIdentity.name !== identityPayload.name
+          || activeIdentity.icon !== identityPayload.icon
+          || getConfiguredIdentityRoleDescription(activeIdentity) !== roleDescription
+          || activeIdentity.defaultRuntimeProfileId !== identityPayload.defaultRuntimeProfileId
+          || (activeIdentity.defaultReasoningEffort ?? null) !== (identityPayload.defaultReasoningEffort ?? null);
+        if (identityChanged) {
+          const result = await props.onUpdateIdentity(activeIdentity.id, identityPayload);
+          activeIdentity = result.identity ?? activeIdentity;
+        }
+      }
+
+      const participantPayload: UpdateParticipantRequest = {
+        displayName: resolvedDisplayName,
         avatar: props.avatar,
         listenMode: DEFAULT_PARTICIPANT_LISTEN_MODE,
+        runtimeProfileId: canonicalRuntime?.id ?? (runtimeProfileId || undefined),
         model: model || undefined,
         reasoningEffort: reasoningEffort || null,
         roomInstructions: roomInstructions.trim(),
       };
 
       if (isAddMode) {
-        if (!props.conversationId || !identity || !props.onAddParticipant) {
+        if (!props.conversationId || !activeIdentity || !props.onAddParticipant) {
           throw new Error("无法添加 Agent，请关闭后重试");
         }
         const result = await props.onAddParticipant(props.conversationId, {
-          identityId: identity.id,
-          displayName: displayName.trim() || identity.name,
+          identityId: activeIdentity.id,
+          runtimeProfileId: canonicalRuntime?.id ?? (runtimeProfileId || null),
+          displayName: resolvedDisplayName,
           listenMode: DEFAULT_PARTICIPANT_LISTEN_MODE,
           roomInstructions: roomInstructions.trim(),
           reasoningEffort: reasoningEffort || null,
         });
-        await props.onUpdateParticipant(result.participant.id, payload);
+        await props.onUpdateParticipant(result.participant.id, participantPayload);
       } else {
-        await props.onUpdateParticipant(participant.id, payload);
+        await props.onUpdateParticipant(participant.id, participantPayload);
       }
       props.onSaved?.();
     } catch (error) {
@@ -99,7 +217,7 @@ export function AgentManageForm(props: {
     <div className={"[display:grid] [gap:20px] [&_input]:[height:34px] [&_input]:[width:100%] [&_input]:[min-width:0] [&_input]:[border:1px_solid_var(--border)] [&_input]:[border-radius:12px] [&_input]:[padding:0_10px] [&_input]:[font-size:13px] [&_input]:[outline:none] [&_select]:[height:34px] [&_select]:[width:100%] [&_select]:[min-width:0] [&_select]:[border:1px_solid_var(--border)] [&_select]:[border-radius:12px] [&_select]:[padding:0_10px] [&_select]:[font-size:13px] [&_select]:[outline:none] [&_textarea]:[width:100%] [&_textarea]:[min-height:88px] [&_textarea]:[border:1px_solid_var(--border)] [&_textarea]:[border-radius:12px] [&_textarea]:[padding:10px] [&_textarea]:[font-size:13px] [&_textarea]:[line-height:1.5] [&_textarea]:[outline:none] [&_textarea]:[resize:vertical] [&_label]:[display:grid] [&_label]:[gap:8px] [&_label_span]:[color:var(--muted)] [&_label_span]:[font-size:12px] [&_label_span]:[font-weight:700]"}>
       {!readOnly && isAddMode ? (
         <p className={"[margin:0] [border:1px_solid_var(--border)] [border-radius:12px] [padding:10px_12px] [color:var(--muted)] [background:#f7f7f8] [font-size:12px] [line-height:1.5]"}>
-          保存后才会将此 Agent 加入当前房间。
+          配置完成后保存，将创建 Agent 并加入当前房间。
         </p>
       ) : null}
       {readOnly && !isAddMode ? (
@@ -126,12 +244,28 @@ export function AgentManageForm(props: {
       <div className={"[display:grid] [grid-template-columns:repeat(3,_minmax(0,_1fr))] [gap:10px] max-[520px]:[grid-template-columns:1fr]"}>
         <label>
           <span>Runtime</span>
-          <input
-            value={runtimeProfile?.displayName ?? "未配置"}
-            readOnly
-            aria-readonly
-            className={"[color:var(--muted)] [background:#f3f4f6] [cursor:default]"}
-          />
+          <select
+            value={canonicalRuntime?.id ?? runtimeProfileId}
+            disabled={readOnly}
+            onChange={(event) => {
+              const nextProfile = props.runtimeProfiles.find((profile) => profile.id === event.target.value) ?? null;
+              setRuntimeProfileId(event.target.value);
+              const nextModel = preferredRuntimeModelId(nextProfile, props.localAgentProviders);
+              setModel(nextModel);
+              const nextProvider = localAgentStatus(nextProfile, props.localAgentProviders);
+              if (nextProvider?.defaultReasoningEffort) {
+                setReasoningEffort(nextProvider.defaultReasoningEffort);
+              }
+            }}
+            aria-label={`${participant.displayName} Runtime`}
+            className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
+          >
+            {runtimeOptions.map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {runtimeOptionLabel(profile, props.localAgentProviders)}
+              </option>
+            ))}
+          </select>
         </label>
         <label>
           <span>模型</span>
@@ -162,7 +296,7 @@ export function AgentManageForm(props: {
             aria-label={`${participant.displayName} 推理模式`}
             className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
           >
-            {reasoningEffortOptions.map((option) => (
+            {reasoningOptions.map((option) => (
               <option key={option.value || "auto"} value={option.value}>
                 {option.label}
               </option>
@@ -171,34 +305,70 @@ export function AgentManageForm(props: {
         </label>
       </div>
 
-      {globalRoleLabel ? (
-        <label>
-          <span>角色设定（来自全局 Agent 配置，如需修改请前往「管理智能体」。）</span>
-          <input
-            value={globalRoleLabel}
-            readOnly
-            aria-readonly
-            className={"[color:var(--muted)] [background:#f3f4f6] [cursor:default]"}
-            aria-label={`${participant.displayName} 角色设定`}
-          />
-        </label>
-      ) : null}
-
-      <label>
-        <span>在此群的描述</span>
+      <div className={"[display:grid] [gap:10px]"}>
+        <span className={"[color:var(--muted)] [font-size:12px] [font-weight:700]"}>角色设定</span>
+        {!readOnly ? (
+          <div className={"[display:flex] [flex-wrap:wrap] [gap:8px]"}>
+            {roleDescriptionPresets.map((preset) => {
+              const selected = selectedRolePresetId === preset.id;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  aria-pressed={selected}
+                  className={`[border:1px_solid_var(--border)] [border-radius:999px] [padding:6px_12px] [color:#525252] [background:#f7f7f8] [font-size:12px] [font-weight:650] [transition:background-color_0.12s_ease,_border-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[border-color:#17171733] [&:hover]:[color:var(--text)] ${selected ? "![border-color:#171717] ![color:#ffffff] ![background:#171717]" : ""}`}
+                  onClick={() => {
+                    setSelectedRolePresetId(preset.id);
+                    setRoleDescription(preset.description);
+                  }}
+                >
+                  {preset.name}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
         <textarea
-          value={roomInstructions}
+          value={roleDescription}
           readOnly={readOnly}
           aria-readonly={readOnly || undefined}
           onChange={(event) => {
             if (readOnly) return;
-            setRoomInstructions(event.target.value);
+            const nextValue = event.target.value;
+            setSelectedRolePresetId(matchRolePresetId(nextValue));
+            setRoleDescription(nextValue);
           }}
           className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
-          placeholder={globalRoleLabel ? "留空则使用全局角色设定" : "为本群单独设置描述（可选）"}
-          aria-label={`${participant.displayName} 在此群的描述`}
+          placeholder="描述该 Agent 在此群中的职责、风格与边界"
+          aria-label={`${participant.displayName} 角色设定`}
         />
-      </label>
+      </div>
+
+      {showRoomInstructions ? (
+        <label>
+          <span>在此群的描述</span>
+          <textarea
+            value={roomInstructions}
+            readOnly={readOnly}
+            aria-readonly={readOnly || undefined}
+            onChange={(event) => {
+              if (readOnly) return;
+              setRoomInstructions(event.target.value);
+            }}
+            className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
+            placeholder="写一段展示给其他人看的介绍（可选）"
+            aria-label={`${participant.displayName} 在此群的描述`}
+          />
+        </label>
+      ) : !readOnly ? (
+        <button
+          type="button"
+          className={"[justify-self:start] [border:0] [padding:0] [color:var(--muted)] [background:transparent] [font-size:12px] [font-weight:650] [text-decoration:underline] [text-underline-offset:3px] [&:hover]:[color:var(--text)]"}
+          onClick={() => setShowRoomInstructionsEditor(true)}
+        >
+          添加在此群的描述（可选）
+        </button>
+      ) : null}
 
       <div className={"[display:grid] [gap:8px]"}>
         <span className={"[color:var(--muted)] [font-size:12px] [font-weight:700]"}>Skills</span>

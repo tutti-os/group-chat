@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
-import { Bot, Loader2, MessageCircle } from "lucide-react";
+import { Bot, Loader2 } from "lucide-react";
 import { enrichAgentRuns, isLocalUserMessage, resolveAgentRunVisibility, type AgentRun,
   type Conversation,
   type CreateIdentityRequest,
@@ -24,7 +24,6 @@ import {
   deleteMessage,
   deleteParticipant,
   deleteRoom,
-  deleteIdentity,
   fetchLocalAgentProviders,
   fetchSnapshot,
   type SendMessageResponse,
@@ -49,12 +48,13 @@ import { RoomAgentsDialog } from "./components/chat/RoomAgentsDialog.js";
 import { AgentProfileDialog } from "./components/chat/AgentProfileDialog.js";
 import { MessageTimeline } from "./components/chat/MessageTimeline.js";
 import { DeleteMessageConfirmDialog } from "./components/chat/DeleteMessageConfirmDialog.js";
+import { InvitePeopleDialog } from "./components/chat/InvitePeopleDialog.js";
 import { Composer } from "./components/chat/Composer.js";
 import { BackgroundTaskBar } from "./components/chat/BackgroundTaskBar.js";
 import { AppNavRail } from "./components/nav/AppNavRail.js";
 import { ProfileMenu } from "./components/settings/ProfileMenu.js";
 import { SettingsDialog } from "./components/settings/SettingsDialog.js";
-import { TeamMembersPage } from "./components/team/TeamMembersPage.js";
+import { createDraftLocalAgent } from "./identity-draft.js";
 import { loadUserProfile, saveUserProfile, type LocalUserProfile } from "./user-profile.js";
 import {
   countUnreadMessages,
@@ -63,11 +63,11 @@ import {
   saveConversationReadAt,
   type ConversationReadAtMap,
 } from "./conversation-read-state.js";
-import { UnreadBadge } from "./components/ui/UnreadBadge.js";
 import { applyEvent, applyRoomUpdate, emptyState, normalizeSnapshot, removeActiveRun, removeDeletedRoom, removeHiddenMessages, upsert, upsertIdentity, upsertMany, upsertMessage, upsertParticipant, type AppState } from "./state.js";
-import { backgroundTaskFromSnapshot, createOptimisticBackgroundTask, enrichBackgroundTask, loadDismissedBackgroundTaskIds, loadLocalTaskBarTaskIds, mergeBackgroundTask, removeLocalTaskBarTaskId, saveDismissedBackgroundTaskIds, addLocalTaskBarTaskId, type AgentRunTaskItem, type BackgroundTask } from "./background-tasks.js";
+import { backgroundTaskFromSnapshot, createOptimisticBackgroundTask, createPendingAgentReplyTargets, enrichBackgroundTask, isPendingAgentRunId, loadDismissedBackgroundTaskIds, loadLocalTaskBarTaskIds, mergeBackgroundTask, pendingAgentReplyKey, removeLocalTaskBarTaskId, saveDismissedBackgroundTaskIds, addLocalTaskBarTaskId, type AgentRunTaskItem, type BackgroundTask, type PendingAgentReplyTarget } from "./background-tasks.js";
 import { resolveAgentProfileParticipant, resolveMessageAgentParticipant, resolveMessageSenderLabel, messageSenderLabel } from "./chat-links.js";
 import { collectMessageProcess } from "./agent-thinking.js";
+import { UNREAD_FEATURE_ENABLED } from "./feature-flags.js";
 
 const DEFAULT_CONVERSATION_SIDEBAR_WIDTH = 300;
 const MIN_CONVERSATION_SIDEBAR_WIDTH = 240;
@@ -92,7 +92,6 @@ export function App() {
   const [state, setState] = useState<AppState>(emptyState);
   const [localAgentProviders, setLocalAgentProviders] = useState<LocalAgentProviderStatus[]>([]);
   const [refreshingLocalAgentProviders, setRefreshingLocalAgentProviders] = useState(false);
-  const [activeSection, setActiveSection] = useState<"chats" | "team">("chats");
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [profileMenuPlacement, setProfileMenuPlacement] = useState<"rail" | "mobile" | "chat">("rail");
   const [profileMenuAnchorEl, setProfileMenuAnchorEl] = useState<HTMLElement | null>(null);
@@ -103,12 +102,9 @@ export function App() {
     saveUserProfile(profile);
   }, []);
   const [membersPanelOpen, setMembersPanelOpen] = useState(false);
-  const [membersPanelStartAdding, setMembersPanelStartAdding] = useState(false);
   const [agentProfileParticipantId, setAgentProfileParticipantId] = useState<string | null>(null);
   const [agentProfileShowRemove, setAgentProfileShowRemove] = useState(false);
-  const [pendingAgentSetupIdentityId, setPendingAgentSetupIdentityId] = useState<string | null>(null);
-  const [teamFocusIdentityId, setTeamFocusIdentityId] = useState<string | null>(null);
-  const [teamSelectedIdentityId, setTeamSelectedIdentityId] = useState<string | null>(null);
+  const [pendingNewAgentDraft, setPendingNewAgentDraft] = useState<Identity | null>(null);
   const [filesPanelOpen, setFilesPanelOpen] = useState(false);
   const [openAgentRunId, setOpenAgentRunId] = useState<string | null>(null);
   const [openAgentRunSnapshot, setOpenAgentRunSnapshot] = useState<AgentRun | null>(null);
@@ -132,6 +128,8 @@ export function App() {
   const timelineScrollPreserverRef = useRef<{ capture: () => void } | null>(null);
   const [deletePrompt, setDeletePrompt] = useState<{ ids: string[] } | null>(null);
   const [deletingMessages, setDeletingMessages] = useState(false);
+  const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
+  const [pendingReplyTargets, setPendingReplyTargets] = useState<PendingAgentReplyTarget[]>([]);
 
   const openProfileMenu = useCallback((placement: "rail" | "mobile" | "chat", anchorEl?: HTMLElement | null) => {
     setProfileMenuPlacement(placement);
@@ -154,6 +152,7 @@ export function App() {
   const [dismissedBackgroundTaskIds, setDismissedBackgroundTaskIds] = useState<Set<string>>(() => loadDismissedBackgroundTaskIds());
   const [openBackgroundTaskId, setOpenBackgroundTaskId] = useState<string | null>(null);
   const [conversationReadAt, setConversationReadAt] = useState<ConversationReadAtMap>(() => loadConversationReadAt());
+  const previousConversationIdRef = useRef<string | null>(null);
 
   const refreshLocalAgentProviders = useCallback(async () => {
     setRefreshingLocalAgentProviders(true);
@@ -361,19 +360,40 @@ export function App() {
           ?? null,
       }
     : null;
-  const agentRunTasks: AgentRunTaskItem[] = currentActiveRuns.map((run) => {
-    const visibility = resolveAgentRunVisibility(run, currentMessages);
-    const participantName = currentParticipants.find((participant) => participant.id === run.participantId)?.displayName ?? "Agent";
-    return {
-      id: run.id,
-      type: "agent-run",
-      conversationId: run.conversationId,
-      participantName,
-      status: "running",
-      preview: `${participantName} 执行中`,
-      visibility,
-    };
-  });
+  const agentRunTasks: AgentRunTaskItem[] = useMemo(() => {
+    const runTasks = currentActiveRuns.map((run) => {
+      const visibility = resolveAgentRunVisibility(run, currentMessages);
+      const participantName = currentParticipants.find((participant) => participant.id === run.participantId)?.displayName ?? "Agent";
+      return {
+        id: run.id,
+        type: "agent-run" as const,
+        conversationId: run.conversationId,
+        participantName,
+        status: "running" as const,
+        preview: `${participantName} 执行中`,
+        visibility,
+      };
+    });
+    if (!currentConversation) return runTasks;
+    const settledKeys = new Set(
+      state.agentRuns
+        .filter((run) => run.conversationId === currentConversation.id && run.triggerMessageId && run.participantId)
+        .map((run) => pendingAgentReplyKey(run.triggerMessageId!, run.participantId!)),
+    );
+    const optimisticTasks = pendingReplyTargets
+      .filter((pending) => pending.conversationId === currentConversation.id)
+      .filter((pending) => !settledKeys.has(pending.key))
+      .map((pending) => ({
+        id: `pending:${pending.key}`,
+        type: "agent-run" as const,
+        conversationId: pending.conversationId,
+        participantName: pending.participantName,
+        status: "running" as const,
+        preview: `${pending.participantName} 执行中`,
+        visibility: pending.visibility,
+      }));
+    return [...optimisticTasks, ...runTasks];
+  }, [currentActiveRuns, currentConversation, currentMessages, currentParticipants, pendingReplyTargets, state.agentRuns]);
   const openAgentRun = openAgentRunId
     ? currentActiveRuns.find((run) => run.id === openAgentRunId)
       ?? (openAgentRunSnapshot?.id === openAgentRunId ? openAgentRunSnapshot : null)
@@ -436,9 +456,7 @@ export function App() {
   const agentProfileIdentity = agentProfileParticipant?.identityId
     ? state.identities.find((item) => item.id === agentProfileParticipant.identityId) ?? null
     : null;
-  const pendingAgentSetupIdentity = pendingAgentSetupIdentityId
-    ? state.identities.find((item) => item.id === pendingAgentSetupIdentityId) ?? null
-    : null;
+  const pendingAgentSetupIdentity = pendingNewAgentDraft;
   const agentProfileDialogIdentity = agentProfileIdentity ?? pendingAgentSetupIdentity;
   const agentProfileRuntime = agentProfileParticipant?.runtimeProfileId
     ? state.runtimeProfiles.find((item) => item.id === agentProfileParticipant.runtimeProfileId) ?? null
@@ -448,22 +466,20 @@ export function App() {
   const clearAgentProfileDialog = () => {
     setAgentProfileParticipantId(null);
     setAgentProfileShowRemove(false);
-    setPendingAgentSetupIdentityId(null);
+    setPendingNewAgentDraft(null);
   };
   const finishAgentProfileAdd = () => {
     clearAgentProfileDialog();
     setMembersPanelOpen(true);
-    setMembersPanelStartAdding(false);
   };
   const finishAgentProfileDialog = () => {
     clearAgentProfileDialog();
     setMembersPanelOpen(false);
-    setMembersPanelStartAdding(false);
   };
-  const openTeamIdentity = (identityId: string) => {
-    finishAgentProfileDialog();
-    setTeamFocusIdentityId(identityId);
-    setActiveSection("team");
+  const openNewAgentSetup = () => {
+    setAgentProfileParticipantId(null);
+    setAgentProfileShowRemove(false);
+    setPendingNewAgentDraft(createDraftLocalAgent(state.runtimeProfiles, localAgentProviders));
   };
   const onCreateRoom = async () => {
     const result = await createRoom({
@@ -657,6 +673,7 @@ export function App() {
   };
 
   const cancelActiveRun = useCallback(async (runId: string) => {
+    timelineScrollPreserverRef.current?.capture();
     try {
       await cancelRun(runId);
     } catch (error) {
@@ -691,10 +708,18 @@ export function App() {
   };
 
   const dismissAgentRunTask = async (runId: string) => {
-    const run = currentActiveRuns.find((item) => item.id === runId);
-    if (!run) return;
-    const participantName = currentParticipants.find((item) => item.id === run.participantId)?.displayName ?? "Agent";
-    if (!window.confirm(`确定要取消 ${participantName} 正在执行的任务吗？`)) return;
+    if (isPendingAgentRunId(runId)) {
+      const pendingKey = runId.slice("pending:".length);
+      const pending = pendingReplyTargets.find((item) => item.key === pendingKey) ?? null;
+      setPendingReplyTargets((current) => current.filter((item) => item.key !== pendingKey));
+      const realRun = pending
+        ? state.activeRuns.find(
+            (run) => run.triggerMessageId === pending.triggerMessageId && run.participantId === pending.participantId,
+          )
+        : null;
+      if (realRun) await cancelActiveRun(realRun.id);
+      return;
+    }
     await cancelActiveRun(runId);
   };
 
@@ -753,7 +778,6 @@ export function App() {
       window.alert("没有找到这条消息，可能已经不在本地快照中。");
       return;
     }
-    setActiveSection("chats");
     setCurrentConversationId(message.conversationId);
     setFocusMessageRequest((current) => ({
       messageId,
@@ -815,7 +839,6 @@ export function App() {
       window.alert("没有找到这条总结，可能已被移除。");
       return;
     }
-    setActiveSection("chats");
     if (task.conversationId !== currentConversationId) {
       setCurrentConversationId(task.conversationId);
     }
@@ -864,6 +887,15 @@ export function App() {
     setCurrentConversationId((current) => current ?? snapshot.conversations[0]?.id ?? null);
   }, []);
 
+  const registerPendingReplyTargets = useCallback((result: SendMessageResponse) => {
+    if (!result.message || !result.targets?.length) return;
+    const pending = createPendingAgentReplyTargets(result.message, result.targets);
+    setPendingReplyTargets((current) => [
+      ...current.filter((item) => item.triggerMessageId !== result.message!.id),
+      ...pending,
+    ]);
+  }, []);
+
   const mergeSentMessage = useCallback((result: SendMessageResponse) => {
     setState((current) => {
       const messages = upsertMessage(current.messages, result.message);
@@ -881,22 +913,24 @@ export function App() {
     async (...args: Parameters<typeof sendMessage>) => {
       const result = await sendMessage(...args);
       mergeSentMessage(result);
+      registerPendingReplyTargets(result);
       setScrollToBottomRequest((current) => ({ seq: (current?.seq ?? 0) + 1 }));
       window.setTimeout(() => void refreshSnapshot(), 900);
       window.setTimeout(() => void refreshSnapshot(), 2500);
       return result;
     },
-    [mergeSentMessage, refreshSnapshot],
+    [mergeSentMessage, refreshSnapshot, registerPendingReplyTargets],
   );
 
   const onUpdateMessage = useCallback(
     async (messageId: string, input: UpdateMessageRequest) => {
       const result = await updateMessage(messageId, input);
       mergeSentMessage(result);
+      registerPendingReplyTargets(result);
       window.setTimeout(() => void refreshSnapshot(), 900);
       return result;
     },
-    [mergeSentMessage, refreshSnapshot],
+    [mergeSentMessage, registerPendingReplyTargets, refreshSnapshot],
   );
 
 
@@ -983,7 +1017,6 @@ export function App() {
 
   useEffect(() => {
     setMembersPanelOpen(false);
-    setMembersPanelStartAdding(false);
     setFilesPanelOpen(false);
     setOpenAgentRunId(null);
     setOpenAgentRunSnapshot(null);
@@ -1032,9 +1065,10 @@ export function App() {
   }, [state.messages]);
 
   const unreadCountsByConversation = useMemo(() => {
+    if (!UNREAD_FEATURE_ENABLED) return {} as Record<string, number>;
     const counts: Record<string, number> = {};
     for (const conversation of state.conversations) {
-      if (activeSection === "chats" && conversation.id === currentConversationId) {
+      if (conversation.id === currentConversationId) {
         counts[conversation.id] = 0;
         continue;
       }
@@ -1045,17 +1079,26 @@ export function App() {
       );
     }
     return counts;
-  }, [activeSection, conversationReadAt, currentConversationId, state.conversations, state.messages]);
+  }, [conversationReadAt, currentConversationId, state.conversations, state.messages]);
 
-  const totalUnreadCount = useMemo(
-    () => Object.values(unreadCountsByConversation).reduce((sum, count) => sum + count, 0),
-    [unreadCountsByConversation],
-  );
+  const totalUnreadCount = useMemo(() => {
+    if (!UNREAD_FEATURE_ENABLED) return 0;
+    return Object.values(unreadCountsByConversation).reduce((sum, count) => sum + count, 0);
+  }, [unreadCountsByConversation]);
 
   useEffect(() => {
-    if (!state.ready || activeSection !== "chats" || !currentConversationId) return;
-    markConversationRead(currentConversationId);
-  }, [activeSection, currentConversationId, markConversationRead, state.messages, state.ready]);
+    if (!UNREAD_FEATURE_ENABLED) return;
+    if (!state.ready) return;
+
+    const previousConversationId = previousConversationIdRef.current;
+    if (previousConversationId && previousConversationId !== currentConversationId) {
+      markConversationRead(previousConversationId);
+    }
+    if (currentConversationId) {
+      markConversationRead(currentConversationId);
+    }
+    previousConversationIdRef.current = currentConversationId;
+  }, [currentConversationId, markConversationRead, state.messages, state.ready]);
 
   if (!state.ready) {
     return <div className={"[display:grid] [height:100vh] [place-items:center] [color:var(--muted)] [font-size:13px]"}>Loading group-chat...</div>;
@@ -1074,8 +1117,6 @@ export function App() {
       className={"[display:grid] [grid-template-columns:60px_var(--conversation-sidebar-width)_3px_minmax(var(--chat-pane-min-width),_1fr)] [height:100vh] [overflow:hidden] [background:var(--bg)] [&[data-resizing-sidebar=true]_*]:[cursor:col-resize] max-[1080px]:[grid-template-columns:56px_var(--conversation-sidebar-width)_3px_minmax(var(--chat-pane-min-width),_1fr)] max-[760px]:[grid-template-columns:1fr]"}
     >
       <AppNavRail
-        activeSection={activeSection}
-        onSectionChange={setActiveSection}
         profileMenuOpen={profileMenuOpen && profileMenuPlacement === "rail"}
         onToggleProfileMenu={() => toggleProfileMenu("rail")}
         onOpenSettings={() => setSettingsOpen(true)}
@@ -1090,29 +1131,7 @@ export function App() {
         totalUnreadCount={totalUnreadCount}
       />
 
-      {activeSection === "team" ? (
-        <TeamMembersPage
-          identities={state.identities}
-          participants={state.participants}
-          conversations={state.conversations}
-          rooms={state.rooms}
-          runtimeProfiles={state.runtimeProfiles}
-          localAgentProviders={localAgentProviders}
-          focusIdentityId={teamFocusIdentityId}
-          selectedIdentityId={teamSelectedIdentityId}
-          onSelectedIdentityIdChange={setTeamSelectedIdentityId}
-          onCreateIdentity={onCreateIdentity}
-          onUpdateIdentity={onUpdateIdentity}
-          onDeleteIdentity={deleteIdentity}
-          onOpenConversation={(conversationId) => {
-            setTeamFocusIdentityId(null);
-            setActiveSection("chats");
-            setCurrentConversationId(conversationId);
-          }}
-        />
-      ) : (
-        <>
-          <ConversationSidebar
+      <ConversationSidebar
             rooms={state.rooms}
             conversations={state.conversations}
             messages={state.messages}
@@ -1132,7 +1151,7 @@ export function App() {
             onPointerDown={startConversationSidebarResize}
           />
 
-          <main className={"[display:grid] [position:relative] [min-width:0] [min-height:0] [grid-template-rows:56px_minmax(0,_1fr)_auto_auto] [background:var(--panel)]"}>
+          <main className={"[display:grid] [position:relative] [min-width:0] [min-height:0] [grid-template-rows:56px_minmax(0,_1fr)_auto] [background:var(--panel)]"}>
             {currentConversation && currentRoom ? (
               <>
                 <ChatHeader
@@ -1152,19 +1171,17 @@ export function App() {
                   onToggleAgents={() => {
                     setFilesPanelOpen(false);
                     clearAgentProfileDialog();
-                    setMembersPanelStartAdding(false);
                     setMembersPanelOpen((current) => !current);
                   }}
                   onToggleFiles={() => {
                     setMembersPanelOpen(false);
-                    setMembersPanelStartAdding(false);
                     clearAgentProfileDialog();
                     setOpenAgentRunId(null);
                     setOpenAgentRunSnapshot(null);
                     setOpenThinkingMessageId(null);
                     setFilesPanelOpen((current) => !current);
                   }}
-                  onInvitePeople={() => window.alert("本地版暂不支持邀请其他人加入房间。云端多人协作版将支持邀请队友和他们的 Agent 进房间。")}
+                  onInvitePeople={() => setInviteDialogOpen(true)}
                   onFocusMessage={(messageId) => {
                     setFocusMessageRequest((current) => ({
                       messageId,
@@ -1175,7 +1192,6 @@ export function App() {
                 {isReconnecting ? <ReconnectingBanner /> : null}
                 <RoomAgentsDialog
                   open={membersPanelOpen}
-                  startAdding={membersPanelStartAdding}
                   conversationId={currentConversation.id}
                   participants={currentParticipants}
                   identities={state.identities}
@@ -1183,17 +1199,11 @@ export function App() {
                   localAgentProviders={localAgentProviders}
                   onClose={() => {
                     setMembersPanelOpen(false);
-                    setMembersPanelStartAdding(false);
                     clearAgentProfileDialog();
                   }}
-                  onConfigureNewAgent={(identity) => {
-                    setPendingAgentSetupIdentityId(identity.id);
-                    setAgentProfileParticipantId(null);
-                    setAgentProfileShowRemove(false);
-                    setMembersPanelStartAdding(false);
-                  }}
+                  onStartAddAgent={openNewAgentSetup}
                   onOpenParticipant={(participant) => {
-                    setPendingAgentSetupIdentityId(null);
+                    setPendingNewAgentDraft(null);
                     setAgentProfileShowRemove(true);
                     setAgentProfileParticipantId(participant.id);
                   }}
@@ -1262,13 +1272,15 @@ export function App() {
                   onSelectionModeChange={setMessageSelectionMode}
                   onOpenMembers={(options) => {
                     clearAgentProfileDialog();
-                    setMembersPanelStartAdding(options?.startAdding ?? false);
+                    if (options?.startAdding) {
+                      openNewAgentSetup();
+                      return;
+                    }
                     setMembersPanelOpen(true);
                   }}
                   onOpenAgentProfile={(participant) => {
                     setFilesPanelOpen(false);
                     setMembersPanelOpen(false);
-                    setMembersPanelStartAdding(false);
                     clearAgentProfileDialog();
                     setAgentProfileParticipantId(participant.id);
                   }}
@@ -1330,40 +1342,43 @@ export function App() {
                   onRemoveParticipant={onRemoveParticipant}
                   onRemoved={clearAgentProfileDialog}
                   onSaved={pendingAgentSetupIdentity ? finishAgentProfileAdd : finishAgentProfileDialog}
-                  onOpenIdentity={openTeamIdentity}
+                  onCreateIdentity={onCreateIdentity}
+                  onUpdateIdentity={onUpdateIdentity}
                 />
-                <BackgroundTaskBar
-                  tasks={currentBackgroundTasks}
-                  agentRuns={agentRunTasks}
-                  openTaskId={openBackgroundTaskId}
-                  openAgentRunId={openAgentRunId}
-                  onOpenTask={openBackgroundTaskPanel}
-                  onDismissTask={dismissBackgroundTask}
-                  onDismissAgentRun={dismissAgentRunTask}
-                  onOpenAgentRun={openAgentRunPanel}
-                />
-                <div ref={setBulkToolbarHost} className={"[position:relative] [min-height:0]"}>
-                  <div className={messageSelectionMode ? "[visibility:hidden] [pointer-events:none]" : ""} aria-hidden={messageSelectionMode}>
-                    <Composer
-                      conversation={currentConversation}
-                      conversationId={currentConversation.id}
-                      participants={currentParticipants}
-                      identities={state.identities}
-                      runtimeProfiles={state.runtimeProfiles}
-                      allMessages={state.messages}
-                      allParticipants={state.participants}
-                      conversations={state.conversations}
-                      rooms={state.rooms}
-                      activeRuns={currentActiveRuns}
-                      onSend={onSendMessage}
-                      onUpdateMessage={onUpdateMessage}
-                      onUpload={uploadArtifact}
-                      onCancelRun={cancelActiveRun}
-                      mentionRequest={mentionRequest}
-                      composerRequest={composerRequest}
-                      summaryTasks={backgroundTasks}
-                      userDisplayName={userProfile.displayName}
-                    />
+                <div className={"[display:flex] [flex-direction:column] [flex-shrink:0] [position:relative] [z-index:20] [min-height:0] [background:var(--panel)]"}>
+                  <BackgroundTaskBar
+                    tasks={currentBackgroundTasks}
+                    agentRuns={agentRunTasks}
+                    openTaskId={openBackgroundTaskId}
+                    openAgentRunId={openAgentRunId}
+                    onOpenTask={openBackgroundTaskPanel}
+                    onDismissTask={dismissBackgroundTask}
+                    onDismissAgentRun={dismissAgentRunTask}
+                    onOpenAgentRun={openAgentRunPanel}
+                  />
+                  <div ref={setBulkToolbarHost} className={"[position:relative] [z-index:50] [min-height:0]"}>
+                    <div className={messageSelectionMode ? "[visibility:hidden] [pointer-events:none]" : ""} aria-hidden={messageSelectionMode}>
+                      <Composer
+                        conversation={currentConversation}
+                        conversationId={currentConversation.id}
+                        participants={currentParticipants}
+                        identities={state.identities}
+                        runtimeProfiles={state.runtimeProfiles}
+                        allMessages={state.messages}
+                        allParticipants={state.participants}
+                        conversations={state.conversations}
+                        rooms={state.rooms}
+                        activeRuns={currentActiveRuns}
+                        onSend={onSendMessage}
+                        onUpdateMessage={onUpdateMessage}
+                        onUpload={uploadArtifact}
+                        onCancelRun={cancelActiveRun}
+                        mentionRequest={mentionRequest}
+                        composerRequest={composerRequest}
+                        summaryTasks={backgroundTasks}
+                        userDisplayName={userProfile.displayName}
+                      />
+                    </div>
                   </div>
                 </div>
               </>
@@ -1379,9 +1394,6 @@ export function App() {
               </div>
             )}
           </main>
-        </>
-      )}
-      <MobileSectionNav activeSection={activeSection} onChange={setActiveSection} totalUnreadCount={totalUnreadCount} />
       {profileMenuOpen && profileMenuPlacement === "mobile" ? (
         <div className={"[display:none] max-[760px]:[display:block]"}>
           <ProfileMenu
@@ -1431,6 +1443,7 @@ export function App() {
           onConfirm={() => void confirmDeleteMessages()}
         />
       ) : null}
+      {inviteDialogOpen ? <InvitePeopleDialog onClose={() => setInviteDialogOpen(false)} /> : null}
     </div>
   );
 }
@@ -1441,36 +1454,6 @@ function ReconnectingBanner() {
       <Loader2 size={13} className={"animate-spin"} aria-hidden />
       <span>自动重连中...</span>
     </div>
-  );
-}
-
-function MobileSectionNav(props: {
-  activeSection: "chats" | "team";
-  onChange: (section: "chats" | "team") => void;
-  totalUnreadCount: number;
-}) {
-  return (
-    <nav className={"[position:fixed] [left:50%] [bottom:12px] [z-index:80] [display:none] [transform:translateX(-50%)] [gap:6px] [border:1px_solid_var(--border)] [border-radius:999px] [padding:6px] [background:var(--panel)] [box-shadow:var(--shadow)] max-[760px]:[display:flex]"} aria-label="Mobile section navigation">
-      <button
-        type="button"
-        className={`[position:relative] [display:inline-flex] [height:40px] [align-items:center] [gap:7px] [border:0] [border-radius:999px] [padding:0_16px] [color:var(--muted)] [background:transparent] [font-size:13px] [font-weight:650] ${props.activeSection === "chats" ? "![color:#ffffff] [background:var(--primary)]" : ""}`}
-        onClick={() => props.onChange("chats")}
-      >
-        <MessageCircle size={17} />
-        消息
-        {props.totalUnreadCount > 0 ? (
-          <UnreadBadge count={props.totalUnreadCount} size="md" className={"[top:-4px] [right:-2px] [border-color:var(--panel)]"} />
-        ) : null}
-      </button>
-      <button
-        type="button"
-        className={`[display:inline-flex] [height:40px] [align-items:center] [gap:7px] [border:0] [border-radius:999px] [padding:0_16px] [color:var(--muted)] [background:transparent] [font-size:13px] [font-weight:650] ${props.activeSection === "team" ? "![color:#ffffff] [background:var(--primary)]" : ""}`}
-        onClick={() => props.onChange("team")}
-      >
-        <Bot size={17} />
-        角色
-      </button>
-    </nav>
   );
 }
 

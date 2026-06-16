@@ -35,7 +35,7 @@ export const AVATAR_PRESET_LABELS: Record<AvatarPresetId, string> = {
 };
 
 export const DEFAULT_USER_PROFILE: LocalUserProfile = {
-  displayName: "Group Chat",
+  displayName: "我",
   avatarPreset: "saiyan-01",
   customAvatarUrl: null,
   bio: "本地优先的 Agent 群聊工作区。",
@@ -62,22 +62,36 @@ function normalizePreset(value: unknown): AvatarPresetId {
   return DEFAULT_USER_PROFILE.avatarPreset;
 }
 
+const LEGACY_DEFAULT_DISPLAY_NAMES = new Set(["Group Chat"]);
+
+function normalizeDisplayName(value: unknown) {
+  if (typeof value !== "string") return DEFAULT_USER_PROFILE.displayName;
+  const trimmed = value.trim();
+  if (!trimmed || LEGACY_DEFAULT_DISPLAY_NAMES.has(trimmed)) {
+    return DEFAULT_USER_PROFILE.displayName;
+  }
+  return trimmed;
+}
+
 export function loadUserProfile(): LocalUserProfile {
   if (typeof window === "undefined") return DEFAULT_USER_PROFILE;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_USER_PROFILE;
     const parsed = JSON.parse(raw) as Partial<LocalUserProfile>;
-    return {
-      displayName: typeof parsed.displayName === "string" && parsed.displayName.trim()
-        ? parsed.displayName.trim()
-        : DEFAULT_USER_PROFILE.displayName,
+    const profile: LocalUserProfile = {
+      displayName: normalizeDisplayName(parsed.displayName),
       avatarPreset: normalizePreset(parsed.avatarPreset),
       customAvatarUrl: typeof parsed.customAvatarUrl === "string" && parsed.customAvatarUrl.startsWith("data:image/")
         ? parsed.customAvatarUrl
         : null,
       bio: typeof parsed.bio === "string" ? parsed.bio : DEFAULT_USER_PROFILE.bio,
     };
+    const legacyName = typeof parsed.displayName === "string" ? parsed.displayName.trim() : "";
+    if (legacyName && LEGACY_DEFAULT_DISPLAY_NAMES.has(legacyName)) {
+      saveUserProfile(profile);
+    }
+    return profile;
   } catch {
     return DEFAULT_USER_PROFILE;
   }

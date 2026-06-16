@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent } from "react";
-import { Ear, FileText, ImageIcon, Paperclip, Send, Square, Users, X, Zap } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
+import { Ear, FileText, ImageIcon, Paperclip, Send, Square, Users, X } from "lucide-react";
 import type { AgentRun, Artifact, Conversation, Identity, MentionTarget, Message, Participant, Room, RuntimeProfile } from "@group-chat/shared";
 import { cancelRun, sendMessage, updateMessage, uploadArtifact } from "../../../api/client.js";
 import { formatBytes, fileToBase64 } from "../../formatting.js";
@@ -17,6 +18,9 @@ import { markMessageGroupBreak, MESSAGE_GROUP_IDLE_MS } from "../../message-grou
 import { AttachmentPreviewDialog, isTextAttachment, type AttachmentPreview } from "./AttachmentPreviewDialog.js";
 import { AgentAvatar } from "../ui/AgentAvatar.js";
 import { resolveAgentAvatarFromContext } from "../../identity-avatar.js";
+import { WHISPER_FEATURE_ENABLED } from "../../feature-flags.js";
+
+const MENTION_MENU_Z_INDEX = 90;
 
 export function Composer(props: {
   conversation: Conversation;
@@ -64,6 +68,8 @@ export function Composer(props: {
   const mentionSelectionRef = useRef<Range | null>(null);
   const mentionQueryRangeRef = useRef<Range | null>(null);
   const mentionMenuRef = useRef<HTMLDivElement | null>(null);
+  const footerRef = useRef<HTMLElement | null>(null);
+  const [mentionMenuStyle, setMentionMenuStyle] = useState<CSSProperties>({ visibility: "hidden" });
   const composerCaretOffsetRef = useRef<number | null>(null);
   const lastComposerInputAtRef = useRef(Date.now());
   const composerIdleBreakPendingRef = useRef(false);
@@ -88,7 +94,7 @@ export function Composer(props: {
       }
       const artifacts = await uploadQueuedItems(uploadItems);
       const editorMentions = collectMentionTargetsFromEditor(editorRef.current, mentionableParticipants);
-      const isWhisper = hasWhisperChipInEditor(editorRef.current);
+      const isWhisper = WHISPER_FEATURE_ENABLED && hasWhisperChipInEditor(editorRef.current);
       const result = await props.onSend(props.conversationId, {
         content: quotes.length ? `${formatQuotesForMessage(quotes)}\n\n${text}` : text,
         artifactIds: artifacts.map((artifact) => artifact.id),
@@ -594,6 +600,39 @@ export function Composer(props: {
   const mentionMenuVisible = mentionQuery !== null && mentionOptions.length > 0;
   const mentionMenuOpen = mentionMenuVisible && !mentionMenuDismissed;
 
+  const updateMentionMenuPosition = useCallback(() => {
+    const anchor = footerRef.current;
+    const menu = mentionMenuRef.current;
+    if (!anchor || !menu || !mentionMenuOpen) return;
+    const anchorRect = anchor.getBoundingClientRect();
+    const menuHeight = menu.offsetHeight || Math.min(300, window.innerHeight - 180);
+    const horizontalPadding = window.innerWidth <= 760 ? 12 : 16;
+    const top = Math.max(12, anchorRect.top - menuHeight + 4);
+    setMentionMenuStyle({
+      position: "fixed",
+      top,
+      left: anchorRect.left + horizontalPadding,
+      width: Math.max(0, anchorRect.width - horizontalPadding * 2),
+      zIndex: MENTION_MENU_Z_INDEX,
+      maxHeight: "min(300px, calc(100vh - 180px))",
+      visibility: "visible",
+    });
+  }, [mentionMenuOpen]);
+
+  useLayoutEffect(() => {
+    if (!mentionMenuOpen) return;
+    updateMentionMenuPosition();
+    const frame = window.requestAnimationFrame(updateMentionMenuPosition);
+    const handleReposition = () => updateMentionMenuPosition();
+    window.addEventListener("resize", handleReposition);
+    window.addEventListener("scroll", handleReposition, true);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", handleReposition);
+      window.removeEventListener("scroll", handleReposition, true);
+    };
+  }, [mentionMenuOpen, mentionOptions.length, updateMentionMenuPosition]);
+
   useEffect(() => {
     if (!mentionMenuVisible) return;
 
@@ -610,7 +649,7 @@ export function Composer(props: {
   }, [mentionMenuVisible]);
 
   return (
-    <footer className={"[position:relative] [z-index:2] [border-top:0] [padding:8px_16px_16px] [background:var(--panel)] max-[760px]:[padding-inline:12px]"}>
+    <footer ref={footerRef} className={"[position:relative] [z-index:50] [border-top:0] [padding:8px_16px_16px] [background:var(--panel)] max-[760px]:[padding-inline:12px]"}>
       {editingMessageId ? (
         <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [margin-bottom:8px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:8px_10px] [background:#fff7ed] [color:#9a3412] [font-size:12px] [font-weight:650]"}>
           <span>正在编辑消息，发送后会让被 @ 的 Agent 重新回复。</span>
@@ -734,13 +773,15 @@ export function Composer(props: {
           {sending ? <Square size={18} /> : <Send size={18} />}
         </button>
       </div>
-      {mentionMenuOpen ? (
-        <div
-          ref={mentionMenuRef}
-          className={"[position:absolute] [z-index:60] [left:16px] [right:16px] [bottom:calc(100%_-_4px)] [max-height:min(300px,_calc(100vh_-_180px))] [overflow-y:auto] [border:1px_solid_var(--border)] [border-radius:18px] [padding:6px] [background:var(--panel)] [box-shadow:0_14px_42px_rgb(0_0_0_/_12%)] max-[760px]:[left:12px] max-[760px]:[right:12px]"}
-          role="listbox"
-          aria-label="Mention suggestions"
-        >
+      {mentionMenuOpen
+        ? createPortal(
+            <div
+              ref={mentionMenuRef}
+              style={mentionMenuStyle}
+              className={"[overflow-y:auto] [border:1px_solid_var(--border)] [border-radius:18px] [padding:6px] [background:var(--panel)] [box-shadow:0_14px_42px_rgb(0_0_0_/_12%)]"}
+              role="listbox"
+              aria-label="Mention suggestions"
+            >
           {mentionOptions.map((option, index) => (
             option.kind === "all" ? (
               <button
@@ -781,7 +822,7 @@ export function Composer(props: {
                 <div className={"[display:flex] [width:100%] [min-width:0] [align-items:center] [justify-content:flex-start] [gap:6px] [height:100%]"}>
                   <button
                     type="button"
-                    className={"[display:inline-flex] [min-width:0] [max-width:calc(100%-36px)] [align-items:center] [gap:6px] [height:100%] [overflow:hidden] [border:0] [padding:0] [color:inherit] [text-align:left] [background:transparent] [&:focus-visible]:[outline:none] [&_strong]:[min-width:0] [&_strong]:[overflow:hidden] [&_strong]:[font-size:12px] [&_strong]:[font-weight:500] [&_strong]:[line-height:16px] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap]"}
+                    className={`[display:inline-flex] [min-width:0] [align-items:center] [gap:6px] [height:100%] [overflow:hidden] [border:0] [padding:0] [color:inherit] [text-align:left] [background:transparent] [&:focus-visible]:[outline:none] [&_strong]:[min-width:0] [&_strong]:[overflow:hidden] [&_strong]:[font-size:12px] [&_strong]:[font-weight:500] [&_strong]:[line-height:16px] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] ${WHISPER_FEATURE_ENABLED ? "[max-width:calc(100%-36px)]" : "[width:100%]"}`}
                     onMouseDown={(event) => {
                       event.preventDefault();
                       saveMentionSelection();
@@ -789,27 +830,35 @@ export function Composer(props: {
                     }}
                   >
                     <strong>{option.label}</strong>
-                    <Zap size={13} fill="currentColor" className={"[flex:0_0_auto] [color:#111111]"} />
+                    {option.participant.status === "muted" ? (
+                      <span className={"[display:inline-flex] [flex:0_0_auto] [height:20px] [align-items:center] [border-radius:999px] [padding:0_7px] [color:#b45309] [background:#fef3c7] [font-size:10px] [font-weight:700]"}>
+                        已静音
+                      </span>
+                    ) : null}
                   </button>
-                  <button
-                    type="button"
-                    className={"[display:inline-grid] [flex:0_0_auto] [width:30px] [height:30px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [&:hover]:[color:#7c3aed] [&:hover]:[background:#f3e8ff] [&:focus-visible]:[outline:none] [&:focus-visible]:[box-shadow:0_0_0_2px_#ddd6fe]"}
-                    aria-label={`跟 ${option.label} 说悄悄话`}
-                    title="悄悄话"
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                      saveMentionSelection();
-                      insertWhisperMention(option.participant);
-                    }}
-                  >
-                    <Ear size={15} />
-                  </button>
+                  {WHISPER_FEATURE_ENABLED ? (
+                    <button
+                      type="button"
+                      className={"[display:inline-grid] [flex:0_0_auto] [width:30px] [height:30px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [&:hover]:[color:#7c3aed] [&:hover]:[background:#f3e8ff] [&:focus-visible]:[outline:none] [&:focus-visible]:[box-shadow:0_0_0_2px_#ddd6fe]"}
+                      aria-label={`跟 ${option.label} 说悄悄话`}
+                      title="悄悄话"
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        saveMentionSelection();
+                        insertWhisperMention(option.participant);
+                      }}
+                    >
+                      <Ear size={15} />
+                    </button>
+                  ) : null}
                 </div>
               </div>
             )
-          ))}
-        </div>
-      ) : null}
+            ))}
+            </div>,
+            document.body,
+          )
+        : null}
       <AttachmentPreviewDialog preview={preview} onClose={() => setPreview(null)} />
     </footer>
   );

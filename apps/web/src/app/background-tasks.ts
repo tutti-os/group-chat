@@ -17,6 +17,37 @@ export interface AgentRunTaskItem {
   visibility: "public" | "whisper";
 }
 
+export interface PendingAgentReplyTarget {
+  key: string;
+  conversationId: string;
+  participantId: string;
+  participantName: string;
+  triggerMessageId: string;
+  visibility: "public" | "whisper";
+}
+
+export function pendingAgentReplyKey(triggerMessageId: string, participantId: string) {
+  return `${triggerMessageId}:${participantId}`;
+}
+
+export function isPendingAgentRunId(runId: string) {
+  return runId.startsWith("pending:");
+}
+
+export function createPendingAgentReplyTargets(
+  message: Pick<Message, "id" | "conversationId" | "visibility">,
+  targets: Participant[],
+): PendingAgentReplyTarget[] {
+  return targets.map((target) => ({
+    key: pendingAgentReplyKey(message.id, target.id),
+    conversationId: message.conversationId,
+    participantId: target.id,
+    participantName: target.displayName,
+    triggerMessageId: message.id,
+    visibility: message.visibility ?? "public",
+  }));
+}
+
 export function createOptimisticBackgroundTask(input: {
   id: string;
   type: PrivateTaskType;

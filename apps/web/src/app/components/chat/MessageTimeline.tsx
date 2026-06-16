@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -11,6 +11,7 @@ import type { LocalUserProfile } from "../../user-profile.js";
 import { UserAvatar, type UserAvatarSize } from "../ui/UserAvatar.js";
 import { resolveAgentAvatarFromContext } from "../../identity-avatar.js";
 import { AgentAvatar } from "../ui/AgentAvatar.js";
+import { WHISPER_FEATURE_ENABLED } from "../../feature-flags.js";
 import { AttachmentPreviewDialog, canPreviewInApp, isTextAttachment, type AttachmentPreview } from "./AttachmentPreviewDialog.js";
 import type { BackgroundTask } from "../../background-tasks.js";
 import {
@@ -37,22 +38,25 @@ type CopyTipPosition = { x: number; y: number };
 
 const MESSAGE_MENU_ACTIVE_ATTR = "data-menu-active";
 
+let activeMessageMenuAnchor: HTMLElement | null = null;
+
 function clearActiveMessageMenuAnchor() {
-  document.querySelectorAll(`[data-slot="message-actions"][${MESSAGE_MENU_ACTIVE_ATTR}="true"]`).forEach((element) => {
-    element.removeAttribute(MESSAGE_MENU_ACTIVE_ATTR);
-  });
+  if (activeMessageMenuAnchor) {
+    activeMessageMenuAnchor.removeAttribute(MESSAGE_MENU_ACTIVE_ATTR);
+  }
+  activeMessageMenuAnchor = null;
 }
 
 function setActiveMessageMenuAnchor(anchor: HTMLElement) {
-  clearActiveMessageMenuAnchor();
+  if (activeMessageMenuAnchor && activeMessageMenuAnchor !== anchor) {
+    activeMessageMenuAnchor.removeAttribute(MESSAGE_MENU_ACTIVE_ATTR);
+  }
+  activeMessageMenuAnchor = anchor;
   anchor.setAttribute(MESSAGE_MENU_ACTIVE_ATTR, "true");
 }
 
-function findActiveMessageMenuAnchor(messageId: string) {
-  const messageEl = document.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
-  if (!(messageEl instanceof HTMLElement)) return null;
-  const active = messageEl.querySelector(`[data-slot="message-actions"][${MESSAGE_MENU_ACTIVE_ATTR}="true"]`);
-  return active instanceof HTMLElement ? active : null;
+function getActiveMessageMenuAnchor() {
+  return activeMessageMenuAnchor;
 }
 
 export function MessageTimeline(props: {
@@ -105,11 +109,31 @@ export function MessageTimeline(props: {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
   const [openMessageMenu, setOpenMessageMenu] = useState<{ messageId: string } | null>(null);
+  const [hoveredActionMessageId, setHoveredActionMessageId] = useState<string | null>(null);
+  const hideActionTimerRef = useRef<number | null>(null);
 
   const closeOpenMessageMenu = useCallback(() => {
     clearActiveMessageMenuAnchor();
     setOpenMessageMenu(null);
   }, []);
+
+  const showActionsForMessage = useCallback((messageId: string) => {
+    if (openMessageMenu && openMessageMenu.messageId !== messageId) return;
+    if (hideActionTimerRef.current) {
+      window.clearTimeout(hideActionTimerRef.current);
+      hideActionTimerRef.current = null;
+    }
+    setHoveredActionMessageId(messageId);
+  }, [openMessageMenu]);
+
+  const hideActionsForMessage = useCallback((messageId: string) => {
+    if (openMessageMenu?.messageId === messageId) return;
+    if (hideActionTimerRef.current) window.clearTimeout(hideActionTimerRef.current);
+    hideActionTimerRef.current = window.setTimeout(() => {
+      setHoveredActionMessageId((current) => (current === messageId ? null : current));
+      hideActionTimerRef.current = null;
+    }, 140);
+  }, [openMessageMenu]);
   const [copyTipPosition, setCopyTipPosition] = useState<CopyTipPosition | null>(null);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [summaryAgentPickerMessages, setSummaryAgentPickerMessages] = useState<Message[] | null>(null);
@@ -355,6 +379,12 @@ export function MessageTimeline(props: {
 
   useEffect(() => {
     return () => {
+      if (hideActionTimerRef.current) window.clearTimeout(hideActionTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
       if (copyTipTimerRef.current) window.clearTimeout(copyTipTimerRef.current);
     };
   }, []);
@@ -412,6 +442,12 @@ export function MessageTimeline(props: {
           selectionMode={selectionMode}
           selected={selectedMessageIds.has(message.id)}
           menuOpen={openMessageMenu?.messageId === message.id}
+          actionsVisible={
+            openMessageMenu?.messageId === message.id
+            || (openMessageMenu === null && hoveredActionMessageId === message.id)
+          }
+          onShowActions={() => showActionsForMessage(message.id)}
+          onHideActions={() => hideActionsForMessage(message.id)}
           onToggleSelected={() => toggleSelectedMessage(message.id)}
           onOpenMenu={(anchor) => {
             if (openMessageMenu?.messageId === message.id) {
@@ -419,6 +455,7 @@ export function MessageTimeline(props: {
               return;
             }
             setActiveMessageMenuAnchor(anchor);
+            setHoveredActionMessageId(message.id);
             setOpenMessageMenu({ messageId: message.id });
           }}
           onCloseMenu={closeOpenMessageMenu}
@@ -587,6 +624,8 @@ function shouldStartNewMessageGroup(
   if (!previous) return true;
   if (previous.role === "system" || current.role === "system") return true;
   if (isRemovedMessage(previous) || isRemovedMessage(current)) return true;
+  if (previous.role === "assistant" && previous.status === "error") return true;
+  if (current.role === "assistant" && current.status === "error") return true;
   if (resolveMessageSenderKey(previous, allMessages) !== resolveMessageSenderKey(current, allMessages)) {
     return true;
   }
@@ -633,6 +672,24 @@ function buildMessageGroupLayout(visibleMessages: Message[], allMessages: Messag
 function shouldShowMessage(message: Message) {
   if (message.role === "assistant" && message.status === "error") return true;
   return !(message.role === "assistant" && !message.content.trim() && (message.status === "cancelled" || message.status === "streaming"));
+}
+
+function hasVisibleConversationContent(blocks: MessageBlock[]) {
+  return blocks.some((block) => {
+    if (block.type === "image" || block.type === "file") return true;
+    return Boolean(block.content.trim());
+  });
+}
+
+function resolveAssistantFailureText(message: Message, blocks: MessageBlock[], agentRuns: AgentRun[]) {
+  if (message.role !== "assistant" || message.status !== "error") return null;
+  const messageText = message.content.trim();
+  if (messageText) return messageText;
+  const run = message.runId ? agentRuns.find((item) => item.id === message.runId) ?? null : null;
+  const runError = run?.error?.trim();
+  if (runError) return /^Agent (执行|未)/.test(runError) ? runError : `Agent 执行失败：${runError}`;
+  const blockText = blocks.find((block) => block.content.trim())?.content.trim();
+  return blockText || null;
 }
 
 function resolveReferencedMessage(
@@ -779,6 +836,9 @@ function MessageRow(props: {
   selectionMode: boolean;
   selected: boolean;
   menuOpen: boolean;
+  actionsVisible: boolean;
+  onShowActions: () => void;
+  onHideActions: () => void;
   onToggleSelected: () => void;
   onOpenMenu: (anchor: HTMLElement) => void;
   onCloseMenu: () => void;
@@ -800,6 +860,11 @@ function MessageRow(props: {
   const sortedBlocks = [...props.blocks].sort(compareMessageBlocks);
   const runtimeEventBlocks = sortedBlocks.filter(isRuntimeEventBlock);
   const conversationBlocks = sortedBlocks.filter((block) => !isRuntimeEventBlock(block));
+  const failureFallbackText = resolveAssistantFailureText(props.message, sortedBlocks, props.agentRuns);
+  const showFailureFallback = Boolean(failureFallbackText) && !hasVisibleConversationContent(conversationBlocks);
+  const visibleConversationBlocks = showFailureFallback
+    ? conversationBlocks.filter((block) => block.content.trim())
+    : conversationBlocks;
   const isUserMessage = props.message.role === "user";
   const isRemoved = props.message.status === "deleted" || props.message.status === "recalled";
   const participantIdentity = props.participant?.identityId
@@ -811,7 +876,7 @@ function MessageRow(props: {
     participantIdentity,
     props.userProfile.displayName,
   );
-  const isWhisper = resolveMessageVisibility(props.message, props.allMessages) === "whisper";
+  const isWhisper = WHISPER_FEATURE_ENABLED && resolveMessageVisibility(props.message, props.allMessages) === "whisper";
   const whisperFooter = resolveWhisperFooterLabel(props.message, isWhisper, props.allParticipants);
   const whisperFooterBlockId = whisperFooter
     ? [...conversationBlocks].reverse().find((block) => block.type === "main_text")?.id
@@ -882,16 +947,18 @@ function MessageRow(props: {
     <MessageBodyShell
       selectionMode={props.selectionMode}
       menuOpen={props.menuOpen}
+      actionsVisible={props.actionsVisible}
       disabled={isRemoved}
       showHoverTime={!props.showHeader}
       createdAt={props.message.createdAt}
       onReply={props.onQuoteMessage}
       onCopy={props.onCopyMessage}
       onOpenMenu={props.onOpenMenu}
+      onShowActions={props.onShowActions}
+      onHideActions={props.onHideActions}
     >
         {props.menuOpen ? (
           <MessageMoreMenu
-            messageId={props.message.id}
             message={props.message}
             selectionMode={props.selectionMode}
             onClose={props.onCloseMenu}
@@ -939,7 +1006,7 @@ function MessageRow(props: {
           <DeletedMessageBubble status={props.message.status} />
         ) : (
           <>
-            {conversationBlocks.map((block, index) => (
+            {visibleConversationBlocks.map((block, index) => (
               <MessageBlockRenderer
                 key={block.id}
                 block={block}
@@ -964,6 +1031,35 @@ function MessageRow(props: {
                 }
               />
             ))}
+            {showFailureFallback && failureFallbackText ? (
+              <MessageBlockRenderer
+                key={`${props.message.id}-failure-fallback`}
+                block={{
+                  id: `${props.message.id}-failure-fallback`,
+                  messageId: props.message.id,
+                  type: "main_text",
+                  content: failureFallbackText,
+                  status: "error",
+                  metadata: null,
+                  sortOrder: 0,
+                  createdAt: props.message.createdAt,
+                  updatedAt: props.message.updatedAt,
+                }}
+                artifacts={props.artifacts}
+                allMessages={props.allMessages}
+                allParticipants={props.allParticipants}
+                identities={props.identities}
+                conversations={props.conversations}
+                rooms={props.rooms}
+                onOpenArtifact={props.onOpenArtifact}
+                onOpenMessageLink={props.onOpenMessageLink}
+                onOpenSummaryLink={props.onOpenSummaryLink}
+                onEnsureSummaryTask={props.onEnsureSummaryTask}
+                summaryTasks={props.summaryTasks}
+                quotedMessage={visibleConversationBlocks.length === 0 ? props.quotedMessage : null}
+                onOpenReferencedMessage={(referencedMessage) => props.onOpenReferencedMessage(referencedMessage, props.message)}
+              />
+            ) : null}
             {runtimeEventBlocks.length ? <RuntimeEventGroup blocks={runtimeEventBlocks} artifacts={props.artifacts} onOpenArtifact={props.onOpenArtifact} /> : null}
           </>
         )}
@@ -1007,6 +1103,28 @@ function isRuntimeEventBlock(block: MessageBlock) {
 const MESSAGE_ACTION_BAR_Z_INDEX = 2147483000;
 const MESSAGE_MORE_MENU_Z_INDEX = MESSAGE_ACTION_BAR_Z_INDEX + 1;
 const MESSAGE_MORE_MENU_BOTTOM_RESERVE_PX = 96;
+const MESSAGE_MORE_MENU_MIN_WIDTH = 178;
+
+function computeMessageMoreMenuPosition(anchorRect: DOMRect, menuHeight: number) {
+  const viewportPadding = 12;
+  const maxBottom = window.innerHeight - MESSAGE_MORE_MENU_BOTTOM_RESERVE_PX;
+  const maxMenuHeight = Math.max(160, maxBottom - viewportPadding);
+  const effectiveHeight = Math.min(menuHeight, maxMenuHeight);
+
+  let top = anchorRect.top;
+  if (top + effectiveHeight > maxBottom) {
+    top = Math.max(viewportPadding, maxBottom - effectiveHeight);
+  }
+
+  let left = anchorRect.right;
+  let transform: string | undefined;
+  if (left + MESSAGE_MORE_MENU_MIN_WIDTH > window.innerWidth - viewportPadding) {
+    left = anchorRect.left;
+    transform = "translateX(-100%)";
+  }
+
+  return { top, left, transform, maxMenuHeight };
+}
 
 function MessageActionBar(props: {
   visible: boolean;
@@ -1046,7 +1164,6 @@ function MessageActionBar(props: {
 }
 
 function MessageMoreMenu(props: {
-  messageId: string;
   message: Message;
   selectionMode: boolean;
   onClose: () => void;
@@ -1063,77 +1180,68 @@ function MessageMoreMenu(props: {
   const isAssistant = props.message.role === "assistant";
   const isRemoved = isRemovedMessage(props.message);
   const menuRef = useRef<HTMLDivElement>(null);
-  const [menuStyle, setMenuStyle] = useState<CSSProperties>({ visibility: "hidden" });
 
   const run = async (action: () => void | Promise<unknown>) => {
     await action();
     props.onClose();
   };
 
-  const updateMenuPosition = useCallback(() => {
-    const anchor = findActiveMessageMenuAnchor(props.messageId);
+  const applyMenuPosition = useCallback(() => {
+    const anchor = getActiveMessageMenuAnchor();
     const menu = menuRef.current;
     if (!anchor || !menu) return;
 
     const anchorRect = anchor.getBoundingClientRect();
     if (anchorRect.width === 0 && anchorRect.height === 0) return;
 
-    const menuRect = menu.getBoundingClientRect();
-    const menuWidth = menuRect.width || menu.offsetWidth || 178;
-    const menuHeight = menuRect.height || menu.offsetHeight || 280;
-    const viewportPadding = 12;
     const maxBottom = window.innerHeight - MESSAGE_MORE_MENU_BOTTOM_RESERVE_PX;
-    const maxMenuHeight = Math.max(160, maxBottom - viewportPadding);
+    const maxMenuHeight = Math.max(160, maxBottom - 12);
+    menu.style.position = "fixed";
+    menu.style.visibility = "hidden";
+    menu.style.pointerEvents = "none";
+    menu.style.left = "-9999px";
+    menu.style.top = "0px";
+    menu.style.transform = "none";
+    menu.style.maxHeight = `${maxMenuHeight}px`;
+    const menuHeight = menu.offsetHeight || menu.scrollHeight || 280;
+    const position = computeMessageMoreMenuPosition(anchorRect, menuHeight);
 
-    let top = anchorRect.top;
-    if (top + menuHeight > maxBottom) {
-      top = Math.max(viewportPadding, maxBottom - menuHeight);
-    }
-
-    let left: number;
-    let transform: string | undefined;
-
-    left = anchorRect.right;
-    transform = undefined;
-    if (left + menuWidth > window.innerWidth - viewportPadding) {
-      left = anchorRect.left;
-      transform = "translateX(-100%)";
-    }
-
-    setMenuStyle({
-      position: "fixed",
-      top,
-      left,
-      transform,
-      zIndex: MESSAGE_MORE_MENU_Z_INDEX,
-      maxHeight: maxMenuHeight,
-      overflowY: "auto",
-      visibility: "visible",
-    });
-  }, [props.messageId]);
+    menu.style.top = `${position.top}px`;
+    menu.style.left = `${position.left}px`;
+    menu.style.transform = position.transform ?? "none";
+    menu.style.zIndex = String(MESSAGE_MORE_MENU_Z_INDEX);
+    menu.style.maxHeight = `${position.maxMenuHeight}px`;
+    menu.style.overflowY = "auto";
+    menu.style.visibility = "visible";
+    menu.style.pointerEvents = "auto";
+  }, []);
 
   useLayoutEffect(() => {
-    updateMenuPosition();
-    const frame = window.requestAnimationFrame(() => updateMenuPosition());
-    return () => window.cancelAnimationFrame(frame);
-  }, [updateMenuPosition, props.message.id, isAssistant]);
+    applyMenuPosition();
+  }, [applyMenuPosition, props.message.id, isAssistant]);
 
   useEffect(() => {
-    const handleReposition = () => updateMenuPosition();
+    const handleReposition = () => applyMenuPosition();
     window.addEventListener("resize", handleReposition);
     window.addEventListener("scroll", handleReposition, true);
     return () => {
       window.removeEventListener("resize", handleReposition);
       window.removeEventListener("scroll", handleReposition, true);
     };
-  }, [updateMenuPosition]);
+  }, [applyMenuPosition]);
 
   return createPortal(
     <div
       ref={menuRef}
       data-slot="message-more-menu"
       className={"[display:grid] [min-width:178px] [border:1px_solid_var(--border)] [border-radius:4px] [padding:6px] [background:#ffffff] [box-shadow:0_18px_46px_rgb(0_0_0_/_14%)]"}
-      style={menuStyle}
+      style={{
+        position: "fixed",
+        top: -9999,
+        left: -9999,
+        visibility: "hidden",
+        pointerEvents: "none",
+      }}
       role="menu"
       onPointerDown={(event) => event.stopPropagation()}
     >
@@ -1456,7 +1564,11 @@ function DetailMessageCard(props: {
   );
 }
 
-function IconAction(props: { title: string; onClick: (event: MouseEvent<HTMLButtonElement>) => void; children: ReactNode }) {
+function IconAction(props: {
+  title: string;
+  onClick: (event: MouseEvent<HTMLButtonElement>) => void;
+  children: ReactNode;
+}) {
   return (
     <button
       type="button"
@@ -1529,7 +1641,12 @@ function MessageSenderAvatar(props: {
   });
   const avatarSize = size <= 34 ? 34 : size <= 40 ? 40 : 56;
   return (
-    <AgentAvatar title={label} avatar={resolvedAvatar.avatar} provider={resolvedAvatar.provider} size={avatarSize} />
+    <AgentAvatar
+      title={label}
+      avatar={resolvedAvatar.avatar}
+      provider={resolvedAvatar.provider}
+      size={avatarSize}
+    />
   );
 }
 
@@ -1654,17 +1771,18 @@ function MessageHoverTime(props: { createdAt: string; position: { top: number; l
 function MessageBodyShell(props: {
   selectionMode: boolean;
   menuOpen: boolean;
+  actionsVisible: boolean;
   disabled?: boolean;
   showHoverTime?: boolean;
   createdAt?: string;
   onReply: () => void;
   onCopy: (position: CopyTipPosition) => void;
   onOpenMenu: (anchor: HTMLElement) => void;
+  onShowActions: () => void;
+  onHideActions: () => void;
   children: ReactNode;
 }) {
-  const [actionsVisible, setActionsVisible] = useState(false);
   const [bubbleAnchor, setBubbleAnchor] = useState<MessageBubbleAnchor | null>(null);
-  const hideTimerRef = useRef<number | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
 
   const updateBubbleAnchor = useCallback(() => {
@@ -1675,27 +1793,6 @@ function MessageBodyShell(props: {
 
   const actionBarPosition = bubbleAnchor ? measureMessageActionBarPosition(bubbleAnchor) : null;
   const hoverTimePosition = bubbleAnchor ? measureHoverTimePosition(bubbleAnchor) : null;
-
-  const showActions = () => {
-    if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current);
-    setActionsVisible(true);
-  };
-
-  const hideActions = () => {
-    if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current);
-    hideTimerRef.current = window.setTimeout(() => {
-      setActionsVisible(false);
-      hideTimerRef.current = null;
-    }, 140);
-  };
-
-  useEffect(() => () => {
-    if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current);
-  }, []);
-
-  useEffect(() => {
-    if (props.menuOpen) showActions();
-  }, [props.menuOpen]);
 
   useLayoutEffect(() => {
     updateBubbleAnchor();
@@ -1720,17 +1817,17 @@ function MessageBodyShell(props: {
       ref={bodyRef}
       data-slot="message-body"
       className={"group/body [position:relative] [min-width:0] [max-width:min(760px,_70%)] [overflow:visible] max-[1080px]:[max-width:min(720px,_86%)] max-[760px]:[max-width:88%]"}
-      onMouseEnter={showActions}
-      onMouseLeave={hideActions}
-      onFocusCapture={showActions}
+      onMouseEnter={props.onShowActions}
+      onMouseLeave={props.onHideActions}
+      onFocusCapture={props.onShowActions}
       onBlurCapture={(event) => {
         if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-        hideActions();
+        props.onHideActions();
       }}
     >
       {!props.selectionMode && !props.disabled ? (
         <MessageActionBar
-          visible={actionsVisible || props.menuOpen}
+          visible={props.actionsVisible}
           menuOpen={props.menuOpen}
           position={actionBarPosition}
           onReply={props.onReply}

@@ -14,8 +14,10 @@ import {
   type RawAgentStream,
 } from "@tutti-os/agent-acp-kit";
 import type { LocalAgentProviderStatus } from "@group-chat/shared";
+import { isMentionAllTrigger } from "@group-chat/shared";
 import { buildEffectiveRoleDescription } from "../domains/agent-instructions.js";
 import { participantWorkspaceRoot } from "../local/paths.js";
+import { enrichLocalAgentProviderStatus } from "./local-agent-config-catalog.js";
 import { acpPromptFromLocalAgentInput } from "./local-agent-acp.js";
 import { buildLocalAgentInput, decodeLocalAgentStdout, localToolBaseUrl } from "./local-agent-protocol.js";
 import type { RuntimeProvider, RuntimeReplyContext, RuntimeStreamEvent } from "./runtime-provider.js";
@@ -83,7 +85,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
     const detections = await this.localAgentRuntime.detect();
     return detections.map(({ provider, displayName, result }) => {
       const available = Boolean(result && result.supported !== false);
-      return {
+      const status: LocalAgentProviderStatus = {
         provider,
         displayName,
         available,
@@ -94,9 +96,16 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
         models: (result?.models ?? []).map((model) => ({
           id: model.id,
           label: model.label,
+          ...("description" in model && typeof model.description === "string"
+            ? { description: model.description }
+            : {}),
+          ...("supportedReasoningEfforts" in model && Array.isArray(model.supportedReasoningEfforts)
+            ? { supportedReasoningEfforts: model.supportedReasoningEfforts }
+            : {}),
         })),
         reason: available ? undefined : localAgentUnavailableReason(displayName, result),
       };
+      return enrichLocalAgentProviderStatus(status);
     });
   }
 
@@ -402,6 +411,7 @@ function safePathSegment(value: string) {
 function buildKitSystemPrompt(context: RuntimeReplyContext) {
   const rules = context.conversation.collaborationRules.trim();
   const roleDescription = buildEffectiveRoleDescription(context.participant, context.identity);
+  const mentionAll = isMentionAllTrigger(context.userMessage.mentions);
   return [
     "You are a local agent participant inside an IM group chat.",
     "Read AGENTS.md, IDENTITY.md, SOUL.md, MEMORY.md, and DISTILLED_CONTEXT.md in your workspace before relying on memory.",
@@ -410,6 +420,9 @@ function buildKitSystemPrompt(context: RuntimeReplyContext) {
     "Do not use tools to send the same reply again. Only use messaging tools for intentional additional side messages.",
     "When the user asks you to create or provide a file, image, video, or other generated asset, create it in the local workspace or save it with the artifact tool, then include the resulting local filesystem path in your normal final text so the user can open it. Do not send an extra group-chat message or attach it to the conversation unless the user explicitly asks you to post it to the group.",
     "If the current message does not need your response, output [NO_REPLY] as your entire output.",
+    mentionAll
+      ? "The user @mentioned everyone in this group. You must reply with a substantive message in your own voice. Do not output [NO_REPLY]. If you cannot complete the request, briefly explain why in the group."
+      : null,
     context.conversation.type === "group" && context.participant.listenMode === "active"
       ? "In active group listen mode, most messages should be ignored with [NO_REPLY] unless they clearly address you, mention all agents, ask for your expertise, or need a substantive contribution. Do not engage in agent-to-agent small talk."
       : null,

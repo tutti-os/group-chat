@@ -78,10 +78,10 @@ export function resolveMessageAgentParticipant(
 export function resolveLocalUserDisplayName(explicitName?: string | null) {
   const explicit = explicitName?.trim();
   if (explicit) return explicit;
-  return loadUserProfile().displayName.trim() || "Group Chat";
+  return loadUserProfile().displayName.trim() || "我";
 }
 
-const LEGACY_USER_SENDER_NAMES = new Set(["You", "Group Chat"]);
+const LEGACY_USER_SENDER_NAMES = new Set(["You", "Group Chat", "我"]);
 
 function isLegacyUserSenderName(name: string | null | undefined) {
   const trimmed = name?.trim();

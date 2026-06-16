@@ -28,7 +28,7 @@ test("creates an agent room, attaches a file, mentions an agent, and receives a 
   await expect(page.locator(".teamList").getByRole("button", { name: /本地 Agent/ })).toBeVisible();
   await expect(page.locator(".teamList").getByRole("button", { name: /本地 Agent/ })).toContainText(/Codex Local Agent/);
 
-  await page.getByLabel("Group Chat profile").click();
+  await page.getByLabel("我 profile").click();
   await page.getByRole("menuitem", { name: "设置" }).click();
   await expect(page.getByRole("heading", { name: "设置" })).toBeVisible();
   await page.getByRole("button", { name: "模型" }).click();

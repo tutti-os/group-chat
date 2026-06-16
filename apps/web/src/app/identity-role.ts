@@ -1,6 +1,23 @@
 import type { Identity } from "@group-chat/shared";
 import { defaultRoleDescription, roleDescriptionPresets } from "./constants.js";
 
+export function matchRolePresetId(description: string) {
+  const normalized = description.trim();
+  if (!normalized) return "custom";
+  const matched = roleDescriptionPresets.find(
+    (preset) => preset.id !== "custom" && preset.description.trim() === normalized,
+  );
+  return matched?.id ?? null;
+}
+
+export function normalizeRoleDescriptionForEditor(
+  identity: Pick<Identity, "systemPrompt" | "stylePrompt"> | null | undefined,
+) {
+  const description = getIdentityRoleDescription(identity);
+  if (description === defaultRoleDescription) return "";
+  return description;
+}
+
 export function getIdentityRoleDescription(
   identity: Pick<Identity, "systemPrompt" | "stylePrompt"> | null | undefined,
 ): string {
