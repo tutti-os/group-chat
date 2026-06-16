@@ -10,7 +10,7 @@ import type {
   RuntimeProfile,
   UpdateParticipantRequest,
 } from "@group-chat/shared";
-import { DEFAULT_PARTICIPANT_LISTEN_MODE } from "@group-chat/shared";
+import { DEFAULT_PARTICIPANT_LISTEN_MODE, uniqueParticipantDisplayNameInRoom } from "@group-chat/shared";
 import { roleDescriptionPresets, reasoningEffortOptions, reasoningModeFieldLabel } from "../../constants.js";
 import { isNewAgentDraft } from "../../identity-draft.js";
 import {
@@ -39,6 +39,7 @@ export function AgentManageForm(props: {
   readOnly?: boolean;
   avatar: string | null;
   conversationId?: string;
+  roomParticipants?: Participant[];
   onDisplayNameChange?: (displayName: string) => void;
   onMention: (participant: Participant) => void;
   onCreateIdentity?: (input: CreateIdentityRequest) => Promise<{ identity: Identity }>;
@@ -150,7 +151,16 @@ export function AgentManageForm(props: {
     setSaving(true);
     try {
       let activeIdentity = identity;
-      const identityPayload = buildIdentityPayload();
+      const resolvedDisplayName = props.roomParticipants
+        ? uniqueParticipantDisplayNameInRoom(
+          displayName.trim() || identity?.name || "Agent",
+          props.roomParticipants,
+        )
+        : displayName.trim() || identity?.name || "Agent";
+      const identityPayload = {
+        ...buildIdentityPayload(),
+        name: resolvedDisplayName,
+      };
 
       if (isNewIdentity) {
         if (!props.onCreateIdentity) throw new Error("无法创建 Agent，请关闭后重试");
@@ -170,7 +180,7 @@ export function AgentManageForm(props: {
       }
 
       const participantPayload: UpdateParticipantRequest = {
-        displayName,
+        displayName: resolvedDisplayName,
         avatar: props.avatar,
         listenMode: DEFAULT_PARTICIPANT_LISTEN_MODE,
         runtimeProfileId: canonicalRuntime?.id ?? (runtimeProfileId || undefined),
@@ -186,7 +196,7 @@ export function AgentManageForm(props: {
         const result = await props.onAddParticipant(props.conversationId, {
           identityId: activeIdentity.id,
           runtimeProfileId: canonicalRuntime?.id ?? (runtimeProfileId || null),
-          displayName: displayName.trim() || activeIdentity.name,
+          displayName: resolvedDisplayName,
           listenMode: DEFAULT_PARTICIPANT_LISTEN_MODE,
           roomInstructions: roomInstructions.trim(),
           reasoningEffort: reasoningEffort || null,

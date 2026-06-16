@@ -9,7 +9,7 @@ import type {
   RuntimeProfile,
   UpdateParticipantRequest,
 } from "@group-chat/shared";
-import { DEFAULT_PARTICIPANT_LISTEN_MODE } from "@group-chat/shared";
+import { DEFAULT_PARTICIPANT_LISTEN_MODE, uniqueParticipantDisplayNameInRoom } from "@group-chat/shared";
 import { runtimeStatusSummary } from "../../runtime.js";
 import { resolveAgentAvatar } from "../../identity-avatar.js";
 import { AgentAvatar } from "../ui/AgentAvatar.js";
@@ -222,6 +222,7 @@ export function AgentProfileDialog(props: {
             readOnly={removed}
             avatar={avatar}
             conversationId={props.conversationId ?? undefined}
+            roomParticipants={props.roomParticipants}
             onDisplayNameChange={setPreviewDisplayName}
             onMention={props.onMention}
             onCreateIdentity={props.onCreateIdentity}
@@ -243,18 +244,12 @@ function createDraftParticipant(
   conversationId: string,
   roomParticipants: Participant[],
 ): Participant {
-  const existingCount = roomParticipants.filter(
-    (participant) =>
-      participant.kind === "ai"
-      && participant.status !== "removed"
-      && participant.identityId === identity.id,
-  ).length;
   const now = new Date().toISOString();
   return {
     id: "__draft__",
     conversationId,
     kind: "ai",
-    displayName: existingCount > 0 ? `${identity.name} ${existingCount + 1}` : identity.name,
+    displayName: uniqueParticipantDisplayNameInRoom(identity.name, roomParticipants),
     avatar: null,
     runtimeProfileId: identity.defaultRuntimeProfileId,
     identityId: identity.id,

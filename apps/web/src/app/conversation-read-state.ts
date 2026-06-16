@@ -35,15 +35,35 @@ function shouldCountAsUnread(message: Message) {
   return true;
 }
 
+function resolveLatestSeenMessage(conversationId: string, messages: Message[], lastReadAt: string) {
+  let latest: Message | null = null;
+  for (const message of messages) {
+    if (message.conversationId !== conversationId) continue;
+    if (message.status === "deleted" || message.status === "recalled") continue;
+    if (message.createdAt > lastReadAt) continue;
+    if (!latest || message.createdAt > latest.createdAt) {
+      latest = message;
+    }
+  }
+  return latest;
+}
+
+/** Single-user: unread only when the last seen message was the user's, i.e. they left before an agent reply. */
+function isAwaitingAgentReply(conversationId: string, messages: Message[], lastReadAt: string) {
+  return resolveLatestSeenMessage(conversationId, messages, lastReadAt)?.role === "user";
+}
+
 export function countUnreadMessages(
   conversationId: string,
   messages: Message[],
   lastReadAt: string | null | undefined,
 ) {
+  if (!lastReadAt) return 0;
+  if (!isAwaitingAgentReply(conversationId, messages, lastReadAt)) return 0;
+
   return messages.filter((message) => {
     if (message.conversationId !== conversationId) return false;
     if (!shouldCountAsUnread(message)) return false;
-    if (!lastReadAt) return true;
     return message.createdAt > lastReadAt;
   }).length;
 }

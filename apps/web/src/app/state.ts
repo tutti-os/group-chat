@@ -75,10 +75,18 @@ export function applyEvent(state: AppState, event: StreamEvent): AppState {
     case "message.created":
     case "message.updated": {
       const messages = upsertMessage(state.messages, payload.message);
-      const withMessages = { ...withSeq, messages };
+      const message = payload.message;
+      let activeRuns = withSeq.activeRuns;
+      if (
+        message?.runId
+        && (message.status === "error" || message.status === "success" || message.status === "cancelled")
+      ) {
+        activeRuns = activeRuns.filter((run) => run.id !== message.runId);
+      }
       return {
-        ...withMessages,
-        activeRuns: enrichAgentRuns(withMessages.activeRuns, messages),
+        ...withSeq,
+        messages,
+        activeRuns: enrichAgentRuns(activeRuns, messages),
       };
     }
     case "message.hidden":

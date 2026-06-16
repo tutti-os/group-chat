@@ -25,6 +25,7 @@ import {
   type UploadArtifactRequest,
   type ReplyMode,
   type RuntimeProfile,
+  resolveMentionSpeakingOrder,
 } from "@group-chat/shared";
 import { nanoid } from "nanoid";
 import { AgentToolTokenStore } from "./agent-tool-tokens.js";
@@ -400,7 +401,7 @@ export class ChatService {
       maxRounds: input.maxReplyRounds
         ? clampInteger(input.maxReplyRounds, 1, 8)
         : maxReplyRoundsForTrigger(conversation, mentions),
-      order: conversation.replyPolicy.order,
+      order: resolveReplySpeakingOrder(conversation, mentions),
       seenParticipantIds: new Set(targets.map((participant) => participant.id)),
       mentionScoped: isParticipantMentionScoped(message.mentions),
     });
@@ -527,7 +528,7 @@ export class ChatService {
     void this.generateReplies(conversation.roomId, conversation.id, result.message, targets, {
       currentRound: 1,
       maxRounds: maxReplyRoundsForTrigger(conversation, result.message.mentions),
-      order: conversation.replyPolicy.order,
+      order: resolveReplySpeakingOrder(conversation, result.message.mentions),
       seenParticipantIds: new Set(targets.map((participant) => participant.id)),
       mentionScoped: isParticipantMentionScoped(result.message.mentions),
     });
@@ -699,10 +700,22 @@ export class ChatService {
     },
   ) {
     const orderedTargets = orderTargets(targets, options.order);
-    if (options.order === "parallel") {
+    const effectiveOrder = orderedTargets.length > 1 ? "parallel" : options.order;
+    if (effectiveOrder === "parallel") {
+      const preacceptedRuns = new Map<string, AgentRun>();
+      for (const participant of orderedTargets) {
+        const run = this.createAcceptedAgentRun(roomId, conversationId, userMessage, participant);
+        if (run) preacceptedRuns.set(participant.id, run);
+      }
       const replies = await Promise.all(
         orderedTargets.map(async (participant) => ({
-          assistantMessage: await this.scheduleReply(roomId, conversationId, userMessage, participant),
+          assistantMessage: await this.scheduleReply(
+            roomId,
+            conversationId,
+            userMessage,
+            participant,
+            preacceptedRuns.get(participant.id) ?? null,
+          ),
         })),
       );
       for (const { assistantMessage } of replies) {
@@ -747,7 +760,13 @@ export class ChatService {
     });
   }
 
-  private async scheduleReply(roomId: string, conversationId: string, userMessage: Message, participant: Participant) {
+  private async scheduleReply(
+    roomId: string,
+    conversationId: string,
+    userMessage: Message,
+    participant: Participant,
+    preacceptedRun: AgentRun | null = null,
+  ) {
     const key = replyScheduleKey(conversationId, participant.id);
     if (this.activeReplyKeys.has(key)) {
       this.repo.upsertPendingReply({
@@ -766,7 +785,13 @@ export class ChatService {
       while (nextMessage) {
         const latest = this.repo.getMessage(nextMessage.id);
         if (!latest || latest.status === "recalled") break;
-        const generated = await this.generateForParticipant(roomId, conversationId, latest, participant);
+        const generated = await this.generateForParticipant(
+          roomId,
+          conversationId,
+          latest,
+          participant,
+          nextMessage.id === userMessage.id ? preacceptedRun : null,
+        );
         if (nextMessage.id === userMessage.id) requestedReply = generated;
         const pending = this.repo.consumePendingReply(conversationId, participant.id);
         if (!pending) {
@@ -801,12 +826,12 @@ export class ChatService {
       });
   }
 
-  private async generateForParticipant(
+  private createAcceptedAgentRun(
     roomId: string,
     conversationId: string,
     userMessage: Message,
     participant: Participant,
-  ): Promise<Message | null> {
+  ): AgentRun | null {
     const latestUserMessage = this.repo.getMessage(userMessage.id);
     if (!latestUserMessage || latestUserMessage.status === "recalled") return null;
     const conversation = this.repo.getConversation(conversationId);
@@ -846,6 +871,66 @@ export class ChatService {
       runId: run.id,
       payload: { run },
     });
+    this.repo.updateAgentRun(run.id, { status: "running" });
+    this.events.emit({
+      type: "run.started",
+      roomId,
+      conversationId,
+      runId: run.id,
+      payload: { run: this.repo.getAgentRun(run.id) },
+    });
+    return run;
+  }
+
+  private async generateForParticipant(
+    roomId: string,
+    conversationId: string,
+    userMessage: Message,
+    participant: Participant,
+    preacceptedRun: AgentRun | null = null,
+  ): Promise<Message | null> {
+    const latestUserMessage = this.repo.getMessage(userMessage.id);
+    if (!latestUserMessage || latestUserMessage.status === "recalled") return null;
+    const conversation = this.repo.getConversation(conversationId);
+    if (!conversation) return null;
+    const runtimeProfile = participant.runtimeProfileId ? this.repo.getRuntimeProfile(participant.runtimeProfileId) : null;
+    const identity = participant.identityId ? this.repo.getIdentity(participant.identityId) : null;
+    const attachments = this.repo.listArtifactsForMessage(userMessage.id);
+    const recentMessages = this.repo
+      .listRecentMessages(conversationId, 24)
+      .filter((message) => isMessageVisibleToParticipant(message, participant.id));
+    const provider = this.runtimes.getProvider(runtimeProfile);
+    const runtimeContext: RuntimeReplyContext = {
+      conversation,
+      participant,
+      identity,
+      runtimeProfile,
+      userMessage: latestUserMessage,
+      recentMessages,
+      attachments,
+    };
+    const runDescriptor = provider.describeRun(runtimeContext);
+    const run = preacceptedRun
+      ?? this.repo.createAgentRun({
+        roomId,
+        conversationId,
+        participantId: participant.id,
+        assistantMessageId: null,
+        triggerMessageId: latestUserMessage.id,
+        runtime: runDescriptor.runtime,
+        provider: runDescriptor.provider,
+        model: runDescriptor.model,
+        visibility: latestUserMessage.visibility,
+      });
+    if (!preacceptedRun) {
+      this.events.emit({
+        type: "run.accepted",
+        roomId,
+        conversationId,
+        runId: run.id,
+        payload: { run },
+      });
+    }
     runtimeContext.runId = run.id;
     runtimeContext.toolAccess = this.toolTokens.issue({
       runId: run.id,
@@ -853,7 +938,9 @@ export class ChatService {
       conversationId,
     });
 
-    this.repo.updateAgentRun(run.id, { status: "running" });
+    if (!preacceptedRun) {
+      this.repo.updateAgentRun(run.id, { status: "running" });
+    }
     const visibleReply: { message: Message | null; block: MessageBlock | null } = {
       message: null,
       block: null,
@@ -867,13 +954,15 @@ export class ChatService {
       reasoningBlockId: null as string | null,
       content: "",
     };
-    this.events.emit({
-      type: "run.started",
-      roomId,
-      conversationId,
-      runId: run.id,
-      payload: { run: this.repo.getAgentRun(run.id) },
-    });
+    if (!preacceptedRun) {
+      this.events.emit({
+        type: "run.started",
+        roomId,
+        conversationId,
+        runId: run.id,
+        payload: { run: this.repo.getAgentRun(run.id) },
+      });
+    }
 
     let content = "";
     const createRunEvent = (
@@ -1555,6 +1644,13 @@ export class ChatService {
     return { run: finalRun };
   }
 
+}
+
+function resolveReplySpeakingOrder(
+  conversation: Conversation,
+  mentions: NonNullable<SendMessageRequest["mentions"]>,
+): SpeakingOrder {
+  return resolveMentionSpeakingOrder(conversation.replyPolicy.order, mentions);
 }
 
 function isParticipantMentionScoped(mentions: Message["mentions"]) {

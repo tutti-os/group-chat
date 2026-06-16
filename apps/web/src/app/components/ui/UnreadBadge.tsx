@@ -1,10 +1,12 @@
 import { formatUnreadCount } from "../../conversation-read-state.js";
+import { UNREAD_FEATURE_ENABLED } from "../../feature-flags.js";
 
 export function UnreadBadge(props: {
   count: number;
   className?: string;
   size?: "sm" | "md";
 }) {
+  if (!UNREAD_FEATURE_ENABLED) return null;
   const label = formatUnreadCount(props.count);
   if (!label) return null;
   const compact = label.length > 1;

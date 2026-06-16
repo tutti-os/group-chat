@@ -32,6 +32,7 @@ import {
   type UpdateRoomRequest,
   type UploadArtifactRequest,
   type PrivateTaskSnapshot,
+  uniqueParticipantDisplayNameInRoom,
 } from "@group-chat/shared";
 import { getDb, json, parseJson } from "../db/database.js";
 import { ensureRoomDirs, roomArtifactRoot } from "../local/paths.js";
@@ -362,11 +363,13 @@ export class ChatRepository {
     if (!identity) throw new Error("Identity not found");
     const runtimeProfileId = input.runtimeProfileId ?? identity.defaultRuntimeProfileId;
     if (!runtimeProfileId) throw new Error("Runtime profile is required");
+    const participants = this.listParticipants(conversationId);
+    const baseName = input.displayName?.trim() || identity.name;
     const row = getDb()
       .prepare(`SELECT COALESCE(MAX(sort_order), -1) + 1 AS sort_order FROM participants WHERE conversation_id = ?`)
       .get(conversationId) as { sort_order: number };
     return this.createParticipant(conversationId, {
-      displayName: input.displayName?.trim() || identity.name,
+      displayName: uniqueParticipantDisplayNameInRoom(baseName, participants),
       kind: "ai",
       runtimeProfileId,
       identityId: identity.id,
