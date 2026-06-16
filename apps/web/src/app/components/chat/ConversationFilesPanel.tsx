@@ -10,16 +10,19 @@ import {
 } from "../../artifact-actions.js";
 import { formatBytes, formatShortDate } from "../../formatting.js";
 import { messageSenderLabel } from "../../chat-links.js";
+import { attachmentLabel, t, useTranslation } from "../../i18n/index.js";
 import { AttachmentPreviewDialog, type AttachmentPreview } from "./AttachmentPreviewDialog.js";
 
 const PAGE_SIZE = 30;
 
-const CATEGORY_TABS: Array<{ id: ArtifactFilterCategory; label: string }> = [
-  { id: "all", label: "全部" },
-  { id: "image", label: "图片" },
-  { id: "video", label: "视频" },
-  { id: "file", label: "文件" },
-];
+function getCategoryTabs() {
+  return [
+    { id: "all" as const, label: t("files.all") },
+    { id: "image" as const, label: t("files.image") },
+    { id: "video" as const, label: t("files.video") },
+    { id: "file" as const, label: t("files.file") },
+  ];
+}
 
 export function ConversationFilesPanel(props: {
   open: boolean;
@@ -29,6 +32,7 @@ export function ConversationFilesPanel(props: {
   onClose: () => void;
   onFocusMessage: (messageId: string) => void;
 }) {
+  useTranslation();
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<ArtifactFilterCategory>("all");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
@@ -105,7 +109,7 @@ export function ConversationFilesPanel(props: {
 
   const openSourceMessage = (artifact: Artifact) => {
     if (!artifact.messageId) {
-      window.alert("这条文件没有关联消息，暂时无法定位。");
+      window.alert(t("files.noLinkedMessage"));
       return;
     }
     props.onFocusMessage(artifact.messageId);
@@ -128,11 +132,12 @@ export function ConversationFilesPanel(props: {
 
   if (!props.open) return null;
 
+  const categoryTabs = getCategoryTabs();
   const emptyLabel = normalizedQuery
-    ? "没有找到匹配的文件"
+    ? t("files.noMatch")
     : category === "all"
-      ? "这个群还没有文件"
-      : `这个群还没有${CATEGORY_TABS.find((tab) => tab.id === category)?.label ?? "文件"}`;
+      ? t("files.emptyAll")
+      : t("files.emptyCategory", { category: categoryTabs.find((tab) => tab.id === category)?.label ?? t("files.file") });
 
   return (
     <>
@@ -142,14 +147,14 @@ export function ConversationFilesPanel(props: {
       >
         <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [padding:14px] [border-bottom:1px_solid_var(--border)]"}>
           <div className={"[min-width:0] [&_h3]:[margin:0] [&_h3]:[font-size:15px] [&_h3]:[font-weight:720] [&_h3]:[line-height:1.2] [&_span]:[display:block] [&_span]:[margin-top:3px] [&_span]:[color:var(--muted)] [&_span]:[font-size:12px]"}>
-            <h3>群文件</h3>
-            <span>{filteredArtifacts.length} 个文件</span>
+            <h3>{t("files.title")}</h3>
+            <span>{t("files.count", { count: filteredArtifacts.length })}</span>
           </div>
           <button
             className={"[display:inline-grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [&:focus-visible]:[outline:none]"}
             type="button"
-            aria-label="关闭群文件"
-            title="关闭"
+            aria-label={t("files.close")}
+            title={t("common.close")}
             onClick={props.onClose}
           >
             <X size={16} />
@@ -157,7 +162,7 @@ export function ConversationFilesPanel(props: {
         </div>
 
         <div className={"[display:flex] [gap:8px] [padding:12px_12px_0] [overflow-x:auto]"}>
-          {CATEGORY_TABS.map((tab) => {
+          {categoryTabs.map((tab) => {
             const active = category === tab.id;
             return (
               <button
@@ -179,8 +184,8 @@ export function ConversationFilesPanel(props: {
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索文件名、类型或发送者"
-              aria-label="搜索群文件"
+              placeholder={t("files.searchPlaceholder")}
+              aria-label={t("files.searchAria")}
             />
           </label>
         </div>
@@ -212,7 +217,7 @@ export function ConversationFilesPanel(props: {
                 <button
                   type="button"
                   className={"[display:grid] [grid-column:1_/_3] [grid-template-columns:40px_minmax(0,_1fr)] [align-items:center] [gap:8px] [border:0] [padding:0] [text-align:left] [color:inherit] [background:transparent] [&:focus-visible]:[outline:none]"}
-                  title={artifact.messageId ? "定位到原消息" : "暂无关联消息"}
+                  title={artifact.messageId ? t("files.jumpToMessage") : t("files.noLinkedMessageShort")}
                   onClick={() => openSourceMessage(artifact)}
                 >
                   <span className={"[display:grid] [width:40px] [height:40px] [place-items:center] [overflow:hidden] [border-radius:8px] [background:#f3f4f6]"}>
@@ -234,7 +239,7 @@ export function ConversationFilesPanel(props: {
                     </strong>
                     <span className={"[overflow:hidden] [color:var(--muted)] [font-size:11px] [line-height:1.3] [text-overflow:ellipsis] [white-space:nowrap]"}>
                       {formatBytes(artifact.sizeBytes)} · {formatShortDate(artifact.createdAt)}
-                      {message ? ` · ${formatMessageSender(message)} 发送` : " · 未关联消息"}
+                      {message ? t("files.sentBy", { sender: formatMessageSender(message) }) : t("files.noLinkedMeta")}
                     </span>
                   </span>
                 </button>
@@ -242,8 +247,8 @@ export function ConversationFilesPanel(props: {
                   <button
                     type="button"
                     className={"[display:inline-grid] [width:28px] [height:28px] [place-items:center] [border:0] [border-radius:8px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [&:focus-visible]:[outline:none]"}
-                    aria-label={`预览 ${artifact.filename}`}
-                    title="预览"
+                    aria-label={t("files.previewFile", { filename: artifact.filename })}
+                    title={t("files.preview")}
                     onPointerDown={stopPanelPointerBubble}
                     onClick={(event) => handlePreview(artifact, event)}
                   >
@@ -252,8 +257,8 @@ export function ConversationFilesPanel(props: {
                   <button
                     type="button"
                     className={"[display:inline-grid] [width:28px] [height:28px] [place-items:center] [border:0] [border-radius:8px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [&:focus-visible]:[outline:none]"}
-                    aria-label={`下载 ${artifact.filename}`}
-                    title="下载"
+                    aria-label={t("files.downloadFile", { filename: artifact.filename })}
+                    title={t("files.download")}
                     onPointerDown={stopPanelPointerBubble}
                     onClick={(event) => handleDownload(artifact, event)}
                   >
@@ -265,7 +270,7 @@ export function ConversationFilesPanel(props: {
           })}
           {hasMore ? (
             <div className={"[padding:8px_0_4px] [color:var(--muted)] [font-size:12px] [text-align:center]"}>
-              继续滚动加载更多
+              {t("files.loadMore")}
             </div>
           ) : null}
         </div>

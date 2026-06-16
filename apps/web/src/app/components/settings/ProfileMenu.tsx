@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { X } from "lucide-react";
 import type { LocalUserProfile } from "../../user-profile.js";
+import { useTranslation } from "../../i18n/index.js";
 import { AvatarPicker } from "../ui/AvatarPicker.js";
 import { AvatarUploadButton } from "../ui/AvatarUploadButton.js";
 
@@ -12,6 +13,7 @@ export function ProfileMenu(props: {
   onSave: (profile: LocalUserProfile) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState<LocalUserProfile>(props.profile);
   const [chatPosition, setChatPosition] = useState<CSSProperties | undefined>();
   const nameRef = useRef<HTMLInputElement | null>(null);
@@ -96,16 +98,16 @@ export function ProfileMenu(props: {
       style={props.anchor === "chat" ? chatPosition : undefined}
       className={`${positionClass} [width:min(340px,_calc(100vw_-_24px))] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:18px] [background:#ffffff] [box-shadow:0_20px_56px_rgb(0_0_0_/_16%),_0_2px_8px_rgb(0_0_0_/_6%)]`}
       role="dialog"
-      aria-label="编辑个人资料"
+      aria-label={t("profileMenu.editProfile")}
       onMouseDown={(event) => event.stopPropagation()}
     >
       <header className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:12px] [padding:14px_16px_0]"}>
-        <h2 className={"[margin:0] [color:var(--text)] [font-size:15px] [font-weight:680] [line-height:1.2]"}>个人资料</h2>
+        <h2 className={"[margin:0] [color:var(--text)] [font-size:15px] [font-weight:680] [line-height:1.2]"}>{t("profileMenu.title")}</h2>
         <button
           type="button"
           className={"[display:grid] [width:30px] [height:30px] [flex-shrink:0] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000008]"}
-          aria-label="关闭"
-          title="关闭"
+          aria-label={t("common.close")}
+          title={t("common.close")}
           onClick={props.onClose}
         >
           <X size={16} />
@@ -121,7 +123,7 @@ export function ProfileMenu(props: {
         />
         <div className={"[display:grid] [gap:6px] [min-width:0] [flex:1]"}>
           <label className={"[color:var(--muted)] [font-size:11px] [font-weight:650] [line-height:1]"} htmlFor="profile-display-name">
-            名称
+            {t("profileMenu.name")}
           </label>
           <input
             id="profile-display-name"
@@ -129,7 +131,7 @@ export function ProfileMenu(props: {
             className={"[width:100%] [height:38px] [border:1px_solid_var(--border)] [border-radius:11px] [padding:0_11px] [color:var(--text)] [background:#ffffff] [font-size:14px] [font-weight:620] [outline:none] focus:[border-color:var(--border-strong)] focus:[box-shadow:0_0_0_3px_#00000008]"}
             value={draft.displayName}
             maxLength={32}
-            placeholder="输入名称"
+            placeholder={t("profileMenu.namePlaceholder")}
             onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))}
             onKeyDown={(event) => {
               if (event.key === "Enter") save();
@@ -140,7 +142,7 @@ export function ProfileMenu(props: {
 
       <section className={"[padding:16px_16px_0]"}>
         <h3 className={"[margin:0_0_10px] [color:var(--muted)] [font-size:11px] [font-weight:650] [line-height:1] [letter-spacing:0.02em]"}>
-          选择头像
+          {t("profileMenu.pickAvatar")}
         </h3>
         <AvatarPicker
           compact
@@ -155,14 +157,14 @@ export function ProfileMenu(props: {
           className={"[display:inline-flex] [height:34px] [align-items:center] [justify-content:center] [border:1px_solid_var(--border)] [border-radius:10px] [padding:0_14px] [color:var(--text)] [background:#ffffff] [font-size:13px] [font-weight:650] [&:hover]:[background:#fafafa]"}
           onClick={props.onClose}
         >
-          取消
+          {t("common.cancel")}
         </button>
         <button
           type="button"
           className={"[display:inline-flex] [height:34px] [align-items:center] [justify-content:center] [border:0] [border-radius:10px] [padding:0_14px] [color:var(--primary-contrast)] [background:var(--primary)] [font-size:13px] [font-weight:700] [&:hover]:[background:#2563eb]"}
           onClick={save}
         >
-          保存
+          {t("common.save")}
         </button>
       </footer>
     </div>

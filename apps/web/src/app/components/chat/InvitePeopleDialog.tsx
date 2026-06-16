@@ -1,10 +1,13 @@
 import { UserPlus } from "lucide-react";
+import { useTranslation } from "../../i18n/index.js";
 
 const TUTTI_URL = "https://tutti.sh/";
 
 export function InvitePeopleDialog(props: {
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
+
   return (
     <div
       className={"[position:fixed] [inset:0] [z-index:80] [display:grid] [place-items:center] [padding:24px] [background:rgb(15_23_42_/_52%)]"}
@@ -30,13 +33,13 @@ export function InvitePeopleDialog(props: {
           </div>
           <div className={"[min-width:0]"}>
             <h3 id="invite-people-title" className={"[margin:0] [color:var(--text)] [font-size:16px] [font-weight:720] [line-height:1.35]"}>
-              本地版暂不支持邀请成员
+              {t("invite.title")}
             </h3>
             <p id="invite-people-desc" className={"[margin:10px_0_0] [color:var(--muted)] [font-size:13px] [line-height:1.55]"}>
-              当前为本地单人版本，无法邀请其他人加入房间。云端多人协作版将支持邀请队友和他们的 Agent 进房间。
+              {t("invite.desc")}
             </p>
             <p className={"[margin:10px_0_0] [color:var(--muted)] [font-size:13px] [line-height:1.55]"}>
-              下载tutti云端协作版请前往：{" "}
+              {t("invite.downloadHint")}{" "}
               <a
                 href={TUTTI_URL}
                 target="_blank"
@@ -54,7 +57,7 @@ export function InvitePeopleDialog(props: {
             className={"[display:inline-flex] [height:36px] [align-items:center] [border:1px_solid_var(--border)] [border-radius:10px] [padding:0_14px] [color:var(--text)] [background:var(--panel)] [font-size:13px] [font-weight:650]"}
             onClick={props.onClose}
           >
-            知道了
+            {t("common.gotIt")}
           </button>
           <a
             href={TUTTI_URL}
@@ -63,7 +66,7 @@ export function InvitePeopleDialog(props: {
             className={"[display:inline-flex] [height:36px] [align-items:center] [border:0] [border-radius:10px] [padding:0_14px] [color:#ffffff] [background:#2563eb] [font-size:13px] [font-weight:650] [text-decoration:none] hover:[background:#1d4ed8]"}
             onClick={props.onClose}
           >
-            前往 Tutti
+            {t("invite.goToTutti")}
           </a>
         </div>
       </div>

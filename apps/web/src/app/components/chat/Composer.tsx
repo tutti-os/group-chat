@@ -19,6 +19,7 @@ import { AttachmentPreviewDialog, isTextAttachment, type AttachmentPreview } fro
 import { AgentAvatar } from "../ui/AgentAvatar.js";
 import { resolveAgentAvatarFromContext } from "../../identity-avatar.js";
 import { WHISPER_FEATURE_ENABLED } from "../../feature-flags.js";
+import { useTranslation, t } from "../../i18n/index.js";
 
 const MENTION_MENU_Z_INDEX = 90;
 
@@ -47,6 +48,7 @@ export function Composer(props: {
     | { type: "edit"; seq: number; messageId: string; content: string; mentions: MentionTarget[] }
     | null;
 }) {
+  const { t } = useTranslation();
   const [text, setText] = useState("");
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingMentions, setEditingMentions] = useState<MentionTarget[]>([]);
@@ -341,7 +343,7 @@ export function Composer(props: {
   };
 
   const insertAllMention = () => {
-    if (!insertMentionChipAtActiveQuery("所有人", "all")) return;
+    if (!insertMentionChipAtActiveQuery(t("composer.everyone"), "all")) return;
     setMentionedAll(true);
   };
 
@@ -476,7 +478,7 @@ export function Composer(props: {
       const stashedSummaryLink = readStashedSummaryLink();
       const summaryLink = summaryLinkFromMime.startsWith("group-chat://summary/")
         ? summaryLinkFromMime
-        : pastedText.startsWith("【消息总结】")
+        : /^【(?:消息总结|Message summary)/.test(pastedText)
           ? stashedSummaryLink
           : null;
       if (summaryLink?.startsWith("group-chat://summary/")) {
@@ -520,7 +522,7 @@ export function Composer(props: {
       try {
         setPreview({ title: item.filename, mimeType: item.mimeType, text: await item.file.text() });
       } catch {
-        setPreview({ title: item.filename, mimeType: item.mimeType, text: "无法读取文本预览。" });
+        setPreview({ title: item.filename, mimeType: item.mimeType, text: t("composer.previewUnreadable") });
       }
       return;
     }
@@ -652,11 +654,11 @@ export function Composer(props: {
     <footer ref={footerRef} className={"[position:relative] [z-index:50] [border-top:0] [padding:8px_16px_16px] [background:var(--panel)] max-[760px]:[padding-inline:12px]"}>
       {editingMessageId ? (
         <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [margin-bottom:8px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:8px_10px] [background:#fff7ed] [color:#9a3412] [font-size:12px] [font-weight:650]"}>
-          <span>正在编辑消息，发送后会让被 @ 的 Agent 重新回复。</span>
+          <span>{t("composer.editingHint")}</span>
           <button
             type="button"
             className={"[display:inline-grid] [width:24px] [height:24px] [place-items:center] [border:0] [border-radius:999px] [color:#9a3412] [background:#fed7aa]"}
-            aria-label="取消编辑"
+            aria-label={t("composer.cancelEdit")}
             onClick={() => {
               setEditingMessageId(null);
               setEditingMentions([]);
@@ -676,7 +678,7 @@ export function Composer(props: {
           if (event.target === event.currentTarget) editorRef.current?.focus();
         }}
       >
-        <label className={"[display:inline-grid] [place-items:center] [border:0] [width:40px] [height:40px] [border-radius:999px] [color:#17171799] [background:transparent] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000008] [&_input]:[display:none] max-[760px]:[width:34px] max-[760px]:[height:34px]"} title="Attach files">
+        <label className={"[display:inline-grid] [place-items:center] [border:0] [width:40px] [height:40px] [border-radius:999px] [color:#17171799] [background:transparent] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000008] [&_input]:[display:none] max-[760px]:[width:34px] max-[760px]:[height:34px]"} title={t("composer.attachFiles")}>
           <Paperclip size={18} />
           <input
             type="file"
@@ -698,13 +700,13 @@ export function Composer(props: {
           <div className={"[position:relative] [min-height:28px] [display:grid] [align-items:start]"}>
             {!text ? (
               <span className={"[pointer-events:none] [position:absolute] [left:0] [top:4px] [color:#17171755] [font-size:13px] [line-height:20px]"}>
-                发送消息，输入 / 使用命令...
+                {t("composer.placeholder")}
               </span>
             ) : null}
             <div
               ref={editorRef}
               role="textbox"
-              aria-label="消息输入框"
+              aria-label={t("composer.input")}
               aria-multiline="true"
               contentEditable
               suppressContentEditableWarning
@@ -761,15 +763,15 @@ export function Composer(props: {
         {props.activeRuns.length > 0 ? (
           <button
             className={"[width:40px] [height:40px] [border:0] [border-radius:999px] [color:var(--danger)] [background:#dc262612] [&:disabled]:[color:var(--muted)] [&:disabled]:[background:#00000008] [&:disabled]:[opacity:0.55]"}
-            title="Stop responses"
-            aria-label="Stop responses"
+            title={t("composer.stopResponses")}
+            aria-label={t("composer.stopResponses")}
             onClick={cancelActiveRuns}
             disabled={cancelling}
           >
             <Square size={16} />
           </button>
         ) : null}
-        <button className={"[display:inline-grid] [place-items:center] [border:0] [width:40px] [height:40px] [border-radius:999px] [color:var(--primary-contrast)] [background:var(--primary)] [&:disabled]:[color:var(--muted)] [&:disabled]:[background:#00000008] max-[760px]:[width:38px] max-[760px]:[height:38px]"} aria-label="Send message" onClick={send} disabled={sending}>
+        <button className={"[display:inline-grid] [place-items:center] [border:0] [width:40px] [height:40px] [border-radius:999px] [color:var(--primary-contrast)] [background:var(--primary)] [&:disabled]:[color:var(--muted)] [&:disabled]:[background:#00000008] max-[760px]:[width:38px] max-[760px]:[height:38px]"} aria-label={t("composer.sendMessage")} onClick={send} disabled={sending}>
           {sending ? <Square size={18} /> : <Send size={18} />}
         </button>
       </div>
@@ -832,7 +834,7 @@ export function Composer(props: {
                     <strong>{option.label}</strong>
                     {option.participant.status === "muted" ? (
                       <span className={"[display:inline-flex] [flex:0_0_auto] [height:20px] [align-items:center] [border-radius:999px] [padding:0_7px] [color:#b45309] [background:#fef3c7] [font-size:10px] [font-weight:700]"}>
-                        已静音
+                        {t("composer.muted")}
                       </span>
                     ) : null}
                   </button>
@@ -840,8 +842,8 @@ export function Composer(props: {
                     <button
                       type="button"
                       className={"[display:inline-grid] [flex:0_0_auto] [width:30px] [height:30px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [&:hover]:[color:#7c3aed] [&:hover]:[background:#f3e8ff] [&:focus-visible]:[outline:none] [&:focus-visible]:[box-shadow:0_0_0_2px_#ddd6fe]"}
-                      aria-label={`跟 ${option.label} 说悄悄话`}
-                      title="悄悄话"
+                      aria-label={t("composer.whisperTo", { name: option.label })}
+                      title={t("composer.whisper")}
                       onMouseDown={(event) => {
                         event.preventDefault();
                         saveMentionSelection();
@@ -1319,11 +1321,11 @@ function createMentionChip(label: string, mentionId: string) {
   return chip;
 }
 
-function createWhisperChip() {
+function createWhisperChip(label: string) {
   const chip = document.createElement("span");
   chip.contentEditable = "false";
   chip.dataset.whisperChip = "true";
-  chip.textContent = "悄悄话";
+  chip.textContent = label;
   chip.className = [
     "[display:inline-flex]",
     "[align-items:center]",
@@ -1355,7 +1357,7 @@ function hasWhisperChipInEditor(editor: HTMLDivElement | null) {
 
 function attachWhisperChipBeforeTrailingSpace(editor: HTMLDivElement, trailingSpace: Text | null): Text {
   removeWhisperChips(editor);
-  const whisper = createWhisperChip();
+  const whisper = createWhisperChip(t("composer.whisper"));
   if (trailingSpace?.parentNode) {
     trailingSpace.parentNode.insertBefore(whisper, trailingSpace);
     return trailingSpace;
@@ -1647,8 +1649,8 @@ function createMessageLinkChip(messageId: string, label: string) {
 
 function messageLinkLabel(messageId: string, messages: Message[], participants: Participant[]) {
   const message = messages.find((item) => item.id === messageId) ?? null;
-  if (!message) return "消息链接";
-  return `来自 ${messageSenderLabel(message, participants)} 的消息链接`;
+  if (!message) return t("composer.messageLink");
+  return t("composer.messageLinkFrom", { sender: messageSenderLabel(message, participants) });
 }
 
 interface UploadItem {
@@ -1670,6 +1672,7 @@ interface ComposerQuote {
 }
 
 function QuoteComposerBar(props: { quotes: ComposerQuote[]; onRemove: () => void }) {
+  const { t } = useTranslation();
   const [firstQuote, ...restQuotes] = props.quotes;
   if (!firstQuote) return null;
   return (
@@ -1677,20 +1680,22 @@ function QuoteComposerBar(props: { quotes: ComposerQuote[]; onRemove: () => void
       <button
         type="button"
         className={"[display:inline-grid] [width:20px] [height:20px] [place-items:center] [border:0] [border-radius:4px] [color:#8a8f98] [background:transparent] [&:hover]:[color:var(--text)] [&:hover]:[background:#0000000c]"}
-        aria-label="移除引用"
-        title="移除引用"
+        aria-label={t("composer.removeQuote")}
+        title={t("composer.removeQuote")}
         onClick={props.onRemove}
       >
         <X size={14} />
       </button>
       <span className={"[display:grid] [min-width:0] [gap:2px]"}>
         <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>
-          {props.quotes.length > 1 ? `引用 ${props.quotes.length} 条消息` : `回复 ${firstQuote.sender}: ${compactQuoteContent(firstQuote.content)}`}
+          {props.quotes.length > 1
+            ? t("composer.quoteCount", { count: props.quotes.length })
+            : t("composer.replyTo", { sender: firstQuote.sender, content: compactQuoteContent(firstQuote.content) })}
         </span>
         {props.quotes.length > 1 ? (
           <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap] [color:#9aa1ad] [font-size:12px]"}>
             {firstQuote.sender}: {compactQuoteContent(firstQuote.content)}
-            {restQuotes.length ? ` 等 ${restQuotes.length + 1} 条` : ""}
+            {restQuotes.length ? t("composer.quoteMore", { count: restQuotes.length + 1 }) : ""}
           </span>
         ) : null}
       </span>
@@ -1700,7 +1705,7 @@ function QuoteComposerBar(props: { quotes: ComposerQuote[]; onRemove: () => void
 
 function formatQuotesForMessage(quotes: ComposerQuote[]) {
   return quotes
-    .map((quote) => `> 回复 ${quote.sender}: ${compactQuoteContent(quote.content)}`)
+    .map((quote) => t("composer.replyQuoteBlock", { sender: quote.sender, content: compactQuoteContent(quote.content) }))
     .join("\n");
 }
 
@@ -1745,14 +1750,15 @@ function AttachmentPill(props: {
   onOpen: () => void;
 }) {
   const isImage = props.mimeType.startsWith("image/");
-  const hasStatus = props.status !== "已添加";
+  const addedLabel = t("composer.uploadAdded");
+  const hasStatus = props.status !== addedLabel;
   if (isImage && props.previewUrl) {
     return (
       <div
         className={`group [position:relative] [width:128px] [height:96px] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:18px] [background:#00000008] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] ${props.failed ? "[border-color:#ef444455]" : ""}`}
         role="button"
         tabIndex={0}
-        aria-label={`预览 ${props.filename}`}
+        aria-label={t("composer.previewFile", { filename: props.filename })}
         onClick={props.onOpen}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
@@ -1783,7 +1789,7 @@ function AttachmentPill(props: {
       className={`group [position:relative] [display:grid] [grid-template-columns:60px_minmax(0,_1fr)] [align-items:center] [gap:12px] [width:min(330px,_100%)] [height:86px] [border:1px_solid_var(--border)] [border-radius:22px] [padding:12px_34px_12px_12px] [background:var(--panel)] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] ${props.failed ? "[border-color:#ef444455] [background:#ef44440a]" : ""}`}
       role="button"
       tabIndex={0}
-      aria-label={`预览 ${props.filename}`}
+      aria-label={t("composer.previewFile", { filename: props.filename })}
       onClick={props.onOpen}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
@@ -1827,10 +1833,10 @@ function AttachmentPill(props: {
 }
 
 function attachmentStatusLabel(status: UploadItem["status"]) {
-  if (status === "pending") return "待发送";
-  if (status === "uploading") return "上传中";
-  if (status === "error") return "上传失败";
-  return "已添加";
+  if (status === "pending") return t("composer.uploadPending");
+  if (status === "uploading") return t("composer.uploadUploading");
+  if (status === "error") return t("composer.uploadError");
+  return t("composer.uploadAdded");
 }
 
 function revokePreviewUrl(previewUrl: string | null) {
@@ -1850,11 +1856,12 @@ function buildMentionOptions(
   if (query === null) return [];
   const normalizedQuery = query.toLowerCase();
   const options: MentionOption[] = [];
+  const everyoneLabel = t("composer.everyone");
   if (
     !mentionedAll
-    && ("所有人".includes(normalizedQuery) || "all".includes(normalizedQuery) || "all agents".includes(normalizedQuery))
+    && (everyoneLabel.toLowerCase().includes(normalizedQuery) || "所有人".includes(normalizedQuery) || "all".includes(normalizedQuery) || "all agents".includes(normalizedQuery))
   ) {
-    options.push({ kind: "all", key: "all", label: "所有人" });
+    options.push({ kind: "all", key: "all", label: everyoneLabel });
   }
   const matchingParticipants = participants
     .filter((participant) => !mentionedIds.has(participant.id) && participant.displayName.toLowerCase().includes(normalizedQuery))

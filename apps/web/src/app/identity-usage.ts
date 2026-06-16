@@ -5,6 +5,7 @@ import type {
   ParticipantListenMode,
   Room,
 } from "@group-chat/shared";
+import { getLocale } from "./i18n/index.js";
 
 export interface IdentityUsageClone {
   participantId: string;
@@ -68,7 +69,7 @@ export function listIdentityUsage(
     const conversation = conversationById.get(conversationId);
     if (!conversation) continue;
     const room = roomById.get(conversation.roomId);
-    clones.sort((left, right) => left.displayName.localeCompare(right.displayName, "zh-CN"));
+    clones.sort((left, right) => left.displayName.localeCompare(right.displayName, getLocale()));
     usage.push({
       conversationId,
       title: conversation.title,
@@ -77,7 +78,7 @@ export function listIdentityUsage(
     });
   }
 
-  usage.sort((left, right) => left.title.localeCompare(right.title, "zh-CN"));
+  usage.sort((left, right) => left.title.localeCompare(right.title, getLocale()));
   return usage;
 }
 

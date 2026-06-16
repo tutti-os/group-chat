@@ -1,5 +1,6 @@
 import type { Identity } from "@group-chat/shared";
-import { defaultRoleDescription, roleDescriptionPresets } from "./constants.js";
+import { defaultRoleDescription, roleDescriptionPresetLabel, roleDescriptionPresets } from "./constants.js";
+import { t } from "./i18n/index.js";
 
 export function matchRolePresetId(description: string) {
   const normalized = description.trim();
@@ -45,5 +46,5 @@ export function getIdentityRoleLabel(
   const matched = roleDescriptionPresets.find(
     (preset) => preset.id !== "custom" && preset.description.trim() === description.trim(),
   );
-  return matched?.name ?? "自定义";
+  return matched ? roleDescriptionPresetLabel(matched.id) : t("rolePreset.custom");
 }

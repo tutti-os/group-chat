@@ -1,5 +1,6 @@
 import { ChevronRight } from "lucide-react";
 import type { Identity, LocalAgentProviderStatus, Participant, RuntimeProfile } from "@group-chat/shared";
+import { useTranslation } from "../../i18n/index.js";
 import { runtimeStatusSummary } from "../../runtime.js";
 import { resolveAgentAvatar } from "../../identity-avatar.js";
 import { AgentAvatar } from "../ui/AgentAvatar.js";
@@ -12,6 +13,7 @@ export function AgentManageCard(props: {
   highlighted?: boolean;
   onOpen: (participant: Participant) => void;
 }) {
+  const { t } = useTranslation();
   const { participant, identity, runtimeProfile } = props;
   const muted = participant.status === "muted";
   const displayAvatar = participant.avatar ?? identity?.icon ?? null;
@@ -31,7 +33,7 @@ export function AgentManageCard(props: {
       <button
         type="button"
         className={"[display:grid] [box-sizing:border-box] [width:100%] [height:58px] [min-height:58px] [grid-template-columns:34px_minmax(0,_1fr)_auto_16px] [align-items:center] [gap:9px] [border:0] [padding:12px_10px] [text-align:left] [color:inherit] [background:transparent] [&:hover]:[background:#fbfbfc] [&:focus-visible]:[outline:none] [[data-highlighted=true]_&]:[&:hover]:[background:transparent]"}
-        aria-label={`打开 ${participant.displayName} 设置`}
+        aria-label={t("agentCard.openSettings", { name: participant.displayName })}
         onClick={() => props.onOpen(participant)}
       >
         <span className={"[display:grid] [width:34px] [height:34px] [flex-shrink:0] [place-items:center]"}>
@@ -50,12 +52,12 @@ export function AgentManageCard(props: {
         <span className={"[display:flex] [flex-shrink:0] [flex-wrap:nowrap] [align-items:center] [justify-content:flex-end] [gap:4px]"}>
           {props.highlighted ? (
             <span className={"[display:inline-flex] [height:20px] [align-items:center] [border-radius:999px] [padding:0_7px] [color:var(--accent)] [background:#ffffff] [font-size:10px] [font-weight:700]"}>
-              新添加
+              {t("agentCard.newlyAdded")}
             </span>
           ) : null}
           {muted ? (
             <span className={"[display:inline-flex] [height:20px] [align-items:center] [border-radius:999px] [padding:0_7px] [color:#b45309] [background:#fef3c7] [font-size:10px] [font-weight:700]"}>
-              已静音
+              {t("agentCard.muted")}
             </span>
           ) : null}
         </span>

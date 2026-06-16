@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { Camera } from "lucide-react";
+import { useTranslation } from "../../i18n/index.js";
 import { readRoomAvatarImageFile } from "../../room-avatar.js";
 import { AgentAvatar } from "./AgentAvatar.js";
 import { RoomAvatar, type RoomAvatarSize } from "./RoomAvatar.js";
@@ -14,6 +15,7 @@ export function RoomAvatarUploadButton(props: {
   onUpload: (avatar: string) => void;
   onError?: (message: string) => void;
 }) {
+  const { t } = useTranslation();
   const size = props.size ?? 40;
   const uploadRef = useRef<HTMLInputElement | null>(null);
   const iconSize = size <= 34 ? 16 : size <= 40 ? 18 : 22;
@@ -24,7 +26,7 @@ export function RoomAvatarUploadButton(props: {
       const dataUrl = await readRoomAvatarImageFile(file);
       props.onUpload(dataUrl);
     } catch (error) {
-      props.onError?.(error instanceof Error ? error.message : "上传图片失败");
+      props.onError?.(error instanceof Error ? error.message : t("upload.imageUploadFailed"));
     }
   };
 
@@ -33,8 +35,8 @@ export function RoomAvatarUploadButton(props: {
       <button
         type="button"
         className={`group [position:relative] [display:inline-grid] [border:0] [border-radius:999px] [padding:0] [background:transparent] [cursor:pointer] ${props.className ?? ""}`}
-        aria-label="点击上传头像"
-        title="点击上传头像"
+        aria-label={t("upload.clickAvatar")}
+        title={t("upload.clickAvatar")}
         onClick={() => uploadRef.current?.click()}
       >
         {props.agent ? (

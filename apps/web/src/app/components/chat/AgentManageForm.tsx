@@ -11,7 +11,8 @@ import type {
   UpdateParticipantRequest,
 } from "@group-chat/shared";
 import { DEFAULT_PARTICIPANT_LISTEN_MODE, uniqueParticipantDisplayNameInRoom } from "@group-chat/shared";
-import { roleDescriptionPresets, reasoningEffortOptions, reasoningModeFieldLabel } from "../../constants.js";
+import { roleDescriptionPresetLabel, roleDescriptionPresets, getReasoningEffortOptions, reasoningModeFieldLabel } from "../../constants.js";
+import { useTranslation } from "../../i18n/index.js";
 import { isNewAgentDraft } from "../../identity-draft.js";
 import {
   getConfiguredIdentityRoleDescription,
@@ -56,6 +57,7 @@ export function AgentManageForm(props: {
   onSaved?: () => void;
   onRemoved?: () => void;
 }) {
+  const { t } = useTranslation();
   const { participant, identity } = props;
   const isAddMode = props.mode === "add";
   const isNewIdentity = isNewAgentDraft(identity);
@@ -93,7 +95,7 @@ export function AgentManageForm(props: {
     selectedRuntime ?? null,
     props.localAgentProviders,
     model,
-    reasoningEffortOptions,
+    getReasoningEffortOptions(),
   );
   const providerStatus = localAgentStatus(selectedRuntime ?? null, props.localAgentProviders);
   const skillIds = identity?.skillIds ?? [];
@@ -137,7 +139,7 @@ export function AgentManageForm(props: {
   };
 
   const buildIdentityPayload = (): CreateIdentityRequest => ({
-    name: displayName.trim() || identity?.name || "Agent",
+    name: displayName.trim() || identity?.name || t("common.agent"),
     icon: props.avatar ?? identity?.icon ?? "",
     systemPrompt: roleDescription,
     stylePrompt: "",
@@ -153,17 +155,17 @@ export function AgentManageForm(props: {
       let activeIdentity = identity;
       const resolvedDisplayName = props.roomParticipants
         ? uniqueParticipantDisplayNameInRoom(
-          displayName.trim() || identity?.name || "Agent",
+          displayName.trim() || identity?.name || t("common.agent"),
           props.roomParticipants,
         )
-        : displayName.trim() || identity?.name || "Agent";
+        : displayName.trim() || identity?.name || t("common.agent");
       const identityPayload = {
         ...buildIdentityPayload(),
         name: resolvedDisplayName,
       };
 
       if (isNewIdentity) {
-        if (!props.onCreateIdentity) throw new Error("无法创建 Agent，请关闭后重试");
+        if (!props.onCreateIdentity) throw new Error(t("agentForm.createFailed"));
         const result = await props.onCreateIdentity(identityPayload);
         activeIdentity = result.identity;
       } else if (activeIdentity && props.onUpdateIdentity) {
@@ -191,7 +193,7 @@ export function AgentManageForm(props: {
 
       if (isAddMode) {
         if (!props.conversationId || !activeIdentity || !props.onAddParticipant) {
-          throw new Error("无法添加 Agent，请关闭后重试");
+          throw new Error(t("agentForm.addFailed"));
         }
         const result = await props.onAddParticipant(props.conversationId, {
           identityId: activeIdentity.id,
@@ -207,7 +209,7 @@ export function AgentManageForm(props: {
       }
       props.onSaved?.();
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "保存失败");
+      window.alert(error instanceof Error ? error.message : t("agentForm.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -217,16 +219,16 @@ export function AgentManageForm(props: {
     <div className={"[display:grid] [gap:20px] [&_input]:[height:34px] [&_input]:[width:100%] [&_input]:[min-width:0] [&_input]:[border:1px_solid_var(--border)] [&_input]:[border-radius:12px] [&_input]:[padding:0_10px] [&_input]:[font-size:13px] [&_input]:[outline:none] [&_select]:[height:34px] [&_select]:[width:100%] [&_select]:[min-width:0] [&_select]:[border:1px_solid_var(--border)] [&_select]:[border-radius:12px] [&_select]:[padding:0_10px] [&_select]:[font-size:13px] [&_select]:[outline:none] [&_textarea]:[width:100%] [&_textarea]:[min-height:88px] [&_textarea]:[border:1px_solid_var(--border)] [&_textarea]:[border-radius:12px] [&_textarea]:[padding:10px] [&_textarea]:[font-size:13px] [&_textarea]:[line-height:1.5] [&_textarea]:[outline:none] [&_textarea]:[resize:vertical] [&_label]:[display:grid] [&_label]:[gap:8px] [&_label_span]:[color:var(--muted)] [&_label_span]:[font-size:12px] [&_label_span]:[font-weight:700]"}>
       {!readOnly && isAddMode ? (
         <p className={"[margin:0] [border:1px_solid_var(--border)] [border-radius:12px] [padding:10px_12px] [color:var(--muted)] [background:#f7f7f8] [font-size:12px] [line-height:1.5]"}>
-          配置完成后保存，将创建 Agent 并加入当前房间。
+          {t("agentForm.addHint")}
         </p>
       ) : null}
       {readOnly && !isAddMode ? (
         <p className={"[margin:0] [border:1px_solid_var(--border)] [border-radius:12px] [padding:10px_12px] [color:var(--muted)] [background:#f7f7f8] [font-size:12px] [line-height:1.5]"}>
-          该 Agent 已从此群移出，以下信息仅供查看。
+          {t("agentForm.removedHint")}
         </p>
       ) : null}
       <label>
-        <span>在房间里的别名</span>
+        <span>{t("agentForm.roomAlias")}</span>
         <input
           value={displayName}
           readOnly={readOnly}
@@ -237,7 +239,7 @@ export function AgentManageForm(props: {
             props.onDisplayNameChange?.(event.target.value);
           }}
           className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
-          aria-label={`${participant.displayName} 在房间里的别名`}
+          aria-label={t("agentForm.roomAliasAria", { name: participant.displayName })}
         />
       </label>
 
@@ -268,13 +270,13 @@ export function AgentManageForm(props: {
           </select>
         </label>
         <label>
-          <span>模型</span>
+          <span>{t("agentForm.model")}</span>
           {modelOptions.length ? (
             <select
               value={model}
               disabled={readOnly}
               onChange={(event) => setModel(event.target.value)}
-              aria-label={`${participant.displayName} 模型`}
+              aria-label={t("agentForm.modelAria", { name: participant.displayName })}
               className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
             >
               {modelOptions.map((option) => (
@@ -284,7 +286,7 @@ export function AgentManageForm(props: {
               ))}
             </select>
           ) : (
-            <input value={model || "未配置"} readOnly aria-readonly />
+            <input value={model || t("common.notConfigured")} readOnly aria-readonly />
           )}
         </label>
         <label>
@@ -293,7 +295,7 @@ export function AgentManageForm(props: {
             value={reasoningEffort}
             disabled={readOnly}
             onChange={(event) => setReasoningEffort(event.target.value as "" | ReasoningEffort)}
-            aria-label={`${participant.displayName} 推理模式`}
+            aria-label={t("agentForm.reasoningAria", { name: participant.displayName })}
             className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
           >
             {reasoningOptions.map((option) => (
@@ -306,7 +308,7 @@ export function AgentManageForm(props: {
       </div>
 
       <div className={"[display:grid] [gap:10px]"}>
-        <span className={"[color:var(--muted)] [font-size:12px] [font-weight:700]"}>角色设定</span>
+        <span className={"[color:var(--muted)] [font-size:12px] [font-weight:700]"}>{t("agentForm.roleSetting")}</span>
         {!readOnly ? (
           <div className={"[display:flex] [flex-wrap:wrap] [gap:8px]"}>
             {roleDescriptionPresets.map((preset) => {
@@ -322,7 +324,7 @@ export function AgentManageForm(props: {
                     setRoleDescription(preset.description);
                   }}
                 >
-                  {preset.name}
+                  {roleDescriptionPresetLabel(preset.id)}
                 </button>
               );
             })}
@@ -339,14 +341,14 @@ export function AgentManageForm(props: {
             setRoleDescription(nextValue);
           }}
           className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
-          placeholder="描述该 Agent 在此群中的职责、风格与边界"
-          aria-label={`${participant.displayName} 角色设定`}
+          placeholder={t("agentForm.rolePlaceholder")}
+          aria-label={`${participant.displayName} ${t("agentForm.roleSetting")}`}
         />
       </div>
 
       {showRoomInstructions ? (
         <label>
-          <span>在此群的描述</span>
+          <span>{t("agentForm.roomDesc")}</span>
           <textarea
             value={roomInstructions}
             readOnly={readOnly}
@@ -356,8 +358,8 @@ export function AgentManageForm(props: {
               setRoomInstructions(event.target.value);
             }}
             className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
-            placeholder="写一段展示给其他人看的介绍（可选）"
-            aria-label={`${participant.displayName} 在此群的描述`}
+            placeholder={t("agentForm.roomDescPlaceholder")}
+            aria-label={`${participant.displayName} ${t("agentForm.roomDesc")}`}
           />
         </label>
       ) : !readOnly ? (
@@ -366,7 +368,7 @@ export function AgentManageForm(props: {
           className={"[justify-self:start] [border:0] [padding:0] [color:var(--muted)] [background:transparent] [font-size:12px] [font-weight:650] [text-decoration:underline] [text-underline-offset:3px] [&:hover]:[color:var(--text)]"}
           onClick={() => setShowRoomInstructionsEditor(true)}
         >
-          添加在此群的描述（可选）
+          {t("agentForm.addRoomDesc")}
         </button>
       ) : null}
 
@@ -387,7 +389,7 @@ export function AgentManageForm(props: {
                   key={skillId}
                   type="button"
                   className={"[border:1px_solid_var(--border)] [border-radius:999px] [padding:4px_10px] [color:var(--text)] [background:#f7f7f8] [font-size:11px] [font-weight:650] [&:hover]:[background:#eceef1]"}
-                  title={`点击后 @${participant.displayName}`}
+                  title={t("agentForm.mentionSkill", { name: participant.displayName })}
                   onClick={mention}
                 >
                   {skillId}
@@ -396,7 +398,7 @@ export function AgentManageForm(props: {
             ))}
           </div>
         ) : (
-          <span className={"[color:var(--muted)] [font-size:12px]"}>暂无 Skills</span>
+          <span className={"[color:var(--muted)] [font-size:12px]"}>{t("agentForm.noSkills")}</span>
         )}
       </div>
 
@@ -408,11 +410,11 @@ export function AgentManageForm(props: {
                 type="button"
                 className={"[display:inline-flex] [height:32px] [align-items:center] [border:0] [border-radius:10px] [padding:0_12px] [color:var(--danger)] [background:#fde8e7] [font-size:12px] [font-weight:650]"}
                 onClick={() => {
-                  if (!window.confirm(`确定将 ${participant.displayName} 移出此群吗？`)) return;
+                  if (!window.confirm(t("agentForm.removeConfirm", { name: participant.displayName }))) return;
                   void props.onRemoveParticipant!(participant.id).then(() => props.onRemoved?.());
                 }}
               >
-                移除
+                {t("common.remove")}
               </button>
             ) : null}
           </div>
@@ -423,7 +425,7 @@ export function AgentManageForm(props: {
             onClick={() => void save()}
           >
             <Check size={14} />
-            {saving ? "保存中..." : isAddMode ? "添加到群聊" : "保存"}
+            {saving ? t("common.saving") : isAddMode ? t("agentForm.addToRoom") : t("common.save")}
           </button>
         </div>
       ) : null}

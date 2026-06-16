@@ -1,5 +1,6 @@
 import { Info, RefreshCw, Terminal } from "lucide-react";
 import type { LocalAgentProviderStatus, ReasoningEffort, RuntimeProfile } from "@group-chat/shared";
+import { t, useTranslation } from "./i18n/index.js";
 
 export function defaultIdentityNameForRuntime(
   profile: RuntimeProfile | null,
@@ -29,16 +30,18 @@ export function preferredDefaultRuntimeProfile(profiles: RuntimeProfile[]) {
 
 export function runtimeOptionLabel(profile: RuntimeProfile, localAgentProviders: LocalAgentProviderStatus[]) {
   const status = localAgentStatus(profile, localAgentProviders);
-  if (!status) return `${profile.displayName} · Detecting`;
-  return `${profile.displayName} · ${status.available ? "Ready" : "Unready"}`;
+  if (!status) return t("runtime.optionDetecting", { name: profile.displayName });
+  return status.available
+    ? t("runtime.optionReady", { name: profile.displayName })
+    : t("runtime.optionUnready", { name: profile.displayName });
 }
 
 export function runtimeStatusSummary(profile: RuntimeProfile | null, localAgentProviders: LocalAgentProviderStatus[]) {
-  if (!profile) return "No runtime";
-  if (profile.kind !== "local-agent") return "Server runtime";
+  if (!profile) return t("runtime.noRuntime");
+  if (profile.kind !== "local-agent") return t("runtime.serverRuntime");
   const status = localAgentStatus(profile, localAgentProviders);
-  if (!status) return "Detecting";
-  return status.available ? "Ready" : "Needs setup";
+  if (!status) return t("runtime.detecting");
+  return status.available ? t("runtime.ready") : t("runtime.needsSetup");
 }
 
 export function localAgentStatus(profile: RuntimeProfile | null, localAgentProviders: LocalAgentProviderStatus[]) {
@@ -108,34 +111,39 @@ export function RuntimeStatusHint(props: {
   profile: RuntimeProfile | null;
   localAgentProviders: LocalAgentProviderStatus[];
 }) {
+  const { t } = useTranslation();
   if (!props.profile) {
-    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap] [color:var(--danger)]"}>No runtime selected.</span>;
+    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap] [color:var(--danger)]"}>{t("runtime.noRuntimeSelected")}</span>;
   }
   if (props.profile.kind !== "local-agent") {
-    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>Server-hosted runtime.</span>;
+    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>{t("runtime.serverHosted")}</span>;
   }
   const status = localAgentStatus(props.profile, props.localAgentProviders);
   if (!status) {
-    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>Detecting local provider...</span>;
+    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>{t("runtime.detectingProvider")}</span>;
   }
   if (!status.available) {
-    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap] [color:var(--danger)]"}>Needs setup · {status.reason ?? "Provider is unavailable."}</span>;
+    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap] [color:var(--danger)]"}>{t("runtime.needsSetup")} · {status.reason ?? t("runtime.providerUnavailable")}</span>;
   }
   const version = status.version && status.version !== "not-installed" ? status.version : null;
-  return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap] [color:#16a34a]"}>Ready{version ? ` · ${version}` : ""}</span>;
+  return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap] [color:#16a34a]"}>{t("runtime.ready")}{version ? ` · ${version}` : ""}</span>;
 }
 
 function providerStatusLine(profile: RuntimeProfile, status: LocalAgentProviderStatus | null) {
-  if (!status) return `${profile.provider} · Detecting`;
+  if (!status) return `${profile.provider} · ${t("runtime.detecting")}`;
   const modelCount = status.models.length;
-  const modelLabel = modelCount === 1 ? "1 model" : `${modelCount} models`;
-  return status.available ? `Ready · ${status.version} · ${modelLabel}` : `Needs setup · ${status.reason ?? "Unavailable"}`;
+  const modelLabel = modelCount === 1
+    ? t("runtime.modelCountOne")
+    : t("runtime.modelCountMany", { count: modelCount });
+  return status.available
+    ? `${t("runtime.ready")} · ${status.version} · ${modelLabel}`
+    : `${t("runtime.needsSetup")} · ${status.reason ?? t("runtime.unavailable")}`;
 }
 
 function providerDetailLine(status: LocalAgentProviderStatus | null) {
-  if (!status) return "Waiting for provider detection";
-  if (!status.available) return status.reason ?? "Provider unavailable";
-  return status.executablePath || status.configDir || "Available";
+  if (!status) return t("runtime.waitingDetection");
+  if (!status.available) return status.reason ?? t("runtime.unavailable");
+  return status.executablePath || status.configDir || t("runtime.available");
 }
 
 function uniqueBy<TItem, TKey>(items: TItem[], getKey: (item: TItem) => TKey) {
@@ -154,6 +162,7 @@ export function LocalAgentProvidersPanel(props: {
   refreshing: boolean;
   onRefresh: () => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const localProfiles = props.runtimeProfiles.filter((profile) => profile.kind === "local-agent");
   const providers = uniqueBy(
     localProfiles.map((profile) => ({
@@ -163,17 +172,17 @@ export function LocalAgentProvidersPanel(props: {
     (item) => item.profile.provider,
   );
   return (
-    <section className={"[margin:8px] [overflow:hidden] [border:0] [border-top:1px_solid_var(--border)] [border-radius:0] [background:transparent]"} aria-label="Local providers">
+    <section className={"[margin:8px] [overflow:hidden] [border:0] [border-top:1px_solid_var(--border)] [border-radius:0] [background:transparent]"} aria-label={t("runtime.localProviders")}>
       <div className={"[&_h3]:[margin:0] [&_h3]:[color:var(--text)] [&_h3]:[font-size:13px] [&_h3]:[font-weight:650] [&_span]:[display:block] [&_span]:[margin-top:3px] [display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [padding:12px] [border-bottom:0] [&_span]:[color:var(--muted)] [&_span]:[font-size:11px]"}>
         <div>
-          <h3>Local providers</h3>
-          <span>{providers.length} configured</span>
+          <h3>{t("runtime.localProviders")}</h3>
+          <span>{t("runtime.configuredCount", { count: providers.length })}</span>
         </div>
         <button
           type="button"
           className={"[display:inline-grid] [place-items:center] [border:0] [width:34px] [height:34px] [border-radius:12px] [color:var(--muted)] [background:#00000008] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [width:28px] [height:28px] [&:disabled]:[opacity:0.45]"}
-          title="Refresh local providers"
-          aria-label="Refresh local providers"
+          title={t("runtime.refreshProviders")}
+          aria-label={t("runtime.refreshProviders")}
           disabled={props.refreshing}
           onClick={() => void props.onRefresh()}
         >

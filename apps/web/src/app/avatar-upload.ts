@@ -1,12 +1,14 @@
+import { t } from "./i18n/index.js";
+
 const MAX_INPUT_BYTES = 5 * 1024 * 1024;
 const OUTPUT_SIZE = 128;
 
 export async function readAvatarUpload(file: File): Promise<string> {
   if (!file.type.startsWith("image/")) {
-    throw new Error("请选择图片文件");
+    throw new Error(t("upload.pickImage"));
   }
   if (file.size > MAX_INPUT_BYTES) {
-    throw new Error("图片不能超过 5MB");
+    throw new Error(t("upload.imageTooLarge5mb"));
   }
 
   const objectUrl = URL.createObjectURL(file);
@@ -16,7 +18,7 @@ export async function readAvatarUpload(file: File): Promise<string> {
     canvas.width = OUTPUT_SIZE;
     canvas.height = OUTPUT_SIZE;
     const context = canvas.getContext("2d");
-    if (!context) throw new Error("无法处理图片");
+    if (!context) throw new Error(t("upload.processFailed"));
 
     const side = Math.min(image.width, image.height);
     const sx = (image.width - side) / 2;
@@ -32,7 +34,7 @@ function loadImage(src: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("无法读取图片"));
+    image.onerror = () => reject(new Error(t("upload.readFailed")));
     image.src = src;
   });
 }
