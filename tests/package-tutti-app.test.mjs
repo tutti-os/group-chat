@@ -12,7 +12,6 @@ import {
   renderAgentsGuide,
   renderBootstrap,
   renderCommandsDoc,
-  renderIcon,
   validatePackageRoot,
 } from "../scripts/package-tutti-app.mjs";
 
@@ -29,7 +28,7 @@ test("createManifest returns the Tutti package manifest contract", () => {
     description: "Get work done with your agents in group chat.",
     icon: {
       type: "asset",
-      src: "icon.svg",
+      src: "icon.png",
     },
     runtime: {
       bootstrap: "bootstrap.sh",
@@ -114,7 +113,7 @@ test("validatePackageRoot accepts the required Tutti package files", async () =>
   await writeFile(path.join(root, "AGENTS.md"), renderAgentsGuide());
   await writeFile(path.join(root, "bootstrap.sh"), renderBootstrap({ version: "1.2.3" }));
   await chmod(path.join(root, "bootstrap.sh"), 0o755);
-  await writeFile(path.join(root, "icon.svg"), renderIcon());
+  await writeFile(path.join(root, "icon.png"), "png");
   await writeFile(path.join(root, "server", "server.js"), "console.log('ok');\n");
   await writeFile(path.join(root, "dist", "index.html"), "<!doctype html>\n");
 

@@ -42,7 +42,7 @@ export function createManifest({ version }) {
     description: "Get work done with your agents in group chat.",
     icon: {
       type: "asset",
-      src: "icon.svg",
+      src: "icon.png",
     },
     runtime: {
       bootstrap: "bootstrap.sh",
@@ -109,7 +109,7 @@ This package runs Group Chat as a Tutti workspace app.
 - \`bootstrap.sh\`: maps \`TUTTI_APP_*\` runtime variables into Group Chat env and starts the server.
 - \`server/server.js\`: bundled Fastify server.
 - \`dist/\`: built React/Vite frontend.
-- \`icon.svg\`: package icon.
+- \`icon.png\`: package icon.
 - \`tutti.cli.json\`: read-only Tutti CLI command manifest.
 - \`COMMANDS.md\`: command documentation.
 - \`/tutti/references/list\`: app reference list endpoint for public Group Chat artifacts.
@@ -368,18 +368,6 @@ tutti group-chat artifacts get --artifact-id art123 --json
 `;
 }
 
-export function renderIcon() {
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Group Chat">
-  <rect width="1024" height="1024" rx="220" fill="#101820"/>
-  <path d="M214 296c0-82 66-148 148-148h300c82 0 148 66 148 148v196c0 82-66 148-148 148H472L326 780c-25 24-66 6-66-29V630c-29-16-46-49-46-88V296Z" fill="#F4F1E8"/>
-  <circle cx="386" cy="396" r="46" fill="#2F7D62"/>
-  <circle cx="512" cy="396" r="46" fill="#D65245"/>
-  <circle cx="638" cy="396" r="46" fill="#E7B84A"/>
-  <path d="M366 528h292" stroke="#101820" stroke-width="48" stroke-linecap="round"/>
-</svg>
-`;
-}
-
 export async function readRootPackage() {
   const data = await readFile(path.join(rootDir, "package.json"), "utf8");
   return JSON.parse(data);
@@ -430,7 +418,7 @@ async function writePackageFiles(manifest) {
   await writeFile(path.join(packageRoot, "AGENTS.md"), renderAgentsGuide());
   await writeFile(path.join(packageRoot, "bootstrap.sh"), renderBootstrap({ version: manifest.version }));
   await chmod(path.join(packageRoot, "bootstrap.sh"), 0o755);
-  await writeFile(path.join(packageRoot, "icon.svg"), renderIcon());
+  await cp(path.join(rootDir, "icon.png"), path.join(packageRoot, "icon.png"));
   await cp(path.join(rootDir, "apps", "web", "dist"), path.join(packageRoot, "dist"), {
     recursive: true,
   });
@@ -484,7 +472,7 @@ export async function validatePackageRoot(root) {
     "COMMANDS.md",
     "AGENTS.md",
     "bootstrap.sh",
-    "icon.svg",
+    "icon.png",
     "server/server.js",
     "dist/index.html",
   ];
