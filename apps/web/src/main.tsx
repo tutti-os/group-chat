@@ -4,10 +4,18 @@ import { App } from "./app/App.js";
 import { I18nProvider } from "./app/i18n/index.js";
 import "./styles/index.css";
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <I18nProvider>
-      <App />
-    </I18nProvider>
-  </StrictMode>,
-);
+async function bootstrap() {
+  if (import.meta.env.DEV) {
+    await import("./dev/tuttiExternalMock.js");
+  }
+
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    </StrictMode>,
+  );
+}
+
+void bootstrap();

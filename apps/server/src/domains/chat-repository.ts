@@ -1027,6 +1027,38 @@ export class ChatRepository {
     return rows.map(rowToArtifact);
   }
 
+  listArtifactsForRun(runId: string): Artifact[] {
+    const rows = getDb()
+      .prepare(`SELECT * FROM artifacts WHERE source_run_id = ? ORDER BY created_at ASC`)
+      .all(runId) as any[];
+    return rows.map(rowToArtifact);
+  }
+
+  linkRunArtifactToMessage(artifactId: string, messageId: string): { artifact: Artifact; block: MessageBlock } | null {
+    const artifact = this.attachArtifactToMessage(artifactId, messageId);
+    if (!artifact) return null;
+    const blocks = this.listMessageBlocks(messageId);
+    const sortOrder = blocks.reduce((max, block) => Math.max(max, block.sortOrder), 0) + 1;
+    const block = this.createMessageBlock({
+      messageId,
+      type: artifact.mimeType.startsWith("image/") ? "image" : "file",
+      content: artifact.textPreview ?? "",
+      metadata: { artifactId: artifact.id },
+      sortOrder,
+    });
+    return { artifact, block };
+  }
+
+  linkPendingRunArtifacts(runId: string, messageId: string): Array<{ artifact: Artifact; block: MessageBlock }> {
+    const linked: Array<{ artifact: Artifact; block: MessageBlock }> = [];
+    for (const artifact of this.listArtifactsForRun(runId)) {
+      if (artifact.messageId) continue;
+      const result = this.linkRunArtifactToMessage(artifact.id, messageId);
+      if (result) linked.push(result);
+    }
+    return linked;
+  }
+
   private ensureRuntimeProfiles() {
     const now = new Date().toISOString();
     const profiles: RuntimeProfile[] = [

@@ -1,4 +1,13 @@
-import type { Artifact } from "@group-chat/shared";
+import type { Artifact, TuttiAtProviderId, TuttiReferenceInsert } from "@group-chat/shared";
+
+export interface TuttiAtQueryResult {
+  providerId: TuttiAtProviderId;
+  itemId: string;
+  label: string;
+  subtitle?: string;
+  thumbnailUrl?: string | null;
+  insert: TuttiReferenceInsert;
+}
 
 export interface TuttiWorkspaceAppOpenFileRequest {
   mode?: "auto" | "preview" | "reveal";
@@ -35,6 +44,13 @@ declare global {
       app?: {
         getContext(): Promise<unknown>;
         subscribe(listener: (context: unknown) => void): () => void;
+      };
+      at?: {
+        query(input: {
+          keyword: string;
+          maxResults?: number;
+          providers?: readonly TuttiAtProviderId[];
+        }): Promise<readonly TuttiAtQueryResult[]>;
       };
       files?: {
         open(input: TuttiWorkspaceAppOpenFileRequest): Promise<void>;
