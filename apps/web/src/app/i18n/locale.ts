@@ -43,14 +43,6 @@ export async function readAppContextLocaleAsync(): Promise<AppLocale | null> {
     }
   }
 
-  if (typeof appContext.getLocale === "function") {
-    try {
-      return normalizeLocale(await appContext.getLocale());
-    } catch {
-      return null;
-    }
-  }
-
   return normalizeLocale(normalizeAppContextLocaleValue(appContext));
 }
 
@@ -63,12 +55,6 @@ export function subscribeHostLocale(listener: (locale: AppLocale | null) => void
   if (typeof appContext.subscribe === "function") {
     return appContext.subscribe((context) => {
       listener(normalizeLocale(normalizeAppContextLocaleValue(context)));
-    });
-  }
-
-  if (typeof appContext.onLocaleChanged === "function") {
-    return appContext.onLocaleChanged((locale) => {
-      listener(normalizeLocale(locale));
     });
   }
 
