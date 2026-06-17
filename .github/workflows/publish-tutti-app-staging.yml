@@ -25,7 +25,7 @@ jobs:
       app_id: group-chat
       package_command: pnpm package:tutti
       package_dir: build/tutti-app/package
-      icon_path: build/tutti-app/package/icon.svg
+      icon_path: build/tutti-app/package/icon.png
       runner: macos-latest
       pnpm_version: 10.11.0
       aws_region: ${{ vars.TUTTI_APP_RELEASES_STAGING_AWS_REGION || vars.TUTTI_APP_RELEASES_AWS_REGION }}

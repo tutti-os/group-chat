@@ -18,7 +18,7 @@ test("production Tutti app workflow publishes Group Chat from a release bump", a
   assert.match(source, /app_id: group-chat/);
   assert.match(source, /package_command: pnpm package:tutti/);
   assert.match(source, /package_dir: build\/tutti-app\/package/);
-  assert.match(source, /icon_path: build\/tutti-app\/package\/icon\.svg/);
+  assert.match(source, /icon_path: build\/tutti-app\/package\/icon\.png/);
   assert.match(source, /release_tag_prefix: group-chat-v/);
   assert.match(source, /release_bump: \$\{\{ inputs\.release_bump \}\}/);
   assert.match(source, /create_release_tag: \$\{\{ !inputs\.catalog_only \}\}/);
@@ -35,7 +35,7 @@ test("staging Tutti app workflow publishes Group Chat manually", async () => {
   assert.match(source, /app_id: group-chat/);
   assert.match(source, /package_command: pnpm package:tutti/);
   assert.match(source, /package_dir: build\/tutti-app\/package/);
-  assert.match(source, /icon_path: build\/tutti-app\/package\/icon\.svg/);
+  assert.match(source, /icon_path: build\/tutti-app\/package\/icon\.png/);
   assert.match(source, /tutti-app-releases-staging/);
   assert.doesNotMatch(source, /release_version/);
 });

@@ -34,7 +34,7 @@ jobs:
       app_id: group-chat
       package_command: pnpm package:tutti
       package_dir: build/tutti-app/package
-      icon_path: build/tutti-app/package/icon.svg
+      icon_path: build/tutti-app/package/icon.png
       release_tag_prefix: group-chat-v
       release_bump: ${{ inputs.release_bump }}
       create_release_tag: ${{ !inputs.catalog_only }}

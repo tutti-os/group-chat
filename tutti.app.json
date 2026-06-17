@@ -6,7 +6,7 @@
   "description": "Get work done with your agents in group chat.",
   "icon": {
     "type": "asset",
-    "src": "icon.svg"
+    "src": "icon.png"
   },
   "runtime": {
     "bootstrap": "bootstrap.sh",
