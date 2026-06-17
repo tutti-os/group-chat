@@ -24,6 +24,17 @@ function normalizeAppContextLocaleValue(value: unknown): string | null {
 }
 
 export function resolveFallbackLocale(): AppLocale {
+  if (typeof navigator !== "undefined") {
+    const candidates = [...(navigator.languages ?? []), navigator.language];
+    for (const candidate of candidates) {
+      const locale = normalizeLocale(candidate);
+      if (locale) return locale;
+    }
+  }
+  if (typeof document !== "undefined") {
+    const locale = normalizeLocale(document.documentElement.lang);
+    if (locale) return locale;
+  }
   return "en";
 }
 

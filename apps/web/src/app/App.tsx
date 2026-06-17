@@ -115,7 +115,7 @@ export function App() {
   const [conversationSidebarWidth, setConversationSidebarWidth] = useState(DEFAULT_CONVERSATION_SIDEBAR_WIDTH);
   const [resizingConversationSidebar, setResizingConversationSidebar] = useState(false);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
-  const [focusMessageRequest, setFocusMessageRequest] = useState<{ messageId: string; seq: number } | null>(null);
+  const [focusMessageRequest, setFocusMessageRequest] = useState<{ messageId: string; artifactId?: string; seq: number } | null>(null);
   const [scrollToBottomRequest, setScrollToBottomRequest] = useState<{ seq: number } | null>(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const lastSeqRef = useRef(0);
@@ -1214,10 +1214,15 @@ export function App() {
                   conversationId={currentConversation.id}
                   artifacts={state.artifacts}
                   messages={currentMessages}
+                  messageBlocks={state.messageBlocks.filter((block) =>
+                    currentMessages.some((message) => message.id === block.messageId),
+                  )}
+                  agentRuns={state.agentRuns}
                   onClose={() => setFilesPanelOpen(false)}
-                  onFocusMessage={(messageId) => {
+                  onFocusMessage={({ messageId, artifactId }) => {
                     setFocusMessageRequest((current) => ({
                       messageId,
+                      artifactId,
                       seq: (current?.seq ?? 0) + 1,
                     }));
                     setFilesPanelOpen(false);
@@ -1365,11 +1370,13 @@ export function App() {
                         participants={currentParticipants}
                         identities={state.identities}
                         runtimeProfiles={state.runtimeProfiles}
+                        localAgentProviders={localAgentProviders}
                         allMessages={state.messages}
                         allParticipants={state.participants}
                         conversations={state.conversations}
                         rooms={state.rooms}
                         activeRuns={currentActiveRuns}
+                        agentRuns={state.agentRuns.filter((run) => run.conversationId === currentConversation.id)}
                         onSend={onSendMessage}
                         onUpdateMessage={onUpdateMessage}
                         onUpload={uploadArtifact}
@@ -1378,6 +1385,14 @@ export function App() {
                         composerRequest={composerRequest}
                         summaryTasks={backgroundTasks}
                         userDisplayName={userProfile.displayName}
+                        artifacts={state.artifacts.filter((artifact) => artifact.conversationId === currentConversation.id)}
+                        onFocusRoomFile={({ messageId, artifactId }) => {
+                          setFocusMessageRequest((current) => ({
+                            messageId,
+                            artifactId,
+                            seq: (current?.seq ?? 0) + 1,
+                          }));
+                        }}
                       />
                     </div>
                   </div>

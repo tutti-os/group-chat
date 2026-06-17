@@ -1,9 +1,9 @@
 import { getMessageCatalog } from "./messages.js";
-import type { AppLocale } from "./locale.js";
+import { resolveFallbackLocale, type AppLocale } from "./locale.js";
 
 export type TranslateParams = Record<string, string | number | undefined>;
 
-let currentLocale: AppLocale = "en";
+let currentLocale: AppLocale = typeof window !== "undefined" ? resolveFallbackLocale() : "en";
 const listeners = new Set<() => void>();
 
 export function subscribeI18n(listener: () => void) {

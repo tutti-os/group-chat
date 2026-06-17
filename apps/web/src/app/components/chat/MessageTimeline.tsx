@@ -20,6 +20,8 @@ import {
   extractMessageLinks,
   extractSummaryLinks,
   formatMessageLink,
+  formatMessageLinkLabel,
+  primaryMessageLinkId,
   removeEmbeddedLinks,
   readStashedSummaryLink,
   resolveSourceMessages,
@@ -74,7 +76,7 @@ export function MessageTimeline(props: {
   conversations: Conversation[];
   rooms: Room[];
   participantsCount: number;
-  focusMessageRequest: { messageId: string; seq: number } | null;
+  focusMessageRequest: { messageId: string; artifactId?: string; seq: number } | null;
   scrollToBottomRequest: { seq: number } | null;
   bulkToolbarHost?: HTMLElement | null;
   onSelectionModeChange?: (active: boolean) => void;
@@ -230,7 +232,9 @@ export function MessageTimeline(props: {
 
   useEffect(() => {
     if (!props.focusMessageRequest) return;
-    window.requestAnimationFrame(() => scrollToMessage(props.focusMessageRequest!.messageId));
+    window.requestAnimationFrame(() =>
+      scrollToMessage(props.focusMessageRequest!.messageId, props.focusMessageRequest!.artifactId),
+    );
   }, [props.focusMessageRequest]);
 
   useEffect(() => {
@@ -293,8 +297,9 @@ export function MessageTimeline(props: {
     showCopyTip(position);
   };
 
-  const copyMessageLink = async (messageId: string, position: CopyTipPosition) => {
-    await copyTextToClipboard(formatMessageLink(messageId));
+  const copyMessageLink = async (messageIds: string | string[], position: CopyTipPosition) => {
+    const ids = Array.isArray(messageIds) ? messageIds : [messageIds];
+    await copyTextToClipboard(formatMessageLink(...ids));
     showCopyTip(position);
   };
 
@@ -351,20 +356,29 @@ export function MessageTimeline(props: {
     scrollToBottomInstant();
   };
 
-  const scrollToMessage = (messageId: string) => {
+  const scrollToMessage = (messageId: string, artifactId?: string) => {
     const container = scrollRef.current;
     const target = container?.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
     if (!(container instanceof HTMLElement) || !(target instanceof HTMLElement)) return;
+    const scrollTarget = artifactId
+      ? (target.querySelector(`[data-artifact-id="${CSS.escape(artifactId)}"]`) as HTMLElement | null) ?? target
+      : target;
     const containerRect = container.getBoundingClientRect();
-    const targetRect = target.getBoundingClientRect();
+    const targetRect = scrollTarget.getBoundingClientRect();
     const nextScrollTop =
       container.scrollTop +
       (targetRect.top - containerRect.top) -
       (container.clientHeight - targetRect.height) / 2;
     container.scrollTop = Math.max(0, nextScrollTop);
-    target.dataset.flash = "true";
+    scrollTarget.dataset.flash = "true";
+    if (scrollTarget !== target) {
+      target.dataset.flash = "true";
+      window.setTimeout(() => {
+        delete target.dataset.flash;
+      }, 1400);
+    }
     window.setTimeout(() => {
-      delete target.dataset.flash;
+      delete scrollTarget.dataset.flash;
     }, 1400);
   };
 
@@ -394,11 +408,7 @@ export function MessageTimeline(props: {
   return (
     <section
       ref={scrollRef}
-      className={`[position:relative] [min-height:0] [overflow-y:auto] [background:var(--panel)] ${
-        selectionMode
-          ? "[padding:26px_18px_18px_4px] max-[1080px]:[padding-inline:4px_18px] max-[760px]:[padding:18px_18px_18px_4px]"
-          : "[padding:26px_18px_18px_14px] max-[1080px]:[padding-inline:14px_18px] max-[760px]:[padding:18px_18px_18px_14px]"
-      }`}
+      className={`[position:relative] [min-height:0] [overflow-y:auto] [background:var(--panel)] [padding:26px_18px_18px_14px] max-[1080px]:[padding-inline:14px_18px] max-[760px]:[padding:18px_18px_18px_14px]`}
       onScroll={updateJumpToBottomVisibility}
     >
       {visibleMessages.length === 0 ? (
@@ -478,6 +488,12 @@ export function MessageTimeline(props: {
               count={selectedMessages.length}
               onCopy={(position) => {
                 void copyMessages(selectedMessages, position);
+                exitSelectionMode();
+              }}
+              onCopyMessageLink={(position) => {
+                const messageIds = selectedMessages.map((message) => message.id);
+                if (!messageIds.length) return;
+                void copyMessageLink(messageIds, position);
                 exitSelectionMode();
               }}
               onQuote={() => {
@@ -1016,6 +1032,7 @@ function MessageRow(props: {
                 allMessages={props.allMessages}
                 allParticipants={props.allParticipants}
                 identities={props.identities}
+                userProfile={props.userProfile}
                 conversations={props.conversations}
                 rooms={props.rooms}
                 onOpenArtifact={props.onOpenArtifact}
@@ -1051,6 +1068,7 @@ function MessageRow(props: {
                 allMessages={props.allMessages}
                 allParticipants={props.allParticipants}
                 identities={props.identities}
+                userProfile={props.userProfile}
                 conversations={props.conversations}
                 rooms={props.rooms}
                 onOpenArtifact={props.onOpenArtifact}
@@ -1076,12 +1094,12 @@ function MessageRow(props: {
       data-failed={props.message.status === "error" || undefined}
       data-selected={props.selected || undefined}
       data-group-continuation={!props.showHeader || undefined}
-      className={`group/message [position:relative] [display:grid] [grid-template-columns:34px_minmax(0,_1fr)] [gap:8px] [align-items:start] [border-radius:18px] [transition:background-color_0.2s_ease,_box-shadow_0.2s_ease] ${props.selectionMode ? "[margin-left:10px]" : ""} ${props.isLastInGroup ? "[margin-bottom:18px]" : "[margin-bottom:4px]"} [&[data-selected=true]]:[background:#eaf2ff66] [&[data-flash=true]]:[background:#fef3c7] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-whisper=true]:not([data-failed=true])_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#d0d3d6] [&[data-whisper=true][data-failed=true]_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#f59e0b] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[border-radius:8px] [&[data-whisper=true][data-role=assistant]_[data-slot=message-block]:not([data-link-only])]:[background:#f8f9fb] [&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[background:#f2f3f5] [&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[border-radius:8px] [&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[border-color:transparent] [&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[background:#d6e9ff] [&[data-role=user][data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[background:#eef6ff]`}
+      className={`group/message [position:relative] [display:grid] ${props.selectionMode ? "[grid-template-columns:22px_34px_minmax(0,_1fr)]" : "[grid-template-columns:34px_minmax(0,_1fr)]"} [gap:8px] [align-items:start] [border-radius:18px] [transition:background-color_0.2s_ease,_box-shadow_0.2s_ease] ${props.isLastInGroup ? "[margin-bottom:18px]" : "[margin-bottom:4px]"} [&[data-selected=true]]:[background:#eaf2ff66] [&[data-flash=true]]:[background:#fef3c7] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-whisper=true]:not([data-failed=true])_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#d0d3d6] [&[data-whisper=true][data-failed=true]_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#f59e0b] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[border-radius:8px] [&[data-whisper=true][data-role=assistant]_[data-slot=message-block]:not([data-link-only])]:[background:#f8f9fb] [&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[background:#f2f3f5] [&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[border-radius:8px] [&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[border-color:transparent] [&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[background:#d6e9ff] [&[data-role=user][data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[background:#eef6ff]`}
     >
       {props.selectionMode ? (
       <div
         data-slot="message-select"
-        className={"[position:absolute] [left:-10px] [top:0] [z-index:1] [display:flex] [height:34px] [align-items:center] [justify-content:flex-end]"}
+        className={"[display:flex] [height:34px] [align-items:center] [justify-content:center]"}
       >
         {!isRemoved ? (
           <label className={"[display:grid] [width:16px] [height:16px] [place-items:center] [cursor:pointer]"}>
@@ -1263,6 +1281,7 @@ function MessageMoreMenu(props: {
 function BulkMessageToolbar(props: {
   count: number;
   onCopy: (position: CopyTipPosition) => void;
+  onCopyMessageLink: (position: CopyTipPosition) => void;
   onQuote: () => void;
   onSummarize: () => void;
   onDelete: () => void;
@@ -1276,6 +1295,7 @@ function BulkMessageToolbar(props: {
     >
       <span className={"[flex-shrink:0] [padding:0_4px] [color:var(--muted)] [font-size:13px] [font-weight:700]"}>{t("messageActions.selectedCount", { count: props.count })}</span>
       <ToolbarButton label={t("common.copy")} onClick={(event) => props.onCopy({ x: event.clientX, y: event.clientY })} />
+      <ToolbarButton label={t("messageActions.copyLink")} onClick={(event) => props.onCopyMessageLink({ x: event.clientX, y: event.clientY })} />
       <ToolbarButton label={t("messageActions.quote")} onClick={props.onQuote} />
       <ToolbarButton label={t("messageActions.summarize")} onClick={props.onSummarize} />
       <ToolbarButton label={t("common.delete")} danger onClick={props.onDelete} />
@@ -1853,6 +1873,7 @@ function MessageBlockRenderer(props: {
   allMessages?: Message[];
   allParticipants?: Participant[];
   identities?: Identity[];
+  userProfile?: Pick<LocalUserProfile, "displayName">;
   conversations?: Conversation[];
   rooms?: Room[];
   summaryTasks?: BackgroundTask[];
@@ -1944,15 +1965,17 @@ function MessageBlockRenderer(props: {
       ) : quotedContent ? (
         <ReplyQuotePreview quotes={quotedContent.quotes} />
       ) : null}
-      {messageLinks.map((messageId) => (
+      {messageLinks.map((messageIdSegment) => (
         <MessageLinkCard
-          key={`message-${messageId}`}
-          messageId={messageId}
+          key={`message-${messageIdSegment}`}
+          messageIdSegment={messageIdSegment}
           messages={props.allMessages ?? []}
           participants={props.allParticipants ?? []}
+          identities={props.identities ?? []}
+          userDisplayName={props.userProfile?.displayName}
           conversations={props.conversations ?? []}
           rooms={props.rooms ?? []}
-          onOpen={() => props.onOpenMessageLink?.(messageId)}
+          onOpen={() => props.onOpenMessageLink?.(primaryMessageLinkId(messageIdSegment))}
         />
       ))}
       {summaryLinks.map((taskId) => (
@@ -2048,19 +2071,29 @@ function SummaryLinkCard(props: {
 }
 
 function MessageLinkCard(props: {
-  messageId: string;
+  messageIdSegment: string;
   messages: Message[];
   participants: Participant[];
+  identities: Identity[];
+  userDisplayName?: string | null;
   conversations: Conversation[];
   rooms: Room[];
   onOpen: () => void;
 }) {
-  const message = props.messages.find((item) => item.id === props.messageId) ?? null;
+  const messageId = primaryMessageLinkId(props.messageIdSegment);
+  const message = props.messages.find((item) => item.id === messageId) ?? null;
   const participant = message?.senderParticipantId
     ? props.participants.find((item) => item.id === message.senderParticipantId) ?? null
     : null;
   const conversation = message ? props.conversations.find((item) => item.id === message.conversationId) ?? null : null;
   const room = conversation ? props.rooms.find((item) => item.id === conversation.roomId) ?? null : null;
+  const linkLabel = formatMessageLinkLabel(
+    props.messageIdSegment,
+    props.messages,
+    props.participants,
+    props.identities,
+    props.userDisplayName,
+  );
   return (
     <button
       type="button"
@@ -2069,7 +2102,7 @@ function MessageLinkCard(props: {
     >
       <span className={"[display:flex] [align-items:center] [gap:5px] [color:#2563eb] [font-size:12px] [font-weight:700] [line-height:1.3]"}>
         <Reply size={13} />
-        <span>{message ? t("composer.messageLinkFrom", { sender: messageSenderLabel(message, props.participants) }) : t("composer.messageLink")}</span>
+        <span>{linkLabel}</span>
       </span>
       <span className={"[display:block] [overflow:hidden] [color:var(--text)] [font-size:13px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>
         {message ? compactInline(message.content || attachmentLabel()) : t("messageActions.messageNotInSnapshot")}
@@ -2168,7 +2201,8 @@ function ArtifactBlock(props: { artifact: Artifact; onOpen: () => void }) {
       <button
         type="button"
         data-slot="artifact-block"
-        className={"[display:block] [width:min(280px,_100%)] [height:180px] [margin-top:8px] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:16px] [padding:0] [background:var(--panel)] [cursor:pointer]"}
+        data-artifact-id={props.artifact.id}
+        className={"[display:block] [width:min(280px,_100%)] [height:180px] [margin-top:8px] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:16px] [padding:0] [background:var(--panel)] [cursor:pointer] [transition:box-shadow_0.2s_ease] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15]"}
         onClick={props.onOpen}
         aria-label={props.artifact.filename}
       >
@@ -2185,7 +2219,8 @@ function ArtifactBlock(props: { artifact: Artifact; onOpen: () => void }) {
     <button
       type="button"
       data-slot="artifact-block"
-      className={"[display:grid] [width:min(520px,_100%)] [min-height:88px] [grid-template-columns:56px_minmax(0,_1fr)] [align-items:center] [gap:16px] [margin-top:8px] [border:1px_solid_var(--border)] [border-radius:12px] [padding:16px_20px] [color:var(--text)] [background:#ffffff] [cursor:pointer] [box-shadow:0_1px_2px_rgb(0_0_0_/_3%)] [transition:border-color_0.12s_ease,_background-color_0.12s_ease,_box-shadow_0.12s_ease] hover:[border-color:#d4d4d8] hover:[background:#fbfbfc] hover:[box-shadow:0_4px_14px_rgb(0_0_0_/_6%)] focus-visible:[outline:none] focus-visible:[border-color:var(--border-strong)]"}
+      data-artifact-id={props.artifact.id}
+      className={"[display:grid] [width:min(520px,_100%)] [min-height:88px] [grid-template-columns:56px_minmax(0,_1fr)] [align-items:center] [gap:16px] [margin-top:8px] [border:1px_solid_var(--border)] [border-radius:12px] [padding:16px_20px] [color:var(--text)] [background:#ffffff] [cursor:pointer] [box-shadow:0_1px_2px_rgb(0_0_0_/_3%)] [transition:border-color_0.12s_ease,_background-color_0.12s_ease,_box-shadow_0.12s_ease] hover:[border-color:#d4d4d8] hover:[background:#fbfbfc] hover:[box-shadow:0_4px_14px_rgb(0_0_0_/_6%)] focus-visible:[outline:none] focus-visible:[border-color:var(--border-strong)] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-flash=true]]:[border-color:#facc15]"}
       onClick={props.onOpen}
       title={canPreviewInApp(props.artifact.mimeType, props.artifact.filename) ? t("messageActions.previewInApp") : t("messageActions.openWithSystemApp")}
     >

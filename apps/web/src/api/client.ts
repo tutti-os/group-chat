@@ -1,5 +1,7 @@
 import type {
   AddParticipantRequest,
+  AppReferenceListRequest,
+  AppReferenceListResponse,
   Artifact,
   ChatSnapshot,
   CollaborationRuleEvent,
@@ -186,6 +188,13 @@ export async function uploadArtifact(
 export async function openArtifactInSystem(artifactId: string) {
   return fetchJson<{ ok: true }>(`/api/artifacts/${artifactId}/open`, {
     method: "POST",
+  });
+}
+
+export async function listAppReferences(body: AppReferenceListRequest): Promise<AppReferenceListResponse> {
+  return fetchJson<AppReferenceListResponse>("/tutti/references/list", {
+    method: "POST",
+    body: JSON.stringify(body),
   });
 }
 

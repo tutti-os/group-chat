@@ -7,12 +7,14 @@ import type {
   AppReferenceListRequest,
   AppReferenceListResponse,
   AppReferenceListTimeRange,
+  AgentRun,
   Artifact,
   ChatSnapshot,
   Conversation,
   Message,
   Room,
 } from "@group-chat/shared";
+import { resolveArtifactLinkedMessageId, isVisibleGroupChatFile } from "@group-chat/shared";
 import { appPaths } from "../local/paths.js";
 
 interface ReferenceListInput {
@@ -75,15 +77,18 @@ export function listAppReferences(
   const conversationsById = new Map(snapshot.conversations.map((conversation) => [conversation.id, conversation]));
   const roomsById = new Map(snapshot.rooms.map((room) => [room.id, room]));
   const entries = snapshot.artifacts
-    .map((artifact) =>
-      artifactToFileReferenceEntry(
+    .map((artifact) => {
+      if (!isVisibleGroupChatFile(artifact, snapshot.messages, snapshot.messageBlocks, snapshot.agentRuns)) return null;
+      const linkedMessageId = resolveArtifactLinkedMessageId(artifact, snapshot.agentRuns, snapshot.messages);
+      return artifactToFileReferenceEntry(
         artifact,
-        messagesById.get(artifact.messageId ?? ""),
+        linkedMessageId ? messagesById.get(linkedMessageId) : undefined,
         runsById,
         conversationsById.get(artifact.conversationId),
         roomsById.get(artifact.roomId),
-      )
-    )
+        linkedMessageId,
+      );
+    })
     .filter((entry): entry is AppFileReferenceEntry => entry !== null);
 
   if (!input.parentGroupId) {
@@ -97,7 +102,7 @@ export function listAppReferences(
     .filter((entry) => entry.artifact.roomId === room.id)
     .filter((entry) => matchesTimeRange(entry.reference.mtimeMs, input.timeRange))
     .filter((entry) => matchesChatFileFilter(entry.artifact, entry.message, input.filterText))
-    .sort((left, right) => right.artifact.createdAt.localeCompare(left.artifact.createdAt));
+    .sort((left, right) => compareFileReferenceEntries(left, right, input.filterText));
 
   const page = matchingEntries.slice(input.cursor, input.cursor + input.limit);
   const nextOffset = input.cursor + page.length;
@@ -267,9 +272,10 @@ function normalizeTimeRange(value: AppReferenceListTimeRange | null | undefined)
 function artifactToFileReferenceEntry(
   artifact: Artifact,
   message: Message | undefined,
-  runsById: Map<string, { visibility: "public" | "whisper" }>,
+  runsById: Map<string, Pick<AgentRun, "visibility">>,
   conversation: Conversation | undefined,
   room: Room | undefined,
+  linkedMessageId: string | null,
 ): AppFileReferenceEntry | null {
   if (!isPublicArtifact(artifact, message, runsById)) return null;
   if (!existsSync(artifact.localPath)) return null;
@@ -299,6 +305,9 @@ function artifactToFileReferenceEntry(
       sizeBytes: artifact.sizeBytes,
       mtimeMs: Math.trunc(stat.mtimeMs),
       mimeType: truncateRunes(artifact.mimeType, MIME_TYPE_MAX_RUNES),
+      artifactId: artifact.id,
+      ...(linkedMessageId ? { messageId: linkedMessageId } : {}),
+      previewUrl: artifact.publicUrl,
     },
   };
 }
@@ -344,6 +353,57 @@ function matchesTimeRange(mtimeMs: number | undefined, timeRange: ReferenceListT
   if (timeRange.fromMs !== undefined && mtimeMs < timeRange.fromMs) return false;
   if (timeRange.toMs !== undefined && mtimeMs > timeRange.toMs) return false;
   return true;
+}
+
+function compareFileReferenceEntries(left: AppFileReferenceEntry, right: AppFileReferenceEntry, filterText: string) {
+  if (filterText) {
+    const scoreDelta = fileReferenceMatchScore(right, filterText) - fileReferenceMatchScore(left, filterText);
+    if (scoreDelta !== 0) return scoreDelta;
+  }
+  return compareFileReferenceEntriesDesc(left, right);
+}
+
+function fileReferenceMatchScore(entry: AppFileReferenceEntry, filterText: string) {
+  const query = filterText.toLowerCase();
+  const filename = entry.artifact.filename.toLowerCase();
+  if (filename === query) return 1000;
+  if (filename.startsWith(query)) return 900;
+  if (filename.includes(query)) return 800;
+
+  const displayName = (entry.reference.displayName ?? "").toLowerCase();
+  if (displayName.includes(query)) return 750;
+
+  const path = entry.reference.location.path.toLowerCase();
+  if (path.includes(query)) return 700;
+
+  const description = (entry.reference.description ?? "").toLowerCase();
+  if (description.includes(query)) return 500;
+
+  const textPreview = (entry.artifact.textPreview ?? "").toLowerCase();
+  if (textPreview.includes(query)) return 400;
+
+  const sender = entry.message ? formatMessageSender(entry.message).toLowerCase() : "";
+  if (sender.includes(query)) return 300;
+
+  const mimeType = entry.artifact.mimeType.toLowerCase();
+  if (mimeType.includes(query)) return 100;
+
+  const kind = entry.artifact.kind.toLowerCase();
+  if (kind.includes(query)) return 50;
+
+  return 0;
+}
+
+function compareFileReferenceEntriesDesc(left: AppFileReferenceEntry, right: AppFileReferenceEntry) {
+  return fileReferenceSortMs(right) - fileReferenceSortMs(left);
+}
+
+function fileReferenceSortMs(entry: AppFileReferenceEntry) {
+  const messageMs = entry.message ? parseTimeMs(entry.message.createdAt) : null;
+  if (messageMs !== null) return messageMs;
+  const artifactMs = parseTimeMs(entry.artifact.createdAt);
+  if (artifactMs !== null) return artifactMs;
+  return entry.reference.mtimeMs ?? 0;
 }
 
 function compareNullableTimeDesc(left: number | null, right: number | null) {

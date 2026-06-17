@@ -102,7 +102,7 @@ export class AgentToolGateway {
   ) {
     const context = this.getContext(participantId, credential);
     const sourceRunId = input.runId ?? context.toolRun.runId;
-    const artifact = this.repo.createArtifact(context.conversation.id, input, {
+    let artifact = this.repo.createArtifact(context.conversation.id, input, {
       kind: sourceRunId ? "run-output" : "generated",
       messageId: input.messageId ?? null,
       sourceRunId,
@@ -114,6 +114,31 @@ export class AgentToolGateway {
       runId: sourceRunId,
       payload: { artifact },
     });
+
+    if (sourceRunId && !input.messageId) {
+      const run = context.activeRuns.find((item) => item.id === sourceRunId);
+      if (run?.assistantMessageId) {
+        const linked = this.repo.linkRunArtifactToMessage(artifact.id, run.assistantMessageId);
+        if (linked) {
+          artifact = linked.artifact;
+          this.events.emit({
+            type: "artifact.created",
+            roomId: context.room.id,
+            conversationId: context.conversation.id,
+            runId: sourceRunId,
+            payload: { artifact: linked.artifact },
+          });
+          this.events.emit({
+            type: "message_block.created",
+            roomId: context.room.id,
+            conversationId: context.conversation.id,
+            runId: sourceRunId,
+            payload: { block: linked.block },
+          });
+        }
+      }
+    }
+
     return { artifact };
   }
 }

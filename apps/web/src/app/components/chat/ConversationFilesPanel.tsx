@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { Download, Eye, FileText, Search, Video, X } from "lucide-react";
-import type { Artifact, Message } from "@group-chat/shared";
+import type { Artifact, AgentRun, Message, MessageBlock } from "@group-chat/shared";
+import { resolveArtifactLinkedMessageId } from "@group-chat/shared";
 import {
   downloadArtifactFile,
+  filterGroupChatFiles,
   getArtifactCategory,
   matchesArtifactCategory,
   openArtifactPreview,
@@ -29,8 +31,10 @@ export function ConversationFilesPanel(props: {
   conversationId: string;
   artifacts: Artifact[];
   messages: Message[];
+  messageBlocks: MessageBlock[];
+  agentRuns: AgentRun[];
   onClose: () => void;
-  onFocusMessage: (messageId: string) => void;
+  onFocusMessage: (input: { messageId: string; artifactId: string }) => void;
 }) {
   useTranslation();
   const [query, setQuery] = useState("");
@@ -77,23 +81,26 @@ export function ConversationFilesPanel(props: {
 
   const normalizedQuery = query.trim().toLowerCase();
 
+  const groupChatArtifacts = useMemo(
+    () => filterGroupChatFiles(props.artifacts, props.messages, props.messageBlocks, props.agentRuns, props.conversationId),
+    [props.agentRuns, props.artifacts, props.conversationId, props.messageBlocks, props.messages],
+  );
+
   const filteredArtifacts = useMemo(() => {
-    return props.artifacts
-      .filter((artifact) => artifact.conversationId === props.conversationId)
+    return groupChatArtifacts
       .filter((artifact) => matchesArtifactCategory(artifact, category))
       .filter((artifact) => {
         if (!normalizedQuery) return true;
-        const message = artifact.messageId
-          ? props.messages.find((item) => item.id === artifact.messageId) ?? null
-          : null;
+        const messageId = resolveArtifactLinkedMessageId(artifact, props.agentRuns, props.messages);
+        const message = messageId ? props.messages.find((item) => item.id === messageId) ?? null : null;
         const sender = message ? formatMessageSender(message) : "";
         return [artifact.filename, artifact.mimeType, artifact.textPreview, sender]
           .filter(Boolean)
           .some((value) => value!.toLowerCase().includes(normalizedQuery));
       })
       .slice()
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-  }, [category, normalizedQuery, props.artifacts, props.conversationId, props.messages]);
+      .sort((left, right) => artifactChatSortMs(right, props.messages, props.agentRuns) - artifactChatSortMs(left, props.messages, props.agentRuns));
+  }, [category, groupChatArtifacts, normalizedQuery, props.agentRuns, props.messages]);
 
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
@@ -108,11 +115,12 @@ export function ConversationFilesPanel(props: {
   };
 
   const openSourceMessage = (artifact: Artifact) => {
-    if (!artifact.messageId) {
+    const messageId = resolveArtifactLinkedMessageId(artifact, props.agentRuns, props.messages);
+    if (!messageId) {
       window.alert(t("files.noLinkedMessage"));
       return;
     }
-    props.onFocusMessage(artifact.messageId);
+    props.onFocusMessage({ messageId, artifactId: artifact.id });
     props.onClose();
   };
 
@@ -205,9 +213,11 @@ export function ConversationFilesPanel(props: {
             </div>
           ) : null}
           {visibleArtifacts.map((artifact) => {
-            const message = artifact.messageId
-              ? props.messages.find((item) => item.id === artifact.messageId) ?? null
+            const linkedMessageId = resolveArtifactLinkedMessageId(artifact, props.agentRuns, props.messages);
+            const message = linkedMessageId
+              ? props.messages.find((item) => item.id === linkedMessageId) ?? null
               : null;
+            const canJumpToMessage = Boolean(linkedMessageId);
             const artifactCategory = getArtifactCategory(artifact);
             return (
               <article
@@ -217,7 +227,7 @@ export function ConversationFilesPanel(props: {
                 <button
                   type="button"
                   className={"[display:grid] [grid-column:1_/_3] [grid-template-columns:40px_minmax(0,_1fr)] [align-items:center] [gap:8px] [border:0] [padding:0] [text-align:left] [color:inherit] [background:transparent] [&:focus-visible]:[outline:none]"}
-                  title={artifact.messageId ? t("files.jumpToMessage") : t("files.noLinkedMessageShort")}
+                  title={canJumpToMessage ? t("files.jumpToMessage") : t("files.noLinkedMessageShort")}
                   onClick={() => openSourceMessage(artifact)}
                 >
                   <span className={"[display:grid] [width:40px] [height:40px] [place-items:center] [overflow:hidden] [border-radius:8px] [background:#f3f4f6]"}>
@@ -286,4 +296,13 @@ export function ConversationFilesPanel(props: {
 
 function formatMessageSender(message: Message) {
   return messageSenderLabel(message);
+}
+
+function artifactChatSortMs(artifact: Artifact, messages: Message[], agentRuns: AgentRun[]) {
+  const messageId = resolveArtifactLinkedMessageId(artifact, agentRuns, messages);
+  const message = messageId ? messages.find((item) => item.id === messageId) : undefined;
+  const messageMs = message?.createdAt ? Date.parse(message.createdAt) : Number.NaN;
+  if (Number.isFinite(messageMs)) return messageMs;
+  const artifactMs = Date.parse(artifact.createdAt);
+  return Number.isFinite(artifactMs) ? artifactMs : 0;
 }

@@ -1,4 +1,5 @@
-import type { Artifact } from "@group-chat/shared";
+import type { AgentRun, Artifact, Message, MessageBlock } from "@group-chat/shared";
+import { isVisibleGroupChatFile } from "@group-chat/shared";
 import { openArtifactInSystem } from "../api/client.js";
 import { isTextAttachment, type AttachmentPreview } from "./components/chat/AttachmentPreviewDialog.js";
 import { tryOpenArtifactInTutti } from "./tutti-bridge.js";
@@ -19,6 +20,20 @@ export function getArtifactCategory(artifact: Artifact): ArtifactCategory {
 export function matchesArtifactCategory(artifact: Artifact, category: ArtifactFilterCategory) {
   if (category === "all") return true;
   return getArtifactCategory(artifact) === category;
+}
+
+export function filterGroupChatFiles(
+  artifacts: Artifact[],
+  messages: Message[],
+  blocks: MessageBlock[],
+  agentRuns: AgentRun[],
+  conversationId?: string,
+) {
+  return artifacts.filter(
+    (artifact) =>
+      (!conversationId || artifact.conversationId === conversationId)
+      && isVisibleGroupChatFile(artifact, messages, blocks, agentRuns),
+  );
 }
 
 export function resolveArtifactPublicUrl(publicUrl: string) {

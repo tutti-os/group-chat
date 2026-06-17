@@ -226,6 +226,51 @@ export interface Artifact {
   createdAt: string;
 }
 
+export function isGroupChatFile(
+  artifact: Pick<Artifact, "id" | "messageId">,
+  messages: Array<Pick<Message, "id" | "status" | "visibility">>,
+  blocks: Array<Pick<MessageBlock, "messageId" | "type" | "metadata">>,
+): boolean {
+  if (!artifact.messageId) return false;
+  const message = messages.find((item) => item.id === artifact.messageId);
+  if (!message) return false;
+  if (message.status === "deleted" || message.status === "recalled") return false;
+  if (message.visibility === "whisper") return false;
+  return blocks.some(
+    (block) =>
+      block.messageId === artifact.messageId
+      && (block.type === "image" || block.type === "file")
+      && block.metadata?.artifactId === artifact.id,
+  );
+}
+
+export function isAgentGroupChatFile(
+  artifact: Pick<Artifact, "messageId" | "sourceRunId" | "kind">,
+  messages: Array<Pick<Message, "id" | "status" | "visibility" | "role">>,
+  agentRuns: Array<Pick<AgentRun, "id" | "visibility">>,
+): boolean {
+  if (artifact.kind !== "run-output" && artifact.kind !== "generated") return false;
+  if (artifact.sourceRunId) {
+    const run = agentRuns.find((item) => item.id === artifact.sourceRunId);
+    if (run?.visibility === "public") return true;
+  }
+  if (!artifact.messageId) return false;
+  const message = messages.find((item) => item.id === artifact.messageId);
+  if (!message) return false;
+  if (message.role !== "assistant") return false;
+  if (message.status === "deleted" || message.status === "recalled") return false;
+  return message.visibility === "public";
+}
+
+export function isVisibleGroupChatFile(
+  artifact: Pick<Artifact, "id" | "messageId" | "sourceRunId" | "kind" | "conversationId">,
+  messages: Array<Pick<Message, "id" | "status" | "visibility" | "role">>,
+  blocks: Array<Pick<MessageBlock, "messageId" | "type" | "metadata">>,
+  agentRuns: Array<Pick<AgentRun, "id" | "visibility">>,
+): boolean {
+  return isGroupChatFile(artifact, messages, blocks) || isAgentGroupChatFile(artifact, messages, agentRuns);
+}
+
 export interface AgentRun {
   id: Id;
   conversationId: Id;
@@ -245,6 +290,21 @@ export interface AgentRun {
   error: string | null;
 }
 
+export function resolveArtifactLinkedMessageId(
+  artifact: Pick<Artifact, "messageId" | "sourceRunId">,
+  runs: Array<Pick<AgentRun, "id" | "assistantMessageId" | "triggerMessageId">>,
+  messages: Array<Pick<Message, "id" | "runId" | "role">>,
+): string | null {
+  if (artifact.messageId) return artifact.messageId;
+  if (!artifact.sourceRunId) return null;
+  const run = runs.find((item) => item.id === artifact.sourceRunId);
+  if (!run) return null;
+  if (run.assistantMessageId) return run.assistantMessageId;
+  const assistantMessage = messages.find((message) => message.runId === run.id && message.role === "assistant");
+  if (assistantMessage) return assistantMessage.id;
+  return run.triggerMessageId ?? null;
+}
+
 export interface AgentRunEvent {
   id: Id;
   runId: Id;
@@ -262,10 +322,41 @@ export interface TokenUsage {
   outputTokens: number;
 }
 
+export const TUTTI_AT_PROVIDER_IDS = [
+  "file",
+  "workspace-issue",
+  "workspace-app",
+  "agent-session",
+  "agent-generated-file",
+] as const;
+
+export type TuttiAtProviderId = (typeof TUTTI_AT_PROVIDER_IDS)[number];
+
+export type TuttiReferenceInsert =
+  | {
+      kind: "mention";
+      entityId: string;
+      label: string;
+      scope?: Readonly<Record<string, string>>;
+    }
+  | {
+      kind: "markdown-link";
+      label: string;
+      href: string;
+    }
+  | {
+      kind: "text";
+      text: string;
+    };
+
 export interface MentionTarget {
   participantId: Id;
   displayNameSnapshot: string;
-  mentionType: "participant" | "all";
+  mentionType: "participant" | "all" | "reference";
+  referenceProviderId?: TuttiAtProviderId;
+  referenceEntityId?: string;
+  referenceScope?: Readonly<Record<string, string>>;
+  referenceInsert?: TuttiReferenceInsert;
 }
 
 export type AppReferenceKind = "file";
@@ -288,6 +379,9 @@ export interface AppFileReference {
   mtimeMs?: number;
   mimeType?: string;
   score?: number;
+  artifactId?: string;
+  messageId?: string;
+  previewUrl?: string;
 }
 
 export interface AppReferenceListTimeRange {

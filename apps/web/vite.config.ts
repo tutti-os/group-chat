@@ -12,6 +12,9 @@ export default defineConfig({
         target: apiTarget,
         ws: true,
       },
+      "/tutti": {
+        target: apiTarget,
+      },
       "/local-assets": {
         target: apiTarget,
       },

@@ -555,11 +555,29 @@ export class ChatService {
     const byId = new Map(participants.map((participant) => [participant.id, participant]));
     return mentions
       .map((mention) => {
+        if (mention.mentionType === "reference") {
+          return {
+            participantId: mention.participantId,
+            displayNameSnapshot: mention.displayNameSnapshot,
+            mentionType: mention.mentionType,
+            referenceProviderId: mention.referenceProviderId,
+            referenceEntityId: mention.referenceEntityId,
+            referenceScope: mention.referenceScope,
+            referenceInsert: mention.referenceInsert,
+          };
+        }
+        if (mention.mentionType === "all") {
+          return {
+            participantId: mention.participantId,
+            displayNameSnapshot: mention.displayNameSnapshot,
+            mentionType: mention.mentionType,
+          };
+        }
         const participant = byId.get(mention.participantId);
-        if (!participant && mention.mentionType !== "all") return null;
+        if (!participant) return null;
         return {
           participantId: mention.participantId,
-          displayNameSnapshot: participant?.displayName ?? mention.displayNameSnapshot,
+          displayNameSnapshot: participant.displayName,
           mentionType: mention.mentionType,
         };
       })
@@ -1272,6 +1290,12 @@ export class ChatService {
         userMessage,
         assistantMessage: finalMessage,
       });
+      this.publishRunArtifactLinks({
+        roomId,
+        conversationId,
+        runId: run.id,
+        messageId: finalMessage.id,
+      });
     }
     emitBlockUpdated(finalBlock);
     for (const streamingBlock of this.repo
@@ -1583,6 +1607,14 @@ export class ChatService {
     }
 
     const finalRun = this.repo.updateAgentRun(params.runId, { status: "failed", error: params.errorText });
+    if (params.visibleReply.message) {
+      this.publishRunArtifactLinks({
+        roomId: params.roomId,
+        conversationId: params.conversationId,
+        runId: params.runId,
+        messageId: params.visibleReply.message.id,
+      });
+    }
     this.events.emit({
       type: "run.failed",
       roomId: params.roomId,
@@ -1591,6 +1623,30 @@ export class ChatService {
       payload: { run: finalRun },
     });
     this.toolTokens.revokeRun(params.runId);
+  }
+
+  private publishRunArtifactLinks(params: {
+    roomId: string;
+    conversationId: string;
+    runId: string;
+    messageId: string;
+  }) {
+    for (const linked of this.repo.linkPendingRunArtifacts(params.runId, params.messageId)) {
+      this.events.emit({
+        type: "artifact.created",
+        roomId: params.roomId,
+        conversationId: params.conversationId,
+        runId: params.runId,
+        payload: { artifact: linked.artifact },
+      });
+      this.events.emit({
+        type: "message_block.created",
+        roomId: params.roomId,
+        conversationId: params.conversationId,
+        runId: params.runId,
+        payload: { block: linked.block },
+      });
+    }
   }
 
   private async finalizeRunCancellation(runId: string, reason: string) {

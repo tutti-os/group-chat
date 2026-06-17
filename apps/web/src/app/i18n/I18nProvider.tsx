@@ -44,6 +44,10 @@ export function I18nProvider(props: { children: ReactNode }) {
 }
 
 export function useTranslation() {
-  const locale = useSyncExternalStore(subscribeI18n, getI18nSnapshot, () => "en" as AppLocale);
+  const locale = useSyncExternalStore(
+    subscribeI18n,
+    getI18nSnapshot,
+    () => (typeof window !== "undefined" ? resolveFallbackLocale() : "en"),
+  );
   return { t: translate, locale };
 }

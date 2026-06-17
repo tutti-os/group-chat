@@ -1,17 +1,68 @@
 import type { Artifact, Message, Participant, PrivateTaskSnapshot, Identity } from "@group-chat/shared";
 import type { BackgroundTask } from "./background-tasks.js";
+import { truncateMiddle } from "./formatting.js";
 import { loadUserProfile } from "./user-profile.js";
 import { attachmentLabel, t } from "./i18n/index.js";
 
 export const SUMMARY_LINK_MIME = "text/x-group-chat-summary-link";
 const SUMMARY_LINK_CLIPBOARD_KEY = "group-chat:summary-link";
 
-const MESSAGE_LINK_PATTERN = /\bgroup-chat:\/\/message\/([A-Za-z0-9_-]+)/g;
+const MESSAGE_ID_SEGMENT = "[A-Za-z0-9_-]+(?:,[A-Za-z0-9_-]+)*";
+const MESSAGE_LINK_PATTERN = new RegExp(`\\bgroup-chat://message/(${MESSAGE_ID_SEGMENT})`, "g");
 const SUMMARY_LINK_PATTERN = /\bgroup-chat:\/\/summary\/([A-Za-z0-9_-]+)/g;
-const EMBEDDED_LINK_PATTERN = /\bgroup-chat:\/\/(?:message|summary)\/[A-Za-z0-9_-]+/g;
+const EMBEDDED_LINK_PATTERN = new RegExp(`\\bgroup-chat://(?:message/${MESSAGE_ID_SEGMENT}|summary/[A-Za-z0-9_-]+)`, "g");
+const MESSAGE_LINK_LABEL_MAX_LENGTH = 28;
 
-export function formatMessageLink(messageId: string) {
-  return messageId ? `group-chat://message/${messageId}` : "";
+export function parseMessageLinkIds(value: string) {
+  const segment = value.includes("group-chat://message/")
+    ? value.replace(/^.*group-chat:\/\/message\//, "")
+    : value;
+  return segment.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+export function primaryMessageLinkId(value: string) {
+  return parseMessageLinkIds(value)[0] ?? "";
+}
+
+export function formatMessageLink(...messageIds: string[]) {
+  const uniqueIds = [...new Set(messageIds.map((item) => item.trim()).filter(Boolean))];
+  return uniqueIds.length ? `group-chat://message/${uniqueIds.join(",")}` : "";
+}
+
+export function formatMessageLinkLabel(
+  messageIdSegment: string,
+  messages: Message[],
+  participants: Participant[],
+  identities: Array<Pick<Identity, "id" | "name">> = [],
+  userDisplayName?: string | null,
+) {
+  const messageIds = parseMessageLinkIds(messageIdSegment);
+  if (!messageIds.length) return t("composer.messageLink");
+
+  const senders: string[] = [];
+  const seenSenders = new Set<string>();
+  for (const messageId of messageIds) {
+    const message = messages.find((item) => item.id === messageId) ?? null;
+    if (!message) continue;
+    const sender = messageSenderLabel(message, participants, identities, userDisplayName);
+    if (seenSenders.has(sender)) continue;
+    seenSenders.add(sender);
+    senders.push(sender);
+  }
+  if (!senders.length) return t("composer.messageLink");
+
+  let senderPhrase: string;
+  if (senders.length === 1) {
+    senderPhrase = senders[0]!;
+  } else if (senders.length === 2) {
+    senderPhrase = t("composer.messageLinkSendersTwo", { first: senders[0]!, second: senders[1]! });
+  } else {
+    senderPhrase = t("composer.messageLinkSendersMany", { first: senders[0]!, second: senders[1]! });
+  }
+
+  return t("composer.messageLinkFrom", {
+    sender: truncateMiddle(senderPhrase, MESSAGE_LINK_LABEL_MAX_LENGTH),
+  });
 }
 
 export function formatSummaryLink(taskId: string) {
@@ -270,13 +321,13 @@ export type EmbeddedLinkMatch =
 
 export function findEmbeddedLinks(value: string): EmbeddedLinkMatch[] {
   const matches: EmbeddedLinkMatch[] = [];
-  for (const match of value.matchAll(/\bgroup-chat:\/\/(message|summary)\/([A-Za-z0-9_-]+)/g)) {
-    const kind = match[1];
-    const id = match[2];
+  for (const match of value.matchAll(new RegExp(`\\bgroup-chat://(message)/(${MESSAGE_ID_SEGMENT})|(summary)/([A-Za-z0-9_-]+)`, "g"))) {
+    const isMessage = Boolean(match[1]);
+    const id = isMessage ? match[2] : match[4];
     const index = match.index ?? 0;
-    if (!kind || !id) continue;
+    if (!id) continue;
     matches.push({
-      kind: kind === "summary" ? "summary" : "message",
+      kind: isMessage ? "message" : "summary",
       id,
       index,
       length: match[0].length,
