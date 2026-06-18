@@ -123,8 +123,8 @@ export function searchAppReferences(
   const entries = buildFileReferenceEntries(snapshot);
   const roomsById = new Map(snapshot.rooms.map((room) => [room.id, room]));
 
-  // 筛选与搜索是同一能力:有 query 时按相关度打分,纯按类型筛选(query 为空)时
-  // 给所有命中分类的项一个中性分,落到时间倒序。
+  // 返回结果 = 「搜索内容(仅匹配文件名)」 ∩ 「类型筛选」。有 query 时按文件名相关度打分,
+  // 纯按类型筛选(query 为空)时给所有命中分类的项一个中性分,落到时间倒序。
   const hasQuery = input.query.length > 0;
 
   // Search is a flat, relevance-ordered file list across every room (the host
@@ -132,7 +132,7 @@ export function searchAppReferences(
   const scored = entries
     .filter((entry) => matchesTimeRange(entry.reference.mtimeMs, input.timeRange))
     .filter((entry) => matchesFilterCategories(entry.artifact.filename, input.filters))
-    .map((entry) => ({ entry, score: hasQuery ? fileReferenceMatchScore(entry, input.query) : 1 }))
+    .map((entry) => ({ entry, score: hasQuery ? filenameMatchScore(entry.artifact.filename, input.query) : 1 }))
     .filter((item) => item.score > 0)
     .sort((left, right) => right.score - left.score || compareFileReferenceEntriesDesc(left.entry, right.entry));
 
@@ -475,6 +475,15 @@ function compareFileReferenceEntries(left: AppFileReferenceEntry, right: AppFile
     if (scoreDelta !== 0) return scoreDelta;
   }
   return compareFileReferenceEntriesDesc(left, right);
+}
+
+// 搜索接口专用:query 仅作用于文件名,返回 0 表示不命中(被交集排除)。
+function filenameMatchScore(filename: string, query: string) {
+  const name = filename.toLowerCase();
+  if (name === query) return 1000;
+  if (name.startsWith(query)) return 900;
+  if (name.includes(query)) return 800;
+  return 0;
 }
 
 function fileReferenceMatchScore(entry: AppFileReferenceEntry, filterText: string) {
