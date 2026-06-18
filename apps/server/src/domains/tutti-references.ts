@@ -17,6 +17,7 @@ import type {
 } from "@group-chat/shared";
 import { resolveArtifactLinkedMessageId, isVisibleGroupChatFile } from "@group-chat/shared";
 import { appPaths } from "../local/paths.js";
+import { matchesFilterCategories, normalizeFilterCategoryIds } from "./reference-filter-categories.js";
 
 interface ReferenceListInput {
   parentGroupId: string | null;
@@ -29,6 +30,7 @@ interface ReferenceListInput {
 
 interface ReferenceSearchInput {
   query: string;
+  filters: string[];
   limit: number;
   cursor: number;
   kinds: string[];
@@ -121,11 +123,16 @@ export function searchAppReferences(
   const entries = buildFileReferenceEntries(snapshot);
   const roomsById = new Map(snapshot.rooms.map((room) => [room.id, room]));
 
+  // 返回结果 = 「搜索内容(仅匹配文件名)」 ∩ 「类型筛选」。有 query 时按文件名相关度打分,
+  // 纯按类型筛选(query 为空)时给所有命中分类的项一个中性分,落到时间倒序。
+  const hasQuery = input.query.length > 0;
+
   // Search is a flat, relevance-ordered file list across every room (the host
   // drops group items defensively). Only keep entries that actually match.
   const scored = entries
     .filter((entry) => matchesTimeRange(entry.reference.mtimeMs, input.timeRange))
-    .map((entry) => ({ entry, score: fileReferenceMatchScore(entry, input.query) }))
+    .filter((entry) => matchesFilterCategories(entry.artifact.filename, input.filters))
+    .map((entry) => ({ entry, score: hasQuery ? filenameMatchScore(entry.artifact.filename, input.query) : 1 }))
     .filter((item) => item.score > 0)
     .sort((left, right) => right.score - left.score || compareFileReferenceEntriesDesc(left.entry, right.entry));
 
@@ -303,8 +310,14 @@ function normalizeReferenceSearchInput(body: unknown): ReferenceSearchInput | Re
     return referenceError("invalid_input", "Reference search request body must be an object");
   }
   const typed = body as Partial<AppReferenceSearchRequest>;
-  if (typeof typed.query !== "string" || !typed.query.trim()) {
-    return referenceError("invalid_input", "query is required");
+  if (typed.query !== undefined && typeof typed.query !== "string") {
+    return referenceError("invalid_input", "query must be a string");
+  }
+  if (
+    typed.filters !== undefined &&
+    (!Array.isArray(typed.filters) || typed.filters.some((id) => typeof id !== "string"))
+  ) {
+    return referenceError("invalid_input", "filters must be an array of strings");
   }
   if (typed.cursor !== undefined && typed.cursor !== null && typeof typed.cursor !== "string") {
     return referenceError("invalid_input", "cursor must be a string or null");
@@ -315,6 +328,12 @@ function normalizeReferenceSearchInput(body: unknown): ReferenceSearchInput | Re
   if (typed.kinds !== undefined && (!Array.isArray(typed.kinds) || typed.kinds.some((kind) => typeof kind !== "string"))) {
     return referenceError("invalid_input", "kinds must be an array of strings");
   }
+  // 筛选与搜索是同一能力:query 与 filters 至少有一个非空(纯按类型筛选时 query 可空)。
+  const query = (typed.query ?? "").trim().toLocaleLowerCase().slice(0, 200);
+  const filters = normalizeFilterCategoryIds(typed.filters ?? []);
+  if (!query && filters.length === 0) {
+    return referenceError("invalid_input", "query or filters is required");
+  }
   const timeRange = normalizeTimeRange(typed.timeRange);
   if (isReferenceListError(timeRange)) return timeRange;
   const cursor = typed.cursor?.trim() ? Number(typed.cursor) : 0;
@@ -322,7 +341,8 @@ function normalizeReferenceSearchInput(body: unknown): ReferenceSearchInput | Re
     return referenceError("invalid_input", "cursor must be a non-negative integer string");
   }
   return {
-    query: typed.query.trim().toLocaleLowerCase().slice(0, 200),
+    query,
+    filters,
     limit: clampLimit(typed.limit ?? DEFAULT_REFERENCE_LIMIT),
     cursor,
     kinds: (typed.kinds ?? []).map((kind) => kind.trim()).filter(Boolean),
@@ -455,6 +475,15 @@ function compareFileReferenceEntries(left: AppFileReferenceEntry, right: AppFile
     if (scoreDelta !== 0) return scoreDelta;
   }
   return compareFileReferenceEntriesDesc(left, right);
+}
+
+// 搜索接口专用:query 仅作用于文件名,返回 0 表示不命中(被交集排除)。
+function filenameMatchScore(filename: string, query: string) {
+  const name = filename.toLowerCase();
+  if (name === query) return 1000;
+  if (name.startsWith(query)) return 900;
+  if (name.includes(query)) return 800;
+  return 0;
 }
 
 function fileReferenceMatchScore(entry: AppFileReferenceEntry, filterText: string) {
