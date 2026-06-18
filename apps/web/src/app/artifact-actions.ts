@@ -2,7 +2,7 @@ import type { AgentRun, Artifact, Message, MessageBlock } from "@group-chat/shar
 import { isVisibleGroupChatFile } from "@group-chat/shared";
 import { openArtifactInSystem } from "../api/client.js";
 import { isTextAttachment, type AttachmentPreview } from "./components/chat/AttachmentPreviewDialog.js";
-import { tryOpenArtifactInTutti } from "./tutti-bridge.js";
+import { tryOpenArtifactInTutti, tryOpenArtifactInTuttiSync } from "./tutti-bridge.js";
 
 export type ArtifactCategory = "image" | "video" | "file";
 export type ArtifactFilterCategory = "all" | ArtifactCategory;
@@ -69,6 +69,10 @@ export async function downloadArtifactFile(artifact: Artifact) {
   }
 }
 
+export function revealArtifactInTuttiFileManager(artifact: Artifact) {
+  return tryOpenArtifactInTuttiSync(artifact, "reveal");
+}
+
 export async function openArtifact(
   artifact: Artifact,
   setPreview: (preview: AttachmentPreview | null) => void,
@@ -80,7 +84,7 @@ export async function openArtifactPreview(
   artifact: Artifact,
   setPreview: (preview: AttachmentPreview | null) => void,
 ) {
-  if (await tryOpenArtifactInTutti(artifact)) {
+  if (await tryOpenArtifactInTutti(artifact, "preview")) {
     return;
   }
   if (artifact.mimeType.startsWith("image/") || artifact.mimeType.startsWith("video/")) {

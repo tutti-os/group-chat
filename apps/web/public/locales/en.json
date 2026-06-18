@@ -197,6 +197,7 @@
   "messageActions.messageNotInSnapshot": "This message is not in the local snapshot",
   "messageActions.previewInApp": "Preview in app",
   "messageActions.openWithSystemApp": "Open with default app",
+  "messageActions.revealInFileManager": "Reveal in file manager",
 
   "timeline.emptyNoAgentsTitle": "No agents in this room yet",
   "timeline.emptyStartTitle": "Start your first collaboration",
@@ -347,6 +348,8 @@
   "files.sentBy": " · sent by {sender}",
   "files.noLinkedMeta": " · no linked message",
   "files.preview": "Preview",
+  "files.revealInFileManager": "Reveal in file manager",
+  "files.revealFile": "Reveal {filename} in file manager",
   "files.download": "Download",
   "files.previewFile": "Preview {filename}",
   "files.downloadFile": "Download {filename}",

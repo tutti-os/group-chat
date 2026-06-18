@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { Download, Eye, FileText, Search, Video, X } from "lucide-react";
+import { Download, FileText, FolderOpen, Search, Video, X } from "lucide-react";
 import type { Artifact, AgentRun, Message, MessageBlock } from "@group-chat/shared";
 import { resolveArtifactLinkedMessageId } from "@group-chat/shared";
 import {
@@ -7,15 +7,15 @@ import {
   filterGroupChatFiles,
   getArtifactCategory,
   matchesArtifactCategory,
-  openArtifactPreview,
+  revealArtifactInTuttiFileManager,
   type ArtifactFilterCategory,
 } from "../../artifact-actions.js";
 import { formatBytes, formatShortDate } from "../../formatting.js";
 import { messageSenderLabel } from "../../chat-links.js";
-import { attachmentLabel, t, useTranslation } from "../../i18n/index.js";
-import { AttachmentPreviewDialog, type AttachmentPreview } from "./AttachmentPreviewDialog.js";
+import { t, useTranslation } from "../../i18n/index.js";
 
 const PAGE_SIZE = 30;
+const SINGLE_CLICK_DELAY_MS = 250;
 
 function getCategoryTabs() {
   return [
@@ -40,17 +40,21 @@ export function ConversationFilesPanel(props: {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<ArtifactFilterCategory>("all");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  const [preview, setPreview] = useState<AttachmentPreview | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
-  const previewOverlayRef = useRef<HTMLDivElement | null>(null);
+  const pendingClickTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!props.open) return;
     setQuery("");
     setCategory("all");
     setVisibleCount(PAGE_SIZE);
-    setPreview(null);
   }, [props.conversationId, props.open]);
+
+  useEffect(() => {
+    return () => {
+      if (pendingClickTimerRef.current) window.clearTimeout(pendingClickTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!props.open) return;
@@ -58,16 +62,10 @@ export function ConversationFilesPanel(props: {
       const target = event.target;
       if (!(target instanceof Node)) return;
       if (panelRef.current?.contains(target)) return;
-      if (previewOverlayRef.current?.contains(target)) return;
-      if (preview) return;
       props.onClose();
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        if (preview) {
-          setPreview(null);
-          return;
-        }
         props.onClose();
       }
     };
@@ -77,7 +75,7 @@ export function ConversationFilesPanel(props: {
       document.removeEventListener("pointerdown", closeOnOutsidePointer);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [preview, props.onClose, props.open]);
+  }, [props.onClose, props.open]);
 
   const normalizedQuery = query.trim().toLowerCase();
 
@@ -124,13 +122,42 @@ export function ConversationFilesPanel(props: {
     props.onClose();
   };
 
+  const revealInTuttiFileManager = (artifact: Artifact) => {
+    revealArtifactInTuttiFileManager(artifact);
+  };
+
+  const scheduleOpenSourceMessage = (artifact: Artifact) => {
+    if (pendingClickTimerRef.current) window.clearTimeout(pendingClickTimerRef.current);
+    pendingClickTimerRef.current = window.setTimeout(() => {
+      openSourceMessage(artifact);
+      pendingClickTimerRef.current = null;
+    }, SINGLE_CLICK_DELAY_MS);
+  };
+
+  const handleFileRowClick = (artifact: Artifact) => {
+    scheduleOpenSourceMessage(artifact);
+  };
+
+  const handleFileRowDoubleClick = (artifact: Artifact, event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    if (pendingClickTimerRef.current) {
+      window.clearTimeout(pendingClickTimerRef.current);
+      pendingClickTimerRef.current = null;
+    }
+    revealInTuttiFileManager(artifact);
+  };
+
   const stopPanelPointerBubble = (event: { stopPropagation: () => void }) => {
     event.stopPropagation();
   };
 
-  const handlePreview = (artifact: Artifact, event: MouseEvent<HTMLButtonElement>) => {
+  const handleReveal = (artifact: Artifact, event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
-    void openArtifactPreview(artifact, setPreview);
+    if (pendingClickTimerRef.current) {
+      window.clearTimeout(pendingClickTimerRef.current);
+      pendingClickTimerRef.current = null;
+    }
+    revealInTuttiFileManager(artifact);
   };
 
   const handleDownload = (artifact: Artifact, event: MouseEvent<HTMLButtonElement>) => {
@@ -148,149 +175,143 @@ export function ConversationFilesPanel(props: {
       : t("files.emptyCategory", { category: categoryTabs.find((tab) => tab.id === category)?.label ?? t("files.file") });
 
   return (
-    <>
-      <aside
-        ref={panelRef}
-        className={"[position:absolute] [top:56px] [right:0] [bottom:0] [z-index:36] [display:grid] [width:min(360px,_calc(100vw_-_24px))] [grid-template-rows:auto_auto_auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border)] [background:var(--panel)] [box-shadow:-18px_0_40px_rgb(0_0_0_/_8%)]"}
-      >
-        <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [padding:14px] [border-bottom:1px_solid_var(--border)]"}>
-          <div className={"[min-width:0] [&_h3]:[margin:0] [&_h3]:[font-size:15px] [&_h3]:[font-weight:720] [&_h3]:[line-height:1.2] [&_span]:[display:block] [&_span]:[margin-top:3px] [&_span]:[color:var(--muted)] [&_span]:[font-size:12px]"}>
-            <h3>{t("files.title")}</h3>
-            <span>{t("files.count", { count: filteredArtifacts.length })}</span>
-          </div>
-          <button
-            className={"[display:inline-grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [&:focus-visible]:[outline:none]"}
-            type="button"
-            aria-label={t("files.close")}
-            title={t("common.close")}
-            onClick={props.onClose}
-          >
-            <X size={16} />
-          </button>
+    <aside
+      ref={panelRef}
+      className={"[position:absolute] [top:56px] [right:0] [bottom:0] [z-index:36] [display:grid] [width:min(360px,_calc(100vw_-_24px))] [grid-template-rows:auto_auto_auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border)] [background:var(--panel)] [box-shadow:-18px_0_40px_rgb(0_0_0_/_8%)]"}
+    >
+      <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [padding:14px] [border-bottom:1px_solid_var(--border)]"}>
+        <div className={"[min-width:0] [&_h3]:[margin:0] [&_h3]:[font-size:15px] [&_h3]:[font-weight:720] [&_h3]:[line-height:1.2] [&_span]:[display:block] [&_span]:[margin-top:3px] [&_span]:[color:var(--muted)] [&_span]:[font-size:12px]"}>
+          <h3>{t("files.title")}</h3>
+          <span>{t("files.count", { count: filteredArtifacts.length })}</span>
         </div>
-
-        <div className={"[display:flex] [gap:8px] [padding:12px_12px_0] [overflow-x:auto]"}>
-          {categoryTabs.map((tab) => {
-            const active = category === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                className={`[display:inline-flex] [height:32px] [flex:0_0_auto] [align-items:center] [border:0] [border-radius:999px] [padding:0_14px] [font-size:13px] [font-weight:650] [transition:background-color_0.12s_ease,_color_0.12s_ease] ${active ? "[color:#ffffff] [background:#171717]" : "[color:var(--muted)] [background:#f2f3f5] hover:[color:var(--text)] hover:[background:#eceef1]"}`}
-                aria-pressed={active}
-                onClick={() => setCategory(tab.id)}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className={"[padding:12px_12px_0]"}>
-          <label className={"[display:flex] [height:38px] [align-items:center] [gap:8px] [border-radius:12px] [padding:0_12px] [color:var(--muted)] [background:#f2f3f5] [&_input]:[width:100%] [&_input]:[min-width:0] [&_input]:[border:0] [&_input]:[color:var(--text)] [&_input]:[background:transparent] [&_input]:[font-size:13px] [&_input]:[outline:none] [&_input::placeholder]:[color:#7a7d82]"}>
-            <Search size={15} />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t("files.searchPlaceholder")}
-              aria-label={t("files.searchAria")}
-            />
-          </label>
-        </div>
-
-        <div
-          className={"[min-height:0] [overflow-y:auto] [padding:12px] [display:grid] [align-content:start] [gap:8px]"}
-          onScroll={(event) => {
-            const element = event.currentTarget;
-            if (element.scrollTop + element.clientHeight >= element.scrollHeight - 48) {
-              loadMore();
-            }
-          }}
+        <button
+          className={"[display:inline-grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [&:focus-visible]:[outline:none]"}
+          type="button"
+          aria-label={t("files.close")}
+          title={t("common.close")}
+          onClick={props.onClose}
         >
-          {visibleArtifacts.length === 0 ? (
-            <div className={"[padding:28px_12px] [color:var(--muted)] [font-size:13px] [line-height:1.5] [text-align:center]"}>
-              {emptyLabel}
-            </div>
-          ) : null}
-          {visibleArtifacts.map((artifact) => {
-            const linkedMessageId = resolveArtifactLinkedMessageId(artifact, props.agentRuns, props.messages);
-            const message = linkedMessageId
-              ? props.messages.find((item) => item.id === linkedMessageId) ?? null
-              : null;
-            const canJumpToMessage = Boolean(linkedMessageId);
-            const artifactCategory = getArtifactCategory(artifact);
-            return (
-              <article
-                key={artifact.id}
-                className={"[display:grid] [grid-template-columns:40px_minmax(0,_1fr)_auto] [align-items:center] [gap:8px] [border:1px_solid_var(--border)] [border-radius:12px] [padding:8px] [background:#ffffff] [transition:border-color_0.12s_ease,_background-color_0.12s_ease] hover:[border-color:#d4d4d8] hover:[background:#fbfbfc]"}
+          <X size={16} />
+        </button>
+      </div>
+
+      <div className={"[display:flex] [gap:8px] [padding:12px_12px_0] [overflow-x:auto]"}>
+        {categoryTabs.map((tab) => {
+          const active = category === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              className={`[display:inline-flex] [height:32px] [flex:0_0_auto] [align-items:center] [border:0] [border-radius:999px] [padding:0_14px] [font-size:13px] [font-weight:650] [transition:background-color_0.12s_ease,_color_0.12s_ease] ${active ? "[color:#ffffff] [background:#171717]" : "[color:var(--muted)] [background:#f2f3f5] hover:[color:var(--text)] hover:[background:#eceef1]"}`}
+              aria-pressed={active}
+              onClick={() => setCategory(tab.id)}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className={"[padding:12px_12px_0]"}>
+        <label className={"[display:flex] [height:38px] [align-items:center] [gap:8px] [border-radius:12px] [padding:0_12px] [color:var(--muted)] [background:#f2f3f5] [&_input]:[width:100%] [&_input]:[min-width:0] [&_input]:[border:0] [&_input]:[color:var(--text)] [&_input]:[background:transparent] [&_input]:[font-size:13px] [&_input]:[outline:none] [&_input::placeholder]:[color:#7a7d82]"}>
+          <Search size={15} />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t("files.searchPlaceholder")}
+            aria-label={t("files.searchAria")}
+          />
+        </label>
+      </div>
+
+      <div
+        className={"[min-height:0] [overflow-y:auto] [padding:12px] [display:grid] [align-content:start] [gap:8px]"}
+        onScroll={(event) => {
+          const element = event.currentTarget;
+          if (element.scrollTop + element.clientHeight >= element.scrollHeight - 48) {
+            loadMore();
+          }
+        }}
+      >
+        {visibleArtifacts.length === 0 ? (
+          <div className={"[padding:28px_12px] [color:var(--muted)] [font-size:13px] [line-height:1.5] [text-align:center]"}>
+            {emptyLabel}
+          </div>
+        ) : null}
+        {visibleArtifacts.map((artifact) => {
+          const linkedMessageId = resolveArtifactLinkedMessageId(artifact, props.agentRuns, props.messages);
+          const message = linkedMessageId
+            ? props.messages.find((item) => item.id === linkedMessageId) ?? null
+            : null;
+          const canJumpToMessage = Boolean(linkedMessageId);
+          const artifactCategory = getArtifactCategory(artifact);
+          return (
+            <article
+              key={artifact.id}
+              className={"[display:grid] [grid-template-columns:40px_minmax(0,_1fr)_auto] [align-items:center] [gap:8px] [border:1px_solid_var(--border)] [border-radius:12px] [padding:8px] [background:#ffffff] [transition:border-color_0.12s_ease,_background-color_0.12s_ease] hover:[border-color:#d4d4d8] hover:[background:#fbfbfc]"}
+            >
+              <button
+                type="button"
+                className={"[display:grid] [grid-column:1_/_3] [grid-template-columns:40px_minmax(0,_1fr)] [align-items:center] [gap:8px] [border:0] [padding:0] [text-align:left] [color:inherit] [background:transparent] [&:focus-visible]:[outline:none]"}
+                title={canJumpToMessage ? t("files.jumpToMessage") : t("files.noLinkedMessageShort")}
+                onClick={() => handleFileRowClick(artifact)}
+                onDoubleClick={(event) => handleFileRowDoubleClick(artifact, event)}
               >
+                <span className={"[display:grid] [width:40px] [height:40px] [place-items:center] [overflow:hidden] [border-radius:8px] [background:#f3f4f6]"}>
+                  {artifactCategory === "image" ? (
+                    <img
+                      src={artifact.publicUrl}
+                      alt=""
+                      className={"[width:100%] [height:100%] [object-fit:cover]"}
+                    />
+                  ) : (
+                    <span className={"[display:grid] [width:30px] [height:34px] [place-items:center] [border-radius:6px] [color:#ffffff] [background:#8d96a3]"}>
+                      {artifactCategory === "video" ? <Video size={16} /> : <FileText size={16} />}
+                    </span>
+                  )}
+                </span>
+                <span className={"[display:grid] [min-width:0] [gap:2px]"}>
+                  <strong className={"[overflow:hidden] [font-size:13px] [font-weight:650] [line-height:1.25] [text-overflow:ellipsis] [white-space:nowrap]"}>
+                    {artifact.filename}
+                  </strong>
+                  <span className={"[overflow:hidden] [color:var(--muted)] [font-size:11px] [line-height:1.3] [text-overflow:ellipsis] [white-space:nowrap]"}>
+                    {formatBytes(artifact.sizeBytes)} · {formatShortDate(artifact.createdAt)}
+                    {message ? t("files.sentBy", { sender: formatMessageSender(message) }) : t("files.noLinkedMeta")}
+                  </span>
+                </span>
+              </button>
+              <div className={"[display:flex] [align-items:center] [gap:2px]"}>
                 <button
                   type="button"
-                  className={"[display:grid] [grid-column:1_/_3] [grid-template-columns:40px_minmax(0,_1fr)] [align-items:center] [gap:8px] [border:0] [padding:0] [text-align:left] [color:inherit] [background:transparent] [&:focus-visible]:[outline:none]"}
-                  title={canJumpToMessage ? t("files.jumpToMessage") : t("files.noLinkedMessageShort")}
-                  onClick={() => openSourceMessage(artifact)}
+                  className={"[display:inline-grid] [width:28px] [height:28px] [place-items:center] [border:0] [border-radius:8px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [&:focus-visible]:[outline:none]"}
+                  aria-label={t("files.revealFile", { filename: artifact.filename })}
+                  title={t("files.revealInFileManager")}
+                  onPointerDown={stopPanelPointerBubble}
+                  onClick={(event) => handleReveal(artifact, event)}
                 >
-                  <span className={"[display:grid] [width:40px] [height:40px] [place-items:center] [overflow:hidden] [border-radius:8px] [background:#f3f4f6]"}>
-                    {artifactCategory === "image" ? (
-                      <img
-                        src={artifact.publicUrl}
-                        alt=""
-                        className={"[width:100%] [height:100%] [object-fit:cover]"}
-                      />
-                    ) : (
-                      <span className={"[display:grid] [width:30px] [height:34px] [place-items:center] [border-radius:6px] [color:#ffffff] [background:#8d96a3]"}>
-                        {artifactCategory === "video" ? <Video size={16} /> : <FileText size={16} />}
-                      </span>
-                    )}
-                  </span>
-                  <span className={"[display:grid] [min-width:0] [gap:2px]"}>
-                    <strong className={"[overflow:hidden] [font-size:13px] [font-weight:650] [line-height:1.25] [text-overflow:ellipsis] [white-space:nowrap]"}>
-                      {artifact.filename}
-                    </strong>
-                    <span className={"[overflow:hidden] [color:var(--muted)] [font-size:11px] [line-height:1.3] [text-overflow:ellipsis] [white-space:nowrap]"}>
-                      {formatBytes(artifact.sizeBytes)} · {formatShortDate(artifact.createdAt)}
-                      {message ? t("files.sentBy", { sender: formatMessageSender(message) }) : t("files.noLinkedMeta")}
-                    </span>
-                  </span>
+                  <FolderOpen size={13} />
                 </button>
-                <div className={"[display:flex] [align-items:center] [gap:2px]"}>
-                  <button
-                    type="button"
-                    className={"[display:inline-grid] [width:28px] [height:28px] [place-items:center] [border:0] [border-radius:8px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [&:focus-visible]:[outline:none]"}
-                    aria-label={t("files.previewFile", { filename: artifact.filename })}
-                    title={t("files.preview")}
-                    onPointerDown={stopPanelPointerBubble}
-                    onClick={(event) => handlePreview(artifact, event)}
-                  >
-                    <Eye size={13} />
-                  </button>
-                  <button
-                    type="button"
-                    className={"[display:inline-grid] [width:28px] [height:28px] [place-items:center] [border:0] [border-radius:8px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [&:focus-visible]:[outline:none]"}
-                    aria-label={t("files.downloadFile", { filename: artifact.filename })}
-                    title={t("files.download")}
-                    onPointerDown={stopPanelPointerBubble}
-                    onClick={(event) => handleDownload(artifact, event)}
-                  >
-                    <Download size={13} />
-                  </button>
-                </div>
-              </article>
-            );
-          })}
-          {hasMore ? (
-            <div className={"[padding:8px_0_4px] [color:var(--muted)] [font-size:12px] [text-align:center]"}>
-              {t("files.loadMore")}
-            </div>
-          ) : null}
-        </div>
-        <AttachmentPreviewDialog
-          overlayRef={previewOverlayRef}
-          preview={preview}
-          onClose={() => setPreview(null)}
-        />
-      </aside>
-    </>
+                <button
+                  type="button"
+                  className={"[display:inline-grid] [width:28px] [height:28px] [place-items:center] [border:0] [border-radius:8px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [&:focus-visible]:[outline:none]"}
+                  aria-label={t("files.downloadFile", { filename: artifact.filename })}
+                  title={t("files.download")}
+                  onPointerDown={stopPanelPointerBubble}
+                  onClick={(event) => handleDownload(artifact, event)}
+                >
+                  <Download size={13} />
+                </button>
+              </div>
+            </article>
+          );
+        })}
+        {hasMore ? (
+          <div className={"[padding:8px_0_4px] [color:var(--muted)] [font-size:12px] [text-align:center]"}>
+            {t("files.loadMore")}
+          </div>
+        ) : null}
+      </div>
+    </aside>
   );
 }
 

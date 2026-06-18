@@ -1,5 +1,6 @@
 import type { AppReferenceListResponse, TuttiAtProviderId, TuttiReferenceInsert } from "@group-chat/shared";
 import { TUTTI_AT_PROVIDER_IDS } from "@group-chat/shared";
+import { resolveArtifactPublicUrl } from "./artifact-actions.js";
 import { listAppReferences } from "../api/client.js";
 
 export type TuttiAtRoomFileMeta = {
@@ -23,46 +24,26 @@ export function tuttiAtMentionKey(providerId: TuttiAtProviderId, itemId: string)
   return `tutti-at:${providerId}:${itemId}`;
 }
 
+export function resolveMentionThumbnailUrl(url: string | null | undefined): string | null {
+  const trimmed = url?.trim();
+  if (!trimmed) return null;
+  if (
+    trimmed.startsWith("http://")
+    || trimmed.startsWith("https://")
+    || trimmed.startsWith("tutti-asset://")
+    || trimmed.startsWith("data:")
+  ) {
+    return trimmed;
+  }
+  return resolveArtifactPublicUrl(trimmed);
+}
+
 export function parseTuttiAtMentionKey(value: string): { providerId: TuttiAtProviderId; itemId: string } | null {
   const match = /^tutti-at:([^:]+):(.+)$/.exec(value);
   if (!match) return null;
   const providerId = match[1] as TuttiAtProviderId;
   if (!TUTTI_AT_PROVIDER_IDS.includes(providerId)) return null;
   return { providerId, itemId: match[2]! };
-}
-
-export async function queryTuttiAtMentions(input: {
-  keyword: string;
-  roomId?: string | null;
-  maxResults?: number;
-}): Promise<TuttiAtQueryResult[]> {
-  const keyword = input.keyword.trim();
-  const maxResults = Math.max(1, input.maxResults ?? 20);
-  const results: TuttiAtQueryResult[] = [];
-  const seen = new Set<string>();
-
-  const push = (item: TuttiAtQueryResult) => {
-    const key = tuttiAtMentionKey(item.providerId, item.itemId);
-    if (seen.has(key)) return;
-    seen.add(key);
-    results.push(item);
-  };
-
-  if (input.roomId) {
-    const localFiles = await queryLocalRoomFileReferences(input.roomId, keyword, maxResults);
-    for (const item of localFiles) {
-      push(item);
-      if (results.length >= maxResults) return sortTuttiAtMentionResults(results, keyword).slice(0, maxResults);
-    }
-  }
-
-  const hostItems = await queryHostAtMentions(keyword, maxResults);
-  for (const item of hostItems) {
-    push(item);
-    if (results.length >= maxResults) return sortTuttiAtMentionResults(results, keyword).slice(0, maxResults);
-  }
-
-  return sortTuttiAtMentionResults(results, keyword).slice(0, maxResults);
 }
 
 export function scoreTuttiAtMentionMatch(item: TuttiAtQueryResult, keyword: string) {
@@ -86,20 +67,107 @@ export function scoreTuttiAtMentionMatch(item: TuttiAtQueryResult, keyword: stri
   return 0;
 }
 
+const STABLE_HOST_PROVIDERS = new Set<TuttiAtProviderId>([
+  "workspace-app",
+  "agent-session",
+  "workspace-issue",
+]);
+
+const STABLE_HOST_MENTION_CACHE_LIMIT = 50;
+
+const stableHostMentionCache = new Map<string, TuttiAtQueryResult[]>();
+
+function hostProviderCacheKey(providers: readonly TuttiAtProviderId[]) {
+  return [...providers].sort().join("\0");
+}
+
+function isStableHostProviderQuery(providers: readonly TuttiAtProviderId[]) {
+  return providers.length > 0 && providers.every((providerId) => STABLE_HOST_PROVIDERS.has(providerId));
+}
+
+export function isTuttiAtMentionCacheReady(providers: readonly TuttiAtProviderId[]) {
+  if (!isStableHostProviderQuery(providers)) return false;
+  return stableHostMentionCache.has(hostProviderCacheKey(providers));
+}
+
+function filterTuttiAtMentionsByKeyword(items: readonly TuttiAtQueryResult[], keyword: string) {
+  const query = keyword.trim();
+  if (!query) return [...items];
+  return items.filter((item) => scoreTuttiAtMentionMatch(item, query) > 0);
+}
+
+async function queryStableHostAtMentions(
+  keyword: string,
+  maxResults: number,
+  providers: readonly TuttiAtProviderId[],
+): Promise<TuttiAtQueryResult[]> {
+  const cacheKey = hostProviderCacheKey(providers);
+  let cached = stableHostMentionCache.get(cacheKey);
+  if (!cached) {
+    cached = await queryHostAtMentions("", STABLE_HOST_MENTION_CACHE_LIMIT, providers);
+    stableHostMentionCache.set(cacheKey, cached);
+  }
+  return sortTuttiAtMentionResults(filterTuttiAtMentionsByKeyword(cached, keyword), keyword).slice(0, maxResults);
+}
+
+export async function queryTuttiAtMentions(input: {
+  keyword: string;
+  roomId?: string | null;
+  maxResults?: number;
+  providers?: readonly TuttiAtProviderId[];
+}): Promise<TuttiAtQueryResult[]> {
+  const keyword = input.keyword.trim();
+  const maxResults = Math.max(1, input.maxResults ?? 20);
+  const providers = input.providers?.length ? input.providers : [...TUTTI_AT_PROVIDER_IDS];
+  const providerSet = new Set<TuttiAtProviderId>(providers);
+  const results: TuttiAtQueryResult[] = [];
+  const seen = new Set<string>();
+
+  const push = (item: TuttiAtQueryResult) => {
+    const key = tuttiAtMentionKey(item.providerId, item.itemId);
+    if (seen.has(key)) return;
+    seen.add(key);
+    results.push(item);
+  };
+
+  if (input.roomId && providerSet.has("file")) {
+    const localFiles = await queryLocalRoomFileReferences(input.roomId, keyword, maxResults);
+    for (const item of localFiles) {
+      push(item);
+    }
+  }
+
+  const hostProviders = providers.filter((providerId) => providerId !== "file");
+  if (hostProviders.length > 0) {
+    const hostItems = isStableHostProviderQuery(hostProviders)
+      ? await queryStableHostAtMentions(keyword, maxResults, hostProviders)
+      : await queryHostAtMentions(keyword, maxResults, hostProviders);
+    for (const item of hostItems) {
+      push(item);
+    }
+  }
+
+  return sortTuttiAtMentionResults(results, keyword).slice(0, maxResults);
+}
+
 function sortTuttiAtMentionResults(results: TuttiAtQueryResult[], keyword: string) {
   const query = keyword.trim();
   if (!query) return results;
   return [...results].sort((left, right) => scoreTuttiAtMentionMatch(right, query) - scoreTuttiAtMentionMatch(left, query));
 }
 
-async function queryHostAtMentions(keyword: string, maxResults: number): Promise<TuttiAtQueryResult[]> {
+async function queryHostAtMentions(
+  keyword: string,
+  maxResults: number,
+  providers: readonly TuttiAtProviderId[],
+): Promise<TuttiAtQueryResult[]> {
   const bridge = window.tuttiExternal?.at;
   if (!bridge) return [];
   try {
     const items = await bridge.query({
       keyword,
       maxResults,
-      providers: [...TUTTI_AT_PROVIDER_IDS],
+      providers: [...providers],
     });
     return items
       .filter((item) => TUTTI_AT_PROVIDER_IDS.includes(item.providerId))
