@@ -6,7 +6,6 @@ export const MENTION_PANEL_TABS = [
   "sessions",
   "apps",
   "tasks",
-  "agent",
 ] as const;
 
 export type MentionPanelTab = (typeof MENTION_PANEL_TABS)[number];

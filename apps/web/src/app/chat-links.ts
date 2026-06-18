@@ -5,7 +5,9 @@ import { loadUserProfile } from "./user-profile.js";
 import { attachmentLabel, t } from "./i18n/index.js";
 
 export const SUMMARY_LINK_MIME = "text/x-group-chat-summary-link";
+export const ARTIFACT_CLIPBOARD_MIME = "application/x-group-chat-artifacts+json";
 const SUMMARY_LINK_CLIPBOARD_KEY = "group-chat:summary-link";
+const ARTIFACT_CLIPBOARD_KEY = "group-chat:artifact-ids";
 
 const MESSAGE_ID_SEGMENT = "[A-Za-z0-9_-]+(?:,[A-Za-z0-9_-]+)*";
 const MESSAGE_LINK_PATTERN = new RegExp(`\\bgroup-chat://message/(${MESSAGE_ID_SEGMENT})`, "g");
@@ -259,6 +261,110 @@ export function stashSummaryLinkForPaste(taskId: string) {
 export function readStashedSummaryLink() {
   const link = sessionStorage.getItem(SUMMARY_LINK_CLIPBOARD_KEY);
   return link?.startsWith("group-chat://summary/") ? link : null;
+}
+
+export interface ArtifactClipboardPayload {
+  artifactIds: string[];
+  includeText: boolean;
+}
+
+function normalizeArtifactClipboardPayload(value: unknown): ArtifactClipboardPayload | null {
+  if (Array.isArray(value)) {
+    const artifactIds = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+    return artifactIds.length ? { artifactIds, includeText: true } : null;
+  }
+  if (!value || typeof value !== "object") return null;
+  const record = value as { artifactIds?: unknown; includeText?: unknown };
+  if (!Array.isArray(record.artifactIds)) return null;
+  const artifactIds = record.artifactIds.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+  if (!artifactIds.length) return null;
+  return {
+    artifactIds,
+    includeText: record.includeText !== false,
+  };
+}
+
+export function stashArtifactsForPaste(input: { artifactIds: string[]; includeText: boolean }) {
+  const artifactIds = [...new Set(input.artifactIds.map((item) => item.trim()).filter(Boolean))];
+  if (!artifactIds.length) {
+    sessionStorage.removeItem(ARTIFACT_CLIPBOARD_KEY);
+    return;
+  }
+  sessionStorage.setItem(
+    ARTIFACT_CLIPBOARD_KEY,
+    JSON.stringify({ artifactIds, includeText: input.includeText } satisfies ArtifactClipboardPayload),
+  );
+}
+
+export function readStashedArtifactClipboard(): ArtifactClipboardPayload | null {
+  const raw = sessionStorage.getItem(ARTIFACT_CLIPBOARD_KEY);
+  if (!raw) return null;
+  try {
+    return normalizeArtifactClipboardPayload(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+export function readStashedArtifactIds() {
+  return readStashedArtifactClipboard()?.artifactIds ?? null;
+}
+
+export function parseArtifactClipboardPayload(payload: string): ArtifactClipboardPayload | null {
+  const trimmed = payload.trim();
+  if (!trimmed) return null;
+  try {
+    return normalizeArtifactClipboardPayload(JSON.parse(trimmed));
+  } catch {
+    return null;
+  }
+}
+
+export function parseArtifactIdsFromClipboardHtml(html: string) {
+  if (!html.trim()) return null;
+  try {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const ids = new Set<string>();
+    for (const element of doc.querySelectorAll("[data-artifact-id]")) {
+      const artifactId = element.getAttribute("data-artifact-id")?.trim();
+      if (artifactId) ids.add(artifactId);
+    }
+    return ids.size ? [...ids] : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function copyMessagesToClipboard(input: { text: string; artifactIds: string[]; includeText?: boolean }) {
+  const artifactIds = [...new Set(input.artifactIds.map((item) => item.trim()).filter(Boolean))];
+  const includeText = input.includeText ?? true;
+  const clipboardPayload: ArtifactClipboardPayload | null = artifactIds.length
+    ? { artifactIds, includeText }
+    : null;
+  if (clipboardPayload) {
+    stashArtifactsForPaste(clipboardPayload);
+  } else {
+    sessionStorage.removeItem(ARTIFACT_CLIPBOARD_KEY);
+  }
+
+  const plainText = includeText ? input.text : "";
+  const payload = clipboardPayload ? JSON.stringify(clipboardPayload) : "";
+  try {
+    if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+      const items: Record<string, Blob> = {
+        "text/plain": new Blob([plainText], { type: "text/plain" }),
+      };
+      if (payload) {
+        items[ARTIFACT_CLIPBOARD_MIME] = new Blob([payload], { type: ARTIFACT_CLIPBOARD_MIME });
+      }
+      await navigator.clipboard.write([new ClipboardItem(items)]);
+      return;
+    }
+  } catch {
+    // ClipboardItem 可能因权限或不支持的 MIME 失败，继续 fallback
+  }
+
+  await copyTextFallback(plainText);
 }
 
 export async function copySummaryToClipboard(input: {

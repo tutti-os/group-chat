@@ -197,6 +197,7 @@
   "messageActions.messageNotInSnapshot": "这条消息暂时不在本地快照中",
   "messageActions.previewInApp": "应用内预览",
   "messageActions.openWithSystemApp": "用系统默认应用打开",
+  "messageActions.revealInFileManager": "在文件管理器中定位",
 
   "timeline.emptyNoAgentsTitle": "当前房间还没有 Agent",
   "timeline.emptyStartTitle": "开始第一轮协作",
@@ -347,6 +348,8 @@
   "files.sentBy": " · {sender} 发送",
   "files.noLinkedMeta": " · 未关联消息",
   "files.preview": "预览",
+  "files.revealInFileManager": "在文件管理器中定位",
+  "files.revealFile": "在文件管理器中定位 {filename}",
   "files.download": "下载",
   "files.previewFile": "预览 {filename}",
   "files.downloadFile": "下载 {filename}",
