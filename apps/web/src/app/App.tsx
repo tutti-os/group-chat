@@ -69,6 +69,7 @@ import { resolveAgentProfileParticipant, resolveMessageAgentParticipant, resolve
 import { attachmentLabel, t } from "./i18n/index.js";
 import { collectMessageProcess } from "./agent-thinking.js";
 import { UNREAD_FEATURE_ENABLED } from "./feature-flags.js";
+import { initTuttiWorkspaceContextCache } from "./tutti-bridge.js";
 
 const DEFAULT_CONVERSATION_SIDEBAR_WIDTH = 300;
 const MIN_CONVERSATION_SIDEBAR_WIDTH = 240;
@@ -166,6 +167,8 @@ export function App() {
       setRefreshingLocalAgentProviders(false);
     }
   }, []);
+
+  useEffect(() => initTuttiWorkspaceContextCache(), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -324,6 +327,9 @@ export function App() {
     ? state.messages
         .filter((item) => item.conversationId === currentConversation.id)
         .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
+    : [];
+  const currentArtifacts = currentConversation
+    ? state.artifacts.filter((artifact) => artifact.conversationId === currentConversation.id)
     : [];
   const currentActiveRuns = currentConversation
     ? visibleActiveRuns(
@@ -1212,7 +1218,7 @@ export function App() {
                 <ConversationFilesPanel
                   open={filesPanelOpen}
                   conversationId={currentConversation.id}
-                  artifacts={state.artifacts}
+                  artifacts={currentArtifacts}
                   messages={currentMessages}
                   messageBlocks={state.messageBlocks.filter((block) =>
                     currentMessages.some((message) => message.id === block.messageId),
@@ -1256,7 +1262,7 @@ export function App() {
                   messages={currentMessages}
                   allMessages={state.messages}
                   blocks={state.messageBlocks}
-                  artifacts={state.artifacts}
+                  artifacts={currentArtifacts}
                   agentRunEvents={state.agentRunEvents}
                   agentRuns={state.agentRuns}
                   participants={currentParticipants}
@@ -1385,7 +1391,7 @@ export function App() {
                         composerRequest={composerRequest}
                         summaryTasks={backgroundTasks}
                         userDisplayName={userProfile.displayName}
-                        artifacts={state.artifacts.filter((artifact) => artifact.conversationId === currentConversation.id)}
+                        artifacts={currentArtifacts}
                         onFocusRoomFile={({ messageId, artifactId }) => {
                           setFocusMessageRequest((current) => ({
                             messageId,

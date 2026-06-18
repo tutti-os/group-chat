@@ -173,6 +173,24 @@
   text-underline-offset: 2px;
 }
 
+.message-prose [data-mention-display-mode="reference-link"] {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  color: var(--accent);
+  background: transparent;
+  box-shadow: none;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.message-prose a[data-mention-display-mode="reference-link"] {
+  color: var(--accent);
+  text-decoration: none;
+}
+
 .message-prose code:not(pre code) {
   border-radius: 4px;
   padding: 1px 4px;

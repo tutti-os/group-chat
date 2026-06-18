@@ -62,7 +62,7 @@
   "settings.about.appName": "群聊",
   "settings.about.description": "Tutti 本地 Agent 群聊应用",
 
-  "composer.placeholder": "发送消息，输入 / 使用命令...",
+  "composer.placeholder": "输入@ 引用群内成员、群内文件、会话、应用或者任务",
   "composer.sendMessage": "发送消息",
   "composer.stopResponses": "停止回复",
   "composer.attachFiles": "添加附件",

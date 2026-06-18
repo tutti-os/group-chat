@@ -1,4 +1,4 @@
-import type { AppReferenceListResponse, TuttiAtProviderId, TuttiReferenceInsert } from "@group-chat/shared";
+import type { AppReferenceListResponse, Artifact, TuttiAtProviderId, TuttiReferenceInsert } from "@group-chat/shared";
 import { TUTTI_AT_PROVIDER_IDS } from "@group-chat/shared";
 import { resolveArtifactPublicUrl } from "./artifact-actions.js";
 import { listAppReferences } from "../api/client.js";
@@ -74,8 +74,32 @@ const STABLE_HOST_PROVIDERS = new Set<TuttiAtProviderId>([
 ]);
 
 const STABLE_HOST_MENTION_CACHE_LIMIT = 50;
+const ROOM_FILE_MENTION_CACHE_LIMIT = 200;
 
 const stableHostMentionCache = new Map<string, TuttiAtQueryResult[]>();
+
+type RoomFileMentionCacheEntry = {
+  fingerprint: string;
+  items: TuttiAtQueryResult[];
+};
+
+const roomFileMentionCache = new Map<string, RoomFileMentionCacheEntry>();
+
+export function roomFileMentionCacheFingerprint(
+  artifacts: ReadonlyArray<Pick<Artifact, "id" | "roomId">>,
+  roomId: string,
+) {
+  return artifacts
+    .filter((artifact) => artifact.roomId === roomId)
+    .map((artifact) => artifact.id)
+    .sort()
+    .join("\0");
+}
+
+export function isRoomFileMentionCacheReady(roomId: string, fingerprint: string) {
+  const cached = roomFileMentionCache.get(roomId);
+  return cached?.fingerprint === fingerprint;
+}
 
 function hostProviderCacheKey(providers: readonly TuttiAtProviderId[]) {
   return [...providers].sort().join("\0");
@@ -85,9 +109,61 @@ function isStableHostProviderQuery(providers: readonly TuttiAtProviderId[]) {
   return providers.length > 0 && providers.every((providerId) => STABLE_HOST_PROVIDERS.has(providerId));
 }
 
-export function isTuttiAtMentionCacheReady(providers: readonly TuttiAtProviderId[]) {
+export function isTuttiAtMentionCacheReady(
+  providers: readonly TuttiAtProviderId[],
+  options?: {
+    roomId?: string | null;
+    roomFileFingerprint?: string;
+  },
+) {
+  if (providers.includes("file") && options?.roomId && options.roomFileFingerprint !== undefined) {
+    return isRoomFileMentionCacheReady(options.roomId, options.roomFileFingerprint);
+  }
   if (!isStableHostProviderQuery(providers)) return false;
   return stableHostMentionCache.has(hostProviderCacheKey(providers));
+}
+
+export function readCachedTuttiAtMentions(input: {
+  keyword: string;
+  roomId?: string | null;
+  maxResults?: number;
+  providers?: readonly TuttiAtProviderId[];
+  roomArtifacts?: ReadonlyArray<Pick<Artifact, "id" | "roomId" | "createdAt">>;
+}): TuttiAtQueryResult[] | null {
+  const keyword = input.keyword.trim();
+  const maxResults = Math.max(1, input.maxResults ?? 20);
+  const providers = input.providers?.length ? input.providers : [...TUTTI_AT_PROVIDER_IDS];
+  const results: TuttiAtQueryResult[] = [];
+  const seen = new Set<string>();
+  const roomArtifacts = input.roomArtifacts?.filter((artifact) => artifact.roomId === input.roomId) ?? [];
+
+  const push = (item: TuttiAtQueryResult) => {
+    const key = tuttiAtMentionKey(item.providerId, item.itemId);
+    if (seen.has(key)) return;
+    seen.add(key);
+    results.push(item);
+  };
+
+  if (input.roomId && providers.includes("file")) {
+    const fingerprint = roomFileMentionCacheFingerprint(roomArtifacts, input.roomId);
+    const cached = roomFileMentionCache.get(input.roomId);
+    if (!cached || cached.fingerprint !== fingerprint) return null;
+    for (const item of finalizeRoomFileMentions(cached.items, keyword, maxResults, roomArtifacts)) {
+      push(item);
+    }
+  }
+
+  const hostProviders = providers.filter((providerId) => providerId !== "file");
+  if (hostProviders.length > 0) {
+    if (!isStableHostProviderQuery(hostProviders)) return null;
+    const cached = stableHostMentionCache.get(hostProviderCacheKey(hostProviders));
+    if (!cached) return null;
+    for (const item of sortTuttiAtMentionResults(filterTuttiAtMentionsByKeyword(cached, keyword), keyword).slice(0, maxResults)) {
+      push(item);
+    }
+  }
+
+  return sortTuttiAtMentionResults(results, keyword, roomArtifacts).slice(0, maxResults);
 }
 
 function filterTuttiAtMentionsByKeyword(items: readonly TuttiAtQueryResult[], keyword: string) {
@@ -115,6 +191,7 @@ export async function queryTuttiAtMentions(input: {
   roomId?: string | null;
   maxResults?: number;
   providers?: readonly TuttiAtProviderId[];
+  roomArtifacts?: ReadonlyArray<Pick<Artifact, "id" | "roomId" | "createdAt">>;
 }): Promise<TuttiAtQueryResult[]> {
   const keyword = input.keyword.trim();
   const maxResults = Math.max(1, input.maxResults ?? 20);
@@ -122,6 +199,10 @@ export async function queryTuttiAtMentions(input: {
   const providerSet = new Set<TuttiAtProviderId>(providers);
   const results: TuttiAtQueryResult[] = [];
   const seen = new Set<string>();
+  const roomArtifacts = input.roomArtifacts?.filter((artifact) => artifact.roomId === input.roomId) ?? [];
+  const roomFileFingerprint = input.roomId
+    ? roomFileMentionCacheFingerprint(roomArtifacts, input.roomId)
+    : "";
 
   const push = (item: TuttiAtQueryResult) => {
     const key = tuttiAtMentionKey(item.providerId, item.itemId);
@@ -131,7 +212,13 @@ export async function queryTuttiAtMentions(input: {
   };
 
   if (input.roomId && providerSet.has("file")) {
-    const localFiles = await queryLocalRoomFileReferences(input.roomId, keyword, maxResults);
+    const localFiles = await queryLocalRoomFileReferences(
+      input.roomId,
+      keyword,
+      maxResults,
+      roomFileFingerprint,
+      roomArtifacts,
+    );
     for (const item of localFiles) {
       push(item);
     }
@@ -147,13 +234,58 @@ export async function queryTuttiAtMentions(input: {
     }
   }
 
-  return sortTuttiAtMentionResults(results, keyword).slice(0, maxResults);
+  return sortTuttiAtMentionResults(results, keyword, roomArtifacts).slice(0, maxResults);
 }
 
-function sortTuttiAtMentionResults(results: TuttiAtQueryResult[], keyword: string) {
+function sortTuttiAtMentionResults(
+  results: TuttiAtQueryResult[],
+  keyword: string,
+  roomArtifacts: ReadonlyArray<Pick<Artifact, "id" | "createdAt">> = [],
+) {
   const query = keyword.trim();
-  if (!query) return results;
+  if (!query) {
+    const roomFiles = results.filter((item) => item.providerId === "file");
+    const others = results.filter((item) => item.providerId !== "file");
+    return [...sortRoomFileMentionsByRecency(roomFiles, roomArtifacts), ...others];
+  }
   return [...results].sort((left, right) => scoreTuttiAtMentionMatch(right, query) - scoreTuttiAtMentionMatch(left, query));
+}
+
+function parseArtifactCreatedAtMs(createdAt: string) {
+  const ms = Date.parse(createdAt);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function sortRoomFileMentionsByRecency(
+  items: readonly TuttiAtQueryResult[],
+  roomArtifacts: ReadonlyArray<Pick<Artifact, "id" | "createdAt">> = [],
+) {
+  const createdAtByArtifactId = new Map(
+    roomArtifacts.map((artifact) => [artifact.id, parseArtifactCreatedAtMs(artifact.createdAt)]),
+  );
+  return [...items].sort((left, right) => {
+    const leftMs = left.roomFile?.artifactId
+      ? createdAtByArtifactId.get(left.roomFile.artifactId) ?? 0
+      : 0;
+    const rightMs = right.roomFile?.artifactId
+      ? createdAtByArtifactId.get(right.roomFile.artifactId) ?? 0
+      : 0;
+    if (rightMs !== leftMs) return rightMs - leftMs;
+    return left.label.localeCompare(right.label);
+  });
+}
+
+function finalizeRoomFileMentions(
+  items: TuttiAtQueryResult[],
+  keyword: string,
+  maxResults: number,
+  roomArtifacts: ReadonlyArray<Pick<Artifact, "id" | "createdAt">>,
+) {
+  const filtered = filterTuttiAtMentionsByKeyword(items, keyword);
+  const sorted = keyword.trim()
+    ? sortTuttiAtMentionResults(filtered, keyword, roomArtifacts)
+    : sortRoomFileMentionsByRecency(filtered, roomArtifacts);
+  return sorted.slice(0, maxResults);
 }
 
 async function queryHostAtMentions(
@@ -199,16 +331,28 @@ async function queryLocalRoomFileReferences(
   roomId: string,
   keyword: string,
   maxResults: number,
+  fingerprint: string,
+  roomArtifacts: ReadonlyArray<Pick<Artifact, "id" | "createdAt">>,
 ): Promise<TuttiAtQueryResult[]> {
+  const cached = roomFileMentionCache.get(roomId);
+  if (cached && cached.fingerprint === fingerprint) {
+    return finalizeRoomFileMentions(cached.items, keyword, maxResults, roomArtifacts);
+  }
+
   try {
     const response = await listAppReferences({
       parentGroupId: roomId,
-      filterText: keyword || null,
-      limit: maxResults,
+      filterText: null,
+      limit: ROOM_FILE_MENTION_CACHE_LIMIT,
       kinds: ["file"],
     });
     if ("error" in response) return [];
-    return mapLocalFileReferences(response as AppReferenceListResponse);
+    const items = sortRoomFileMentionsByRecency(
+      mapLocalFileReferences(response as AppReferenceListResponse),
+      roomArtifacts,
+    );
+    roomFileMentionCache.set(roomId, { fingerprint, items });
+    return finalizeRoomFileMentions(items, keyword, maxResults, roomArtifacts);
   } catch {
     return [];
   }
@@ -230,9 +374,10 @@ function mapLocalFileReferences(response: AppReferenceListResponse): TuttiAtQuer
           previewUrl: previewUrl ?? "",
         }
       : undefined;
+    const itemId = item.reference.artifactId ?? path;
     items.push({
       providerId: "file",
-      itemId: path,
+      itemId,
       label,
       subtitle: item.reference.description ?? path,
       thumbnailUrl: mimeType.startsWith("image/") ? previewUrl : null,

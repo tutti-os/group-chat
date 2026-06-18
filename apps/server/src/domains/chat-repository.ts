@@ -949,10 +949,9 @@ export class ChatRepository {
     const roomRoot = existsSync(room.artifactRoot) ? room.artifactRoot : ensureRoomDirs(room.id);
     mkdirSync(join(roomRoot, "uploads"), { recursive: true });
     const id = nanoid();
-    const filename = safeFilename(input.filename);
-    const extension = extname(filename);
-    const storedName = `${id}${extension}`;
-    const localPath = join(roomRoot, "uploads", storedName);
+    const uploadRoot = join(roomRoot, "uploads");
+    const filename = availableUploadFilename(uploadRoot, input.filename);
+    const localPath = join(uploadRoot, filename);
     const bytes = Buffer.from(input.dataBase64, "base64");
     writeFileSync(localPath, bytes);
     const textPreview = buildTextPreview(localPath, input.mimeType);
@@ -1406,6 +1405,21 @@ function rowToPrivateTask(row: any): PrivateTaskSnapshot {
 function safeFilename(filename: string) {
   const clean = basename(filename).replace(/[^\w.\- ()]/g, "_");
   return clean || "upload.bin";
+}
+
+function availableUploadFilename(uploadRoot: string, filename: string) {
+  const clean = safeFilename(filename);
+  if (!existsSync(join(uploadRoot, clean))) return clean;
+
+  const extension = extname(clean);
+  const base = extension ? clean.slice(0, -extension.length) : clean;
+  for (let index = 2; index < 10000; index += 1) {
+    const candidate = `${base}${index}${extension}`;
+    if (!existsSync(join(uploadRoot, candidate))) return candidate;
+  }
+
+  const fallback = `${base}-${nanoid()}${extension}`;
+  return fallback;
 }
 
 function normalizeReasoningEffort(value: string | null | undefined) {

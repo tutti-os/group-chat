@@ -7,18 +7,15 @@ import { cancelRun, sendMessage, updateMessage, uploadArtifact } from "../../../
 import { getArtifactCategory, revealArtifactInTuttiFileManager, resolveArtifactPublicUrl } from "../../artifact-actions.js";
 import { formatBytes, fileToBase64 } from "../../formatting.js";
 import {
-  ARTIFACT_CLIPBOARD_MIME,
+  clearArtifactClipboardStash,
   findEmbeddedLinks,
   formatMessageLink,
   formatMessageLinkLabel,
   formatSummaryLink,
-  parseArtifactClipboardPayload,
-  parseArtifactIdsFromClipboardHtml,
   parseMessageLinkIds,
-  readStashedArtifactClipboard,
-  readStashedArtifactIds,
-  SUMMARY_LINK_MIME,
+  readArtifactClipboardFromDataTransfer,
   readStashedSummaryLink,
+  SUMMARY_LINK_MIME,
   summaryLinkLabel,
 } from "../../chat-links.js";
 import { resolveArtifactsByIds } from "../../message-artifacts.js";
@@ -29,17 +26,22 @@ import { AgentAvatar } from "../ui/AgentAvatar.js";
 import { resolveAgentAvatarFromContext } from "../../identity-avatar.js";
 import { WHISPER_FEATURE_ENABLED } from "../../feature-flags.js";
 import { attachmentLabel, useTranslation, t } from "../../i18n/index.js";
-import { tryOpenArtifactInTutti, tryOpenFileInTuttiSync } from "../../tutti-bridge.js";
+import { tryOpenArtifactInTutti, tryOpenFileInTuttiSync, buildTuttiMentionHref, isOpenableTuttiReferenceProvider } from "../../tutti-bridge.js";
+import { openReferenceMentionTarget } from "../../reference-mention-open.js";
 import {
   parseTuttiAtMentionKey,
   queryTuttiAtMentions,
+  readCachedTuttiAtMentions,
   isTuttiAtMentionCacheReady,
+  roomFileMentionCacheFingerprint,
   resolveMentionThumbnailUrl,
   tuttiAtMentionKey,
   type TuttiAtQueryResult,
   type TuttiAtRoomFileMeta,
 } from "../../tutti-at-mentions.js";
+import { serializeReferenceMentionChip } from "../../reference-mentions.js";
 import { mentionTabProviders } from "../../mention-panel-tabs.js";
+import { REFERENCE_MENTION_CHIP_CLASS, REFERENCE_MENTION_COLOR } from "./reference-mention-chip.js";
 import {
   MENTION_PANEL_TABS,
   mentionTabI18nKey,
@@ -148,6 +150,14 @@ export function Composer(props: {
     };
   }, [memberMentionOptions, referenceMentionOptions]);
   const mentionOptions = mentionOptionsByTab[activeMentionTab] ?? [];
+  const roomArtifacts = useMemo(
+    () => props.artifacts.filter((artifact) => artifact.roomId === props.conversation.roomId),
+    [props.artifacts, props.conversation.roomId],
+  );
+  const roomFileFingerprint = useMemo(
+    () => roomFileMentionCacheFingerprint(roomArtifacts, props.conversation.roomId),
+    [roomArtifacts, props.conversation.roomId],
+  );
 
   useEffect(() => {
     if (mentionQuery === null) {
@@ -162,13 +172,29 @@ export function Composer(props: {
       return;
     }
     let cancelled = false;
-    const cacheReady = isTuttiAtMentionCacheReady(tabProviders);
+    const cacheReady = isTuttiAtMentionCacheReady(tabProviders, {
+      roomId: props.conversation.roomId,
+      roomFileFingerprint,
+    });
+    const cachedItems = readCachedTuttiAtMentions({
+      keyword: mentionQuery,
+      roomId: props.conversation.roomId,
+      maxResults: 20,
+      providers: tabProviders,
+      roomArtifacts,
+    });
+    if (cachedItems) {
+      setExternalMentionOptions(cachedItems);
+      setActiveMentionIndex(0);
+    }
     setExternalMentionsLoading(!cacheReady);
+    if (cacheReady && cachedItems) return;
     void queryTuttiAtMentions({
       keyword: mentionQuery,
       roomId: props.conversation.roomId,
       maxResults: 20,
       providers: tabProviders,
+      roomArtifacts,
     }).then((items) => {
       if (cancelled) return;
       setExternalMentionOptions(items);
@@ -178,7 +204,7 @@ export function Composer(props: {
     return () => {
       cancelled = true;
     };
-  }, [mentionQuery, props.conversation.roomId, activeMentionTab]);
+  }, [mentionQuery, props.conversation.roomId, activeMentionTab, roomArtifacts, roomFileFingerprint]);
   const send = async () => {
     if (sending || (!text.trim() && uploadItems.length === 0)) return;
     setSending(true);
@@ -468,47 +494,57 @@ export function Composer(props: {
   };
 
   const openFileReferenceFromChip = useCallback((element: HTMLElement) => {
-    const href = element.dataset.mentionLinkHref?.trim();
+    const href = element instanceof HTMLAnchorElement ? element.href : "";
+    const mentionHref = href.startsWith("mention://") ? href : element.dataset.mentionLinkHref?.trim() || "";
+    if (mentionHref.startsWith("mention://")) {
+      let referenceInsert: MentionTarget["referenceInsert"];
+      let referenceScope: MentionTarget["referenceScope"];
+      if (element.dataset.mentionReferenceInsert) {
+        try {
+          referenceInsert = JSON.parse(element.dataset.mentionReferenceInsert) as MentionTarget["referenceInsert"];
+          if (referenceInsert?.kind === "mention") {
+            referenceScope = referenceInsert.scope;
+          }
+        } catch {
+          referenceInsert = undefined;
+        }
+      }
+      openReferenceMentionTarget(mentionHref, element.dataset.mentionLabel?.trim() || "", {
+        referenceProviderId: element.dataset.mentionReferenceProvider as MentionTarget["referenceProviderId"],
+        referenceEntityId: parseTuttiAtMentionKey(element.dataset.mentionId ?? "")?.itemId,
+        referenceInsert,
+        referenceScope,
+      }, props.artifacts);
+      return;
+    }
     const label = element.dataset.mentionLabel?.trim();
     const roomFileRaw = element.dataset.mentionRoomFile;
-    if (href) {
+    if (roomFileRaw) {
+      try {
+        const roomFile = JSON.parse(roomFileRaw) as TuttiAtRoomFileMeta;
+        const artifact = props.artifacts.find((item) => item.id === roomFile.artifactId);
+        if (artifact) {
+          revealArtifactInTuttiFileManager(artifact);
+          return;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    const fileHref = element.dataset.mentionLinkHref?.trim();
+    if (fileHref && !fileHref.startsWith("mention://")) {
       const locationType = roomFileRaw ? "app-data-relative" : "workspace-relative";
       if (tryOpenFileInTuttiSync({
-        path: href,
-        location: { type: locationType, path: href },
-        name: label || href.split("/").pop() || href,
+        path: fileHref,
+        location: { type: locationType, path: fileHref },
+        name: label || fileHref.split("/").pop() || fileHref,
         mode: "reveal",
       })) {
         return;
       }
     }
-
-    if (roomFileRaw) {
-      try {
-        const roomFile = JSON.parse(roomFileRaw) as TuttiAtRoomFileMeta;
-        const artifact =
-          props.artifacts.find((item) => item.id === roomFile.artifactId)
-          ?? ({
-            id: roomFile.artifactId,
-            roomId: props.conversation.roomId,
-            conversationId: props.conversationId,
-            messageId: roomFile.messageId != null ? roomFile.messageId : null,
-            sourceRunId: null,
-            kind: "upload",
-            filename: element.dataset.mentionLabel?.trim() || "file",
-            mimeType: roomFile.mimeType,
-            sizeBytes: 0,
-            localPath: href ?? "",
-            publicUrl: roomFile.previewUrl,
-            textPreview: null,
-            createdAt: new Date().toISOString(),
-          } satisfies Artifact);
-        revealArtifactInTuttiFileManager(artifact);
-      } catch {
-        // ignore
-      }
-    }
-  }, [props.artifacts, props.conversation.roomId, props.conversationId]);
+  }, [props.artifacts]);
 
   const selectMentionOption = (option: MentionOption) => {
     const editor = editorRef.current;
@@ -583,6 +619,15 @@ export function Composer(props: {
     setUploadItems((current) => [...current, ...queued]);
   };
 
+  const focusComposerAfterAttachmentInsert = () => {
+    requestAnimationFrame(() => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      placeCaretAtEditorEnd(editor, { preventScroll: true });
+      syncEditorText(true);
+    });
+  };
+
   const queueExistingArtifacts = (artifacts: Artifact[]) => {
     if (!artifacts.length) return;
     const queued = artifacts.map((artifact) => ({
@@ -599,18 +644,53 @@ export function Composer(props: {
   };
 
   const resolvePastedArtifacts = (clipboardData: DataTransfer) => {
-    const fromMime = parseArtifactClipboardPayload(clipboardData.getData(ARTIFACT_CLIPBOARD_MIME));
-    const fromStash = readStashedArtifactClipboard();
-    const fromHtml = parseArtifactIdsFromClipboardHtml(clipboardData.getData("text/html"));
-    const payload = fromMime ?? fromStash;
-    const artifactIds = payload?.artifactIds ?? fromHtml;
-    if (!artifactIds?.length) {
-      return { artifacts: [] as Artifact[], includeText: true };
+    const payload = readArtifactClipboardFromDataTransfer(clipboardData);
+    if (!payload?.artifactIds.length) {
+      return { artifacts: [] as Artifact[], includeText: true, preferOverClipboardFiles: false };
+    }
+    const artifacts = resolveArtifactsByIds(payload.artifactIds, props.artifacts);
+    let preferOverClipboardFiles = payload.preferOverClipboardFiles;
+    if (!preferOverClipboardFiles && artifacts.length > 0) {
+      const files = clipboardFiles(clipboardData);
+      const onlyClipboardImages = files.length > 0 && files.every((file) => file.type.startsWith("image/"));
+      const hasNonImageArtifact = artifacts.some((artifact) => !artifact.mimeType.startsWith("image/"));
+      if (onlyClipboardImages && hasNonImageArtifact) {
+        preferOverClipboardFiles = true;
+      }
     }
     return {
-      artifacts: resolveArtifactsByIds(artifactIds, props.artifacts),
-      includeText: payload?.includeText ?? true,
+      artifacts,
+      includeText: payload.includeText,
+      preferOverClipboardFiles,
     };
+  };
+
+  const applyPastedArtifacts = (
+    pastedArtifactClipboard: ReturnType<typeof resolvePastedArtifacts>,
+    pastedText: string,
+  ) => {
+    if (pastedArtifactClipboard.artifacts.length > 0) {
+      queueExistingArtifacts(pastedArtifactClipboard.artifacts);
+      clearArtifactClipboardStash();
+    }
+    if (
+      pastedArtifactClipboard.includeText
+      && pastedText.trim()
+      && !isPlaceholderAttachmentText(pastedText)
+    ) {
+      insertTextOrLinkChipsAtCaret(pastedText, {
+        getMessageLabel: (messageIdSegment) => formatMessageLinkLabel(
+          messageIdSegment,
+          props.allMessages,
+          props.allParticipants,
+          props.identities,
+          props.userDisplayName,
+        ),
+        getSummaryLabel: (taskId) => summaryLinkLabel(props.summaryTasks.find((task) => task.id === taskId)),
+      });
+      requestAnimationFrame(() => syncEditorText(true));
+    }
+    focusComposerAfterAttachmentInsert();
   };
 
   const uploadQueuedItems = async (items: UploadItem[]) => {
@@ -667,15 +747,7 @@ export function Composer(props: {
   };
 
   const pasteFiles = (event: ClipboardEvent<HTMLDivElement>) => {
-    const files = clipboardFiles(event.clipboardData);
-    if (files.length > 0) {
-      event.preventDefault();
-      queueFiles(files);
-      requestAnimationFrame(() => editorRef.current?.focus());
-      return;
-    }
-
-    const { artifacts: pastedArtifacts, includeText: pastedArtifactsIncludeText } = resolvePastedArtifacts(event.clipboardData);
+    const pastedArtifactClipboard = resolvePastedArtifacts(event.clipboardData);
     const pastedText = event.clipboardData.getData("text/plain");
     const summaryLinkFromMime = event.clipboardData.getData(SUMMARY_LINK_MIME).trim();
     const stashedSummaryLink = readStashedSummaryLink();
@@ -694,27 +766,23 @@ export function Composer(props: {
       return;
     }
 
-    if (pastedArtifacts.length > 0) {
+    if (pastedArtifactClipboard.preferOverClipboardFiles) {
       event.preventDefault();
-      queueExistingArtifacts(pastedArtifacts);
-      if (
-        pastedArtifactsIncludeText
-        && pastedText.trim()
-        && !isPlaceholderAttachmentText(pastedText)
-      ) {
-        insertTextOrLinkChipsAtCaret(pastedText, {
-          getMessageLabel: (messageIdSegment) => formatMessageLinkLabel(
-            messageIdSegment,
-            props.allMessages,
-            props.allParticipants,
-            props.identities,
-            props.userDisplayName,
-          ),
-          getSummaryLabel: (taskId) => summaryLinkLabel(props.summaryTasks.find((task) => task.id === taskId)),
-        });
-        requestAnimationFrame(() => syncEditorText(true));
-      }
-      requestAnimationFrame(() => editorRef.current?.focus());
+      applyPastedArtifacts(pastedArtifactClipboard, pastedText);
+      return;
+    }
+
+    const files = clipboardFiles(event.clipboardData);
+    if (files.length > 0) {
+      event.preventDefault();
+      queueFiles(files);
+      focusComposerAfterAttachmentInsert();
+      return;
+    }
+
+    if (pastedArtifactClipboard.artifacts.length > 0) {
+      event.preventDefault();
+      applyPastedArtifacts(pastedArtifactClipboard, pastedText);
       return;
     }
 
@@ -929,19 +997,20 @@ export function Composer(props: {
             onChange={(event) => {
               queueFiles(event.target.files);
               event.currentTarget.value = "";
-              requestAnimationFrame(() => editorRef.current?.focus());
+              focusComposerAfterAttachmentInsert();
             }}
           />
         </label>
-        <div className={"[display:grid] [min-height:40px] [align-content:start] [gap:8px] [padding:2px_0]"}>
+        <div className={"[display:grid] [min-height:40px] [align-content:start] [gap:6px] [padding:2px_0]"}>
           {quotes.length ? <QuoteComposerBar quotes={quotes} onRemove={() => setQuotes([])} /> : null}
-          <PendingAttachmentTray
-            uploadItems={uploadItems}
-            onRemoveUpload={removeUploadItem}
-            onOpenUpload={openUploadItem}
-          />
-          <div className={"[position:relative] [min-height:28px] [display:grid] [align-items:start]"}>
-            {!text ? (
+          <div className={"[display:flex] [min-height:28px] [min-width:0] [flex-wrap:wrap] [align-items:flex-start] [gap:4px_6px]"}>
+            <PendingAttachmentTray
+              uploadItems={uploadItems}
+              onRemoveUpload={removeUploadItem}
+              onOpenUpload={openUploadItem}
+            />
+            <div className={"[position:relative] [min-width:160px] [flex:1_1_180px] [min-height:28px] [display:grid] [align-items:start]"}>
+            {!text && t("composer.placeholder").trim() ? (
               <span className={"[pointer-events:none] [position:absolute] [left:0] [top:4px] [color:#17171755] [font-size:13px] [line-height:20px]"}>
                 {t("composer.placeholder")}
               </span>
@@ -1029,6 +1098,7 @@ export function Composer(props: {
                 }
               }}
             />
+            </div>
           </div>
         </div>
         {props.activeRuns.length > 0 ? (
@@ -1729,6 +1799,7 @@ function collectMentionTargetsFromEditor(editor: HTMLDivElement | null, particip
         referenceProviderId: parsedReference?.providerId,
         referenceEntityId: parsedReference?.itemId,
         referenceInsert,
+        ...(referenceInsert?.kind === "mention" ? { referenceScope: referenceInsert.scope } : {}),
       });
       continue;
     }
@@ -1787,7 +1858,15 @@ function referenceLinkHref(reference: TuttiAtQueryResult) {
   return reference.itemId;
 }
 
-const REFERENCE_LINK_COLOR = "#38bdf8";
+function tuttiMentionUrl(reference: TuttiAtQueryResult) {
+  if (!isOpenableTuttiReferenceProvider(reference.providerId)) {
+    return null;
+  }
+  return buildTuttiMentionHref(reference.providerId, reference.itemId, {
+    referenceInsert: reference.insert,
+    referenceScope: reference.insert.kind === "mention" ? reference.insert.scope : undefined,
+  });
+}
 
 function createFileReferenceLinkIcon() {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -1801,7 +1880,7 @@ function createFileReferenceLinkIcon() {
     "d",
     "M3.25 1.75h4.75l2.75 2.75v7a.75.75 0 0 1-.75.75H3.25a.75.75 0 0 1-.75-.75V2.5a.75.75 0 0 1 .75-.75Z",
   );
-  body.setAttribute("fill", REFERENCE_LINK_COLOR);
+  body.setAttribute("fill", REFERENCE_MENTION_COLOR);
 
   const fold = document.createElementNS("http://www.w3.org/2000/svg", "path");
   fold.setAttribute("d", "M8 1.75V4.5H10.75");
@@ -1834,7 +1913,7 @@ function createReferenceLinkIcon(providerId: TuttiAtProviderId) {
   const stroke = (d: string) => {
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", d);
-    path.setAttribute("stroke", REFERENCE_LINK_COLOR);
+    path.setAttribute("stroke", REFERENCE_MENTION_COLOR);
     path.setAttribute("stroke-width", "1.2");
     path.setAttribute("stroke-linecap", "round");
     path.setAttribute("stroke-linejoin", "round");
@@ -1872,20 +1951,8 @@ function createReferenceLinkIcon(providerId: TuttiAtProviderId) {
 }
 
 function appendStyledReferenceChipContent(chip: HTMLAnchorElement, label: string, reference: TuttiAtQueryResult) {
-  chip.className = [
-    "[display:inline-flex]",
-    "[align-items:center]",
-    "[gap:4px]",
-    "[max-width:100%]",
-    "[color:#38bdf8]",
-    "[font-size:13px]",
-    "[font-weight:600]",
-    "[line-height:20px]",
-    "[text-decoration:none]",
-    "[cursor:pointer]",
-    "[vertical-align:baseline]",
-    "[&:hover]:[text-decoration:none]",
-  ].join(" ");
+  chip.className = REFERENCE_MENTION_CHIP_CLASS;
+  chip.style.color = "var(--accent)";
 
   const iconWrap = document.createElement("span");
   iconWrap.className = "[display:inline-flex] [flex:0_0_auto] [align-items:center] [justify-content:center]";
@@ -1893,6 +1960,7 @@ function appendStyledReferenceChipContent(chip: HTMLAnchorElement, label: string
 
   const labelEl = document.createElement("span");
   labelEl.className = "[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]";
+  labelEl.style.color = "var(--accent)";
   labelEl.textContent = label;
 
   chip.append(iconWrap, labelEl);
@@ -1901,7 +1969,12 @@ function appendStyledReferenceChipContent(chip: HTMLAnchorElement, label: string
 function createMentionChip(label: string, mentionId: string, reference?: TuttiAtQueryResult) {
   if (reference && isStyledReferenceMention(reference)) {
     const chip = document.createElement("a");
-    chip.href = "#";
+    const mentionHref = tuttiMentionUrl(reference);
+    chip.href = mentionHref ?? "#";
+    if (mentionHref) {
+      chip.target = "_blank";
+      chip.rel = "noreferrer";
+    }
     chip.contentEditable = "false";
     chip.dataset.mentionChip = "true";
     chip.dataset.mentionId = mentionId;
@@ -2043,7 +2116,7 @@ function nodeTextValue(node: Node) {
   if (isWhisperChip(node)) return "";
   if (isMentionChip(node)) {
     if (node.dataset.mentionDisplayMode === "reference-link") {
-      return node.dataset.mentionLabel ?? node.textContent ?? "";
+      return serializeReferenceMentionChip(node);
     }
     return `@${node.dataset.mentionLabel ?? node.textContent?.replace(/^@/, "") ?? ""}`;
   }
@@ -2347,7 +2420,7 @@ function PendingAttachmentTray(props: {
   if (props.uploadItems.length === 0) return null;
 
   return (
-    <div className={"[display:flex] [flex-wrap:wrap] [align-items:center] [gap:8px]"} aria-label="Pending attachments">
+    <div className={"[display:contents]"} aria-label="Pending attachments">
       {props.uploadItems.map((item) => (
         <AttachmentPill
           key={item.id}
@@ -2381,7 +2454,7 @@ function AttachmentPill(props: {
   if (isImage && props.previewUrl) {
     return (
       <div
-        className={`group [position:relative] [width:128px] [height:96px] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:18px] [background:#00000008] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] ${props.failed ? "[border-color:#ef444455]" : ""}`}
+        className={`group [position:relative] [width:58px] [height:44px] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:10px] [background:#00000008] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] ${props.failed ? "[border-color:#ef444455]" : ""}`}
         role="button"
         tabIndex={0}
         aria-label={t("composer.previewFile", { filename: props.filename })}
@@ -2395,7 +2468,7 @@ function AttachmentPill(props: {
       >
         <img className={"[width:100%] [height:100%] [object-fit:cover]"} src={props.previewUrl} alt="" />
         <button
-          className={"[position:absolute] [right:7px] [top:7px] [display:inline-grid] [width:22px] [height:22px] [place-items:center] [border:0] [border-radius:999px] [color:var(--text)] [background:#ffffffd9] [opacity:0] [box-shadow:0_1px_4px_rgb(0_0_0_/_12%)] [transition:opacity_0.12s_ease,_background-color_0.12s_ease,_color_0.12s_ease] group-hover:[opacity:1] focus-visible:[opacity:1] [&:hover]:[background:#ffffff]"}
+          className={"[position:absolute] [right:3px] [top:3px] [display:inline-grid] [width:18px] [height:18px] [place-items:center] [border:0] [border-radius:999px] [color:var(--text)] [background:#fffffff0] [opacity:0] [box-shadow:0_1px_4px_rgb(0_0_0_/_12%)] [transition:opacity_0.12s_ease,_background-color_0.12s_ease,_color_0.12s_ease] group-hover:[opacity:1] focus-visible:[opacity:1] [&:hover]:[background:#ffffff]"}
           type="button"
           aria-label={`Remove ${props.filename}`}
           title={`Remove ${props.filename}`}
@@ -2404,7 +2477,7 @@ function AttachmentPill(props: {
             props.onRemove();
           }}
         >
-          <X size={13} />
+          <X size={11} />
         </button>
       </div>
     );
@@ -2412,7 +2485,7 @@ function AttachmentPill(props: {
 
   return (
     <div
-      className={`group [position:relative] [display:grid] [grid-template-columns:60px_minmax(0,_1fr)] [align-items:center] [gap:12px] [width:min(330px,_100%)] [height:86px] [border:1px_solid_var(--border)] [border-radius:22px] [padding:12px_34px_12px_12px] [background:var(--panel)] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] ${props.failed ? "[border-color:#ef444455] [background:#ef44440a]" : ""}`}
+      className={`group [position:relative] [display:grid] [grid-template-columns:24px_minmax(0,_1fr)] [align-items:center] [gap:7px] [width:min(220px,_100%)] [height:32px] [border:1px_solid_var(--border)] [border-radius:10px] [padding:4px_24px_4px_5px] [background:var(--panel)] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] ${props.failed ? "[border-color:#ef444455] [background:#ef44440a]" : ""}`}
       role="button"
       tabIndex={0}
       aria-label={t("composer.previewFile", { filename: props.filename })}
@@ -2424,26 +2497,26 @@ function AttachmentPill(props: {
         }
       }}
     >
-      <span className={"[display:inline-grid] [width:60px] [height:60px] [overflow:hidden] [place-items:center] [border-radius:14px] [color:var(--muted)] [background:#00000008]"}>
+      <span className={"[display:inline-grid] [width:24px] [height:24px] [overflow:hidden] [place-items:center] [border-radius:7px] [color:var(--muted)] [background:#00000008]"}>
         {isImage && props.previewUrl ? (
           <img className={"[width:100%] [height:100%] [object-fit:cover]"} src={props.previewUrl} alt="" />
         ) : isImage ? (
-          <ImageIcon size={19} />
+          <ImageIcon size={14} />
         ) : (
-          <FileText size={19} />
+          <FileText size={14} />
         )}
       </span>
-      <span className={"[display:grid] [min-width:0] [gap:3px]"}>
-        <strong className={"[overflow:hidden] [color:var(--text)] [font-size:15px] [font-weight:650] [line-height:20px] [text-overflow:ellipsis] [white-space:nowrap]"}>
+      <span className={"[display:flex] [min-width:0] [align-items:baseline] [gap:5px]"}>
+        <strong className={"[min-width:0] [overflow:hidden] [color:var(--text)] [font-size:12px] [font-weight:650] [line-height:16px] [text-overflow:ellipsis] [white-space:nowrap]"}>
           {props.filename}
         </strong>
-        <small className={`[overflow:hidden] [font-size:13px] [font-weight:450] [line-height:18px] [text-overflow:ellipsis] [white-space:nowrap] ${props.failed ? "[color:var(--danger)]" : "[color:var(--muted)]"}`}>
-          {hasStatus ? `${props.status} · ` : ""}
+        <small className={`[flex:0_0_auto] [overflow:hidden] [font-size:11px] [font-weight:450] [line-height:14px] [text-overflow:ellipsis] [white-space:nowrap] ${props.failed ? "[color:var(--danger)]" : "[color:var(--muted)]"}`}>
+          {hasStatus ? `${props.status} ` : ""}
           {formatBytes(props.sizeBytes)}
         </small>
       </span>
       <button
-        className={"[position:absolute] [right:9px] [top:9px] [display:inline-grid] [width:22px] [height:22px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:#ffffffd9] [opacity:0] [box-shadow:0_1px_4px_rgb(0_0_0_/_8%)] [transition:opacity_0.12s_ease,_background-color_0.12s_ease,_color_0.12s_ease] group-hover:[opacity:1] focus-visible:[opacity:1] [&:hover]:[color:var(--text)] [&:hover]:[background:#ffffff]"}
+        className={"[position:absolute] [right:4px] [top:6px] [display:inline-grid] [width:18px] [height:18px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:#ffffffd9] [opacity:0] [box-shadow:0_1px_4px_rgb(0_0_0_/_8%)] [transition:opacity_0.12s_ease,_background-color_0.12s_ease,_color_0.12s_ease] group-hover:[opacity:1] focus-visible:[opacity:1] [&:hover]:[color:var(--text)] [&:hover]:[background:#ffffff]"}
         type="button"
         aria-label={`Remove ${props.filename}`}
         title={`Remove ${props.filename}`}
@@ -2452,7 +2525,7 @@ function AttachmentPill(props: {
           props.onRemove();
         }}
       >
-        <X size={13} />
+        <X size={11} />
       </button>
     </div>
   );

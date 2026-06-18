@@ -310,6 +310,39 @@ export function readStashedArtifactIds() {
   return readStashedArtifactClipboard()?.artifactIds ?? null;
 }
 
+export function clearArtifactClipboardStash() {
+  sessionStorage.removeItem(ARTIFACT_CLIPBOARD_KEY);
+}
+
+export interface ArtifactClipboardReadResult extends ArtifactClipboardPayload {
+  /** When true, pasted clipboard file blobs (e.g. spurious image/png) should be ignored. */
+  preferOverClipboardFiles: boolean;
+}
+
+export function readArtifactClipboardFromDataTransfer(dataTransfer: DataTransfer): ArtifactClipboardReadResult | null {
+  const fromMime = parseArtifactClipboardPayload(dataTransfer.getData(ARTIFACT_CLIPBOARD_MIME));
+  if (fromMime) {
+    return { ...fromMime, preferOverClipboardFiles: true };
+  }
+
+  const fromHtml = parseArtifactIdsFromClipboardHtml(dataTransfer.getData("text/html"));
+  if (fromHtml?.length) {
+    const fromStash = readStashedArtifactClipboard();
+    return {
+      artifactIds: fromHtml,
+      includeText: fromStash?.includeText ?? true,
+      preferOverClipboardFiles: true,
+    };
+  }
+
+  const fromStash = readStashedArtifactClipboard();
+  if (fromStash?.artifactIds.length) {
+    return { ...fromStash, preferOverClipboardFiles: false };
+  }
+
+  return null;
+}
+
 export function parseArtifactClipboardPayload(payload: string): ArtifactClipboardPayload | null {
   const trimmed = payload.trim();
   if (!trimmed) return null;
@@ -349,6 +382,9 @@ export async function copyMessagesToClipboard(input: { text: string; artifactIds
 
   const plainText = includeText ? input.text : "";
   const payload = clipboardPayload ? JSON.stringify(clipboardPayload) : "";
+  const htmlText = clipboardPayload
+    ? artifactIds.map((artifactId) => `<span data-artifact-id="${artifactId}"></span>`).join("")
+    : "";
   try {
     if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
       const items: Record<string, Blob> = {
@@ -357,11 +393,23 @@ export async function copyMessagesToClipboard(input: { text: string; artifactIds
       if (payload) {
         items[ARTIFACT_CLIPBOARD_MIME] = new Blob([payload], { type: ARTIFACT_CLIPBOARD_MIME });
       }
+      if (htmlText) {
+        items["text/html"] = new Blob([htmlText], { type: "text/html" });
+      }
       await navigator.clipboard.write([new ClipboardItem(items)]);
       return;
     }
   } catch {
     // ClipboardItem 可能因权限或不支持的 MIME 失败，继续 fallback
+  }
+
+  if (htmlText) {
+    try {
+      await copyRichFallback(htmlText, plainText);
+      return;
+    } catch {
+      // ignore
+    }
   }
 
   await copyTextFallback(plainText);
@@ -400,6 +448,27 @@ export async function copySummaryToClipboard(input: {
   }
 
   await copyTextFallback(plainText);
+}
+
+async function copyRichFallback(html: string, plainText: string) {
+  const container = document.createElement("div");
+  container.innerHTML = html;
+  container.setAttribute("contenteditable", "true");
+  container.style.position = "fixed";
+  container.style.left = "-9999px";
+  container.style.top = "0";
+  document.body.appendChild(container);
+  const range = document.createRange();
+  range.selectNodeContents(container);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  const copied = document.execCommand("copy");
+  selection?.removeAllRanges();
+  document.body.removeChild(container);
+  if (!copied && plainText) {
+    await copyTextFallback(plainText);
+  }
 }
 
 async function copyTextFallback(text: string) {

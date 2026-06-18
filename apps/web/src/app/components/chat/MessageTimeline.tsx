@@ -31,6 +31,8 @@ import {
   summaryLinkLabel,
 } from "../../chat-links.js";
 import { collectImageFileArtifactsForMessages } from "../../message-artifacts.js";
+import { enrichContentWithReferenceMentions } from "../../reference-mentions.js";
+import { MessageReferenceContent } from "./MessageReferenceContent.js";
 import { isMessageGroupBreak, MESSAGE_GROUP_IDLE_MS } from "../../message-group-breaks.js";
 import { attachmentLabel, t, translateAgentError, translateSystemNotice, useTranslation } from "../../i18n/index.js";
 
@@ -828,11 +830,6 @@ function resolveWhisperFooterLabel(
   return null;
 }
 
-const WHISPER_MARKDOWN_COMPONENTS = {
-  p: ({ children }: { children?: ReactNode }) => (
-    <span data-slot="whisper-body" className="[display:block] [margin:0] [line-height:1.35] [white-space:pre-wrap]">{children}</span>
-  ),
-};
 
 function shouldRenderWhisperPlainText(content: string) {
   const trimmed = content.trim();
@@ -1113,6 +1110,7 @@ function MessageRow(props: {
                     ? props.message.mentions
                     : undefined
                 }
+                referenceMentions={props.message.mentions}
               />
             ))}
             {showFailureFallback && failureFallbackText ? (
@@ -2004,6 +2002,7 @@ function MessageBlockRenderer(props: {
   onOpenReferencedMessage?: (message: Message) => void;
   whisperFooter?: { label: string; variant: "user" | "agent" } | null;
   whisperMentionsToStrip?: Message["mentions"];
+  referenceMentions?: Message["mentions"];
 }) {
   const blockShell = (content: ReactNode) => content;
 
@@ -2056,10 +2055,13 @@ function MessageBlockRenderer(props: {
   const bodyContent = props.whisperMentionsToStrip?.length
     ? stripLeadingMentionsFromContent(rawBodyContent, props.whisperMentionsToStrip)
     : rawBodyContent;
-  const messageLinks = extractMessageLinks(bodyContent);
-  const summaryLinks = extractSummaryLinks(bodyContent);
-  const bodyWithoutLinks = removeEmbeddedLinks(bodyContent).trim();
-  const displayContent = bodyWithoutLinks || bodyContent;
+  const enrichedBodyContent = props.referenceMentions?.length
+    ? enrichContentWithReferenceMentions(bodyContent, props.referenceMentions)
+    : bodyContent;
+  const messageLinks = extractMessageLinks(enrichedBodyContent);
+  const summaryLinks = extractSummaryLinks(enrichedBodyContent);
+  const bodyWithoutLinks = removeEmbeddedLinks(enrichedBodyContent).trim();
+  const displayContent = bodyWithoutLinks || enrichedBodyContent;
   const collapsed = displayContent.length > COLLAPSED_MESSAGE_CHAR_LIMIT;
   const isLinkOnly =
     (messageLinks.length > 0 || summaryLinks.length > 0)
@@ -2110,13 +2112,28 @@ function MessageBlockRenderer(props: {
         />
       ))}
       {collapsed ? (
-        <CollapsibleMessageContent content={displayContent} tightSpacing={hasWhisperFooter} />
+        <CollapsibleMessageContent
+          content={displayContent}
+          mentions={props.referenceMentions}
+          artifacts={props.artifacts}
+          tightSpacing={hasWhisperFooter}
+        />
       ) : whisperPlainText ? (
         <span data-slot="whisper-body" className="[display:block] [line-height:1.35] [white-space:pre-wrap]">{bodyWithoutLinks}</span>
       ) : bodyWithoutLinks ? (
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={hasWhisperFooter ? WHISPER_MARKDOWN_COMPONENTS : undefined}>{bodyWithoutLinks}</ReactMarkdown>
+        <MessageReferenceContent
+          content={bodyWithoutLinks}
+          mentions={props.referenceMentions}
+          artifacts={props.artifacts}
+          tightSpacing={hasWhisperFooter}
+        />
       ) : messageLinks.length || summaryLinks.length ? null : (
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={hasWhisperFooter ? WHISPER_MARKDOWN_COMPONENTS : undefined}>{bodyContent || " "}</ReactMarkdown>
+        <MessageReferenceContent
+          content={enrichedBodyContent || " "}
+          mentions={props.referenceMentions}
+          artifacts={props.artifacts}
+          tightSpacing={hasWhisperFooter}
+        />
       )}
       {hasWhisperFooter && props.whisperFooter ? (
         <WhisperMessageFooter label={props.whisperFooter.label} />
@@ -2236,7 +2253,12 @@ function MessageLinkCard(props: {
   );
 }
 
-function CollapsibleMessageContent(props: { content: string; tightSpacing?: boolean }) {
+function CollapsibleMessageContent(props: {
+  content: string;
+  tightSpacing?: boolean;
+  mentions?: Message["mentions"];
+  artifacts?: Artifact[];
+}) {
   const [expanded, setExpanded] = useState(false);
   const needsCollapse = props.content.length > COLLAPSED_MESSAGE_CHAR_LIMIT;
   const visibleContent =
@@ -2246,7 +2268,12 @@ function CollapsibleMessageContent(props: { content: string; tightSpacing?: bool
 
   return (
     <div className={props.tightSpacing ? "[display:grid] [gap:4px]" : "[display:grid] [gap:6px]"}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={props.tightSpacing ? WHISPER_MARKDOWN_COMPONENTS : undefined}>{visibleContent}</ReactMarkdown>
+      <MessageReferenceContent
+        content={visibleContent}
+        mentions={props.mentions}
+        artifacts={props.artifacts}
+        tightSpacing={props.tightSpacing}
+      />
       {needsCollapse ? (
         <button
           type="button"
@@ -2322,7 +2349,7 @@ function ArtifactBlock(props: { artifact: Artifact; onOpen: () => void }) {
         type="button"
         data-slot="artifact-block"
         data-artifact-id={props.artifact.id}
-        className={"[display:block] [width:min(280px,_100%)] [height:180px] [margin-top:8px] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:16px] [padding:0] [background:var(--panel)] [cursor:pointer] [transition:box-shadow_0.2s_ease] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15]"}
+        className={"[display:block] [width:min(180px,_100%)] [height:120px] [margin-top:6px] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:10px] [padding:0] [background:var(--panel)] [cursor:pointer] [transition:box-shadow_0.2s_ease] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15]"}
         onClick={props.onOpen}
         aria-label={props.artifact.filename}
         title={t("messageActions.revealInFileManager")}
@@ -2342,18 +2369,18 @@ function ArtifactBlock(props: { artifact: Artifact; onOpen: () => void }) {
       type="button"
       data-slot="artifact-block"
       data-artifact-id={props.artifact.id}
-      className={"[display:grid] [width:min(520px,_100%)] [min-height:88px] [grid-template-columns:56px_minmax(0,_1fr)] [align-items:center] [gap:16px] [margin-top:8px] [border:1px_solid_var(--border)] [border-radius:12px] [padding:16px_20px] [color:var(--text)] [background:#ffffff] [cursor:pointer] [box-shadow:0_1px_2px_rgb(0_0_0_/_3%)] [transition:border-color_0.12s_ease,_background-color_0.12s_ease,_box-shadow_0.12s_ease] hover:[border-color:#d4d4d8] hover:[background:#fbfbfc] hover:[box-shadow:0_4px_14px_rgb(0_0_0_/_6%)] focus-visible:[outline:none] focus-visible:[border-color:var(--border-strong)] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-flash=true]]:[border-color:#facc15]"}
+      className={"[display:grid] [width:min(300px,_100%)] [min-height:40px] [grid-template-columns:28px_minmax(0,_1fr)] [align-items:center] [gap:9px] [margin-top:6px] [border:1px_solid_var(--border)] [border-radius:10px] [padding:6px_10px] [color:var(--text)] [background:#ffffff] [cursor:pointer] [box-shadow:0_1px_2px_rgb(0_0_0_/_3%)] [transition:border-color_0.12s_ease,_background-color_0.12s_ease,_box-shadow_0.12s_ease] hover:[border-color:#d4d4d8] hover:[background:#fbfbfc] hover:[box-shadow:0_3px_10px_rgb(0_0_0_/_5%)] focus-visible:[outline:none] focus-visible:[border-color:var(--border-strong)] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-flash=true]]:[border-color:#facc15]"}
       onClick={props.onOpen}
       title={t("messageActions.revealInFileManager")}
     >
-      <span className={"[position:relative] [display:grid] [width:50px] [height:58px] [place-items:center] [border-radius:7px] [color:#ffffff] [background:#8d96a3] [box-shadow:inset_0_0_0_1px_rgb(255_255_255_/_20%)] before:[content:''] before:[position:absolute] before:[right:0] before:[top:0] before:[width:16px] before:[height:16px] before:[clip-path:polygon(0_0,_100%_100%,_100%_0)] before:[background:#c8ced6]"}>
-        <FileText size={25} strokeWidth={2.1} />
+      <span className={"[position:relative] [display:grid] [width:28px] [height:28px] [place-items:center] [border-radius:7px] [color:#ffffff] [background:#8d96a3] [box-shadow:inset_0_0_0_1px_rgb(255_255_255_/_20%)] before:[content:''] before:[position:absolute] before:[right:0] before:[top:0] before:[width:9px] before:[height:9px] before:[clip-path:polygon(0_0,_100%_100%,_100%_0)] before:[background:#c8ced6]"}>
+        <FileText size={15} strokeWidth={2.1} />
       </span>
-      <span className={"[display:grid] [min-width:0] [gap:8px] [text-align:left]"}>
-        <strong className={"[min-width:0] [overflow:hidden] [color:#171717] [font-size:17px] [font-weight:600] [line-height:1.25] [text-overflow:ellipsis] [white-space:nowrap]"}>
+      <span className={"[display:flex] [min-width:0] [align-items:baseline] [gap:7px] [text-align:left]"}>
+        <strong className={"[min-width:0] [overflow:hidden] [color:#171717] [font-size:13px] [font-weight:650] [line-height:18px] [text-overflow:ellipsis] [white-space:nowrap]"}>
           {props.artifact.filename}
         </strong>
-        <small className={"[color:#8a8f98] [font-size:14px] [font-weight:450] [line-height:1]"}>
+        <small className={"[flex:0_0_auto] [color:#8a8f98] [font-size:12px] [font-weight:450] [line-height:16px]"}>
           {formatBytes(props.artifact.sizeBytes)}
         </small>
       </span>

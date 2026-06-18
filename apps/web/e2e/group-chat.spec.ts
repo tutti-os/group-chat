@@ -72,7 +72,7 @@ test("creates an agent room, attaches a file, mentions an agent, and receives a 
   const criticChip = page.locator(".participantChip").filter({ has: page.getByLabel("Edit Critic UI") });
   await expect(criticChip).toBeVisible();
 
-  const composer = page.getByPlaceholder("发送消息，输入 / 使用命令...");
+  const composer = page.getByRole("textbox", { name: "消息输入框" });
   await expect(page.getByLabel("Stop responses")).toHaveCount(0);
   await expect(page.getByLabel("Run inspector")).toHaveCount(0);
   await expect(page.getByLabel("Responder preview")).toHaveCount(0);

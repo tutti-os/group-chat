@@ -256,6 +256,11 @@ function createMockBridge() {
         console.info("[tuttiExternal mock] files.open", input);
       },
     },
+    references: {
+      async open(input: { href: string }) {
+        console.info("[tuttiExternal mock] references.open", input);
+      },
+    },
   };
 }
 

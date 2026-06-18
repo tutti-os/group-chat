@@ -62,7 +62,7 @@
   "settings.about.appName": "Group Chat",
   "settings.about.description": "Tutti local agent group chat app",
 
-  "composer.placeholder": "Send a message, type / for commands...",
+  "composer.placeholder": "Send a message",
   "composer.sendMessage": "Send message",
   "composer.stopResponses": "Stop responses",
   "composer.attachFiles": "Attach files",

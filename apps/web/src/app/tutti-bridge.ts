@@ -21,9 +21,13 @@ export interface TuttiWorkspaceAppOpenFileRequest {
   };
 }
 
+export interface TuttiWorkspaceReferenceOpenRequest {
+  href: string;
+}
+
 export interface TuttiWorkspaceAppContext {
   get?(): Promise<{ workspaceId?: string; locale?: string; language?: string }>;
-  subscribe?(listener: (context: { locale?: string; language?: string } | null) => void): () => void;
+  subscribe?(listener: (context: { workspaceId?: string; locale?: string; language?: string } | null) => void): () => void;
 }
 
 export function readTuttiAppContextValue(): TuttiWorkspaceAppContext | null {
@@ -58,6 +62,9 @@ declare global {
       };
       files?: {
         open(input: TuttiWorkspaceAppOpenFileRequest): Promise<void>;
+      };
+      references?: {
+        open(input: TuttiWorkspaceReferenceOpenRequest): Promise<void>;
       };
     };
   }
@@ -129,6 +136,116 @@ export async function tryOpenFileInTutti(
   input: TuttiWorkspaceAppOpenFileRequest,
 ): Promise<boolean> {
   if (tryOpenFileInTuttiSync(input)) {
+    return true;
+  }
+  return false;
+}
+
+export function tryOpenReferenceInTuttiSync(input: TuttiWorkspaceReferenceOpenRequest): boolean {
+  const bridge = window.tuttiExternal;
+  if (!bridge?.references?.open) {
+    return false;
+  }
+
+  try {
+    void bridge.references.open(input);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function tryOpenReferenceHrefInTuttiSync(href: string): boolean {
+  const trimmed = href.trim();
+  if (!trimmed.startsWith("mention://")) return false;
+  return tryOpenReferenceInTuttiSync({ href: trimmed });
+}
+
+export type OpenableTuttiReferenceProvider = "workspace-app" | "workspace-issue" | "agent-session";
+
+export function isOpenableTuttiReferenceProvider(providerId: string): providerId is OpenableTuttiReferenceProvider {
+  return providerId === "workspace-app" || providerId === "workspace-issue" || providerId === "agent-session";
+}
+
+export function resolveReferenceMentionScope(
+  referenceInsert?: TuttiReferenceInsert,
+  referenceScope?: Readonly<Record<string, string>>,
+) {
+  if (referenceInsert?.kind === "mention" && referenceInsert.scope) {
+    return referenceInsert.scope;
+  }
+  return referenceScope;
+}
+
+let cachedTuttiWorkspaceId: string | null = null;
+
+export function readCachedTuttiWorkspaceId() {
+  return cachedTuttiWorkspaceId;
+}
+
+export function initTuttiWorkspaceContextCache() {
+  const context = readTuttiAppContextValue();
+  if (!context?.get) return () => {};
+  void context.get().then((value) => {
+    cachedTuttiWorkspaceId = value.workspaceId?.trim() || null;
+  });
+  const unsubscribe = context.subscribe?.((value) => {
+    cachedTuttiWorkspaceId = value?.workspaceId?.trim() || null;
+  });
+  return unsubscribe ?? (() => {});
+}
+
+export function buildTuttiMentionHref(
+  providerId: OpenableTuttiReferenceProvider,
+  entityId: string,
+  options?: {
+    referenceInsert?: TuttiReferenceInsert;
+    referenceScope?: Readonly<Record<string, string>>;
+    workspaceId?: string | null;
+  },
+) {
+  const scope = resolveReferenceMentionScope(options?.referenceInsert, options?.referenceScope);
+  const workspaceId = options?.workspaceId?.trim() || scope?.workspaceId?.trim() || readCachedTuttiWorkspaceId();
+  const normalizedEntityId = entityId.trim();
+  if (!workspaceId || !normalizedEntityId) return null;
+
+  const url = new URL(`mention://${providerId}/${encodeURIComponent(normalizedEntityId)}`);
+  url.searchParams.set("workspaceId", workspaceId);
+  if (providerId === "agent-session" && scope?.provider?.trim()) {
+    url.searchParams.set("provider", scope.provider.trim());
+  }
+  if (providerId === "workspace-issue") {
+    for (const key of ["mode", "outputDir", "runId", "taskId", "topicId"] as const) {
+      const value = scope?.[key]?.trim();
+      if (value) url.searchParams.set(key, value);
+    }
+  }
+  return url.toString();
+}
+
+export async function tryOpenTuttiReferenceMention(
+  providerId: OpenableTuttiReferenceProvider,
+  entityId: string,
+  options?: {
+    referenceInsert?: TuttiReferenceInsert;
+    referenceScope?: Readonly<Record<string, string>>;
+  },
+) {
+  const href = buildTuttiMentionHref(providerId, entityId, options);
+  if (href && tryOpenReferenceHrefInTuttiSync(href)) {
+    return true;
+  }
+
+  const context = readTuttiAppContextValue();
+  if (!context?.get) {
+    return false;
+  }
+  const workspaceId = (await context.get())?.workspaceId;
+  const fallbackHref = buildTuttiMentionHref(providerId, entityId, {
+    ...options,
+    workspaceId,
+  });
+  if (fallbackHref && tryOpenReferenceHrefInTuttiSync(fallbackHref)) {
     return true;
   }
   return false;

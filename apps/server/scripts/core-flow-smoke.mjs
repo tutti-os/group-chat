@@ -82,6 +82,19 @@ try {
       dataBase64: Buffer.from("Smoke attachment: prefer concise answers.", "utf8").toString("base64"),
     }),
   });
+  assert(artifactResult.artifact.filename === "brief.txt", "first upload did not keep original filename");
+  assert(artifactResult.artifact.localPath.endsWith("/brief.txt"), "first upload did not use original filename on disk");
+
+  const duplicateArtifactResult = await api(`/api/conversations/${conversation.id}/artifacts`, {
+    method: "POST",
+    body: JSON.stringify({
+      filename: "brief.txt",
+      mimeType: "text/plain",
+      dataBase64: Buffer.from("Second smoke attachment.", "utf8").toString("base64"),
+    }),
+  });
+  assert(duplicateArtifactResult.artifact.filename === "brief2.txt", "duplicate upload did not get numeric display suffix");
+  assert(duplicateArtifactResult.artifact.localPath.endsWith("/brief2.txt"), "duplicate upload did not get numeric disk suffix");
 
   const sendResult = await api(`/api/conversations/${conversation.id}/messages`, {
     method: "POST",
