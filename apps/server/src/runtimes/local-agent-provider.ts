@@ -430,6 +430,7 @@ function buildKitSystemPrompt(context: RuntimeReplyContext) {
       ? "In passive group listen mode, reply only when directly mentioned or explicitly assigned work; otherwise output [NO_REPLY]."
       : null,
     "Use the group-chat MCP tools for run-scoped room context, artifacts, sending side messages, and saving artifacts.",
+    "When you create or update Tutti workspace resources (issues/tasks, apps, or agent sessions), include clickable markdown links in your final reply so the user can open them directly. Use mention:// links, for example [task title](mention://workspace-issue/{issueId}?workspaceId={workspaceId}&topicId={topicId}) or [app name](mention://workspace-app/{appId}?workspaceId={workspaceId}). Read workspaceId and topicId from the current message <mentions> JSON (referenceInsert.scope). Prefer linking the task title instead of only listing a raw Issue ID.",
     rules ? `Collaboration rules version ${context.conversation.collaborationRulesVersion}:\n${rules}` : null,
     roleDescription ? `Role description for this participant in this room:\n${roleDescription}` : null,
   ]

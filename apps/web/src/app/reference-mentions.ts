@@ -4,6 +4,7 @@ import { parseTuttiAtMentionKey } from "./tutti-at-mentions.js";
 import { buildTuttiMentionHref, isOpenableTuttiReferenceProvider } from "./tutti-bridge.js";
 
 const REFERENCE_LINK_PREFIX = "group-chat://reference/";
+const PARTICIPANT_MENTION_LINK_PREFIX = "group-chat://participant/";
 const MENTION_LINK_PREFIX = "mention://";
 
 export function isStyledReferenceProvider(providerId: TuttiAtProviderId | string | undefined): providerId is TuttiAtProviderId {
@@ -36,6 +37,27 @@ export function formatReferenceMentionMarkdown(
   return `[${safeLabel}](${href})`;
 }
 
+export function formatParticipantMentionMarkdown(participantId: string, label: string) {
+  const displayLabel = `@${label.replace(/^@/, "")}`;
+  const safeLabel = displayLabel.replace(/\\/g, "\\\\").replace(/\[/g, "\\[");
+  return `[${safeLabel}](${PARTICIPANT_MENTION_LINK_PREFIX}${encodeURIComponent(participantId)})`;
+}
+
+export function parseParticipantMentionHref(href: string): { participantId: string } | null {
+  if (!href.startsWith(PARTICIPANT_MENTION_LINK_PREFIX)) return null;
+  const encodedParticipantId = href.slice(PARTICIPANT_MENTION_LINK_PREFIX.length);
+  if (!encodedParticipantId) return null;
+  try {
+    return { participantId: decodeURIComponent(encodedParticipantId) };
+  } catch {
+    return null;
+  }
+}
+
+export function isParticipantMentionHref(href: string | undefined | null) {
+  return Boolean(href?.startsWith(PARTICIPANT_MENTION_LINK_PREFIX));
+}
+
 export function parseReferenceMentionHref(href: string): { providerId: TuttiAtProviderId; entityId: string } | null {
   if (!href.startsWith(REFERENCE_LINK_PREFIX)) return null;
   const rest = href.slice(REFERENCE_LINK_PREFIX.length);
@@ -55,8 +77,37 @@ export function parseReferenceMentionHref(href: string): { providerId: TuttiAtPr
 export function isReferenceMentionHref(href: string | undefined | null) {
   return Boolean(
     href
-    && (href.startsWith(REFERENCE_LINK_PREFIX) || href.startsWith(MENTION_LINK_PREFIX)),
+    && (href.startsWith(REFERENCE_LINK_PREFIX)
+      || href.startsWith(MENTION_LINK_PREFIX)
+      || href.startsWith(PARTICIPANT_MENTION_LINK_PREFIX)),
   );
+}
+
+export function enrichContentWithParticipantMentions(
+  content: string,
+  mentions: Array<Pick<MentionTarget, "mentionType" | "displayNameSnapshot" | "participantId">>,
+) {
+  let result = content;
+  const participantMentions = mentions
+    .filter((mention) => mention.mentionType === "participant" || mention.mentionType === "all")
+    .map((mention) => ({
+      participantId: mention.participantId?.trim() ?? "",
+      name: mention.displayNameSnapshot.trim(),
+    }))
+    .filter((mention) => mention.participantId && mention.name)
+    .sort((left, right) => right.name.length - left.name.length);
+
+  for (const mention of participantMentions) {
+    const markdown = formatParticipantMentionMarkdown(mention.participantId, mention.name);
+    if (result.includes(markdown)) continue;
+    const escapedName = mention.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    result = result.replace(new RegExp(`@${escapedName}(?=\\s|$|[，。！？,.!?;:：；、])`, "g"), (match, offset) => {
+      const before = result.slice(0, offset);
+      if (/\[[^\]]*$/.test(before)) return match;
+      return markdown;
+    });
+  }
+  return result;
 }
 
 export function enrichContentWithReferenceMentions(
@@ -117,10 +168,12 @@ export type ReferenceMentionContentSegment =
   | { kind: "text"; text: string }
   | { kind: "reference"; label: string; href: string };
 
-const REFERENCE_MARKDOWN_LINK_PATTERN = /\[([^\]]+)\]\(((?:group-chat:\/\/reference\/|mention:\/\/)[^)]+)\)/g;
+const REFERENCE_MARKDOWN_LINK_PATTERN = /\[([^\]]+)\]\(((?:group-chat:\/\/reference\/|group-chat:\/\/participant\/|mention:\/\/)[^)]+)\)/g;
 
 export function contentHasReferenceMentions(content: string) {
-  return content.includes(REFERENCE_LINK_PREFIX) || content.includes(MENTION_LINK_PREFIX);
+  return content.includes(REFERENCE_LINK_PREFIX)
+    || content.includes(MENTION_LINK_PREFIX)
+    || content.includes(PARTICIPANT_MENTION_LINK_PREFIX);
 }
 
 export function splitContentByReferenceMentions(content: string): ReferenceMentionContentSegment[] {

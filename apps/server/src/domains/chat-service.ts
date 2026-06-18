@@ -28,6 +28,7 @@ import {
   resolveMentionSpeakingOrder,
 } from "@group-chat/shared";
 import { nanoid } from "nanoid";
+import { enrichAssistantContentWithWorkspaceResourceLinks } from "./assistant-reference-enrichment.js";
 import { AgentToolTokenStore } from "./agent-tool-tokens.js";
 import { AgentWorkspaceService } from "./agent-workspace.js";
 import { ChatRepository } from "./chat-repository.js";
@@ -548,6 +549,41 @@ export class ChatService {
       payload: { messageId },
     });
     return { messageId, hidden: true as const };
+  }
+
+  resolveMessageDeepLink(messageId: string, conversationIdHint?: string | null) {
+    const normalizedMessageId = messageId.trim();
+    if (!normalizedMessageId) {
+      return { outcome: "not_found" as const };
+    }
+
+    const message = this.repo.getMessage(normalizedMessageId);
+    const hiddenConversationId = this.repo.getHiddenMessageConversationId(normalizedMessageId);
+    const hintedConversationId = conversationIdHint?.trim() || null;
+    const conversationId = message?.conversationId ?? hiddenConversationId ?? hintedConversationId;
+    if (!conversationId) {
+      return { outcome: "not_found" as const };
+    }
+
+    const conversation = this.repo.getConversation(conversationId);
+    if (!conversation || !this.repo.getRoom(conversation.roomId)) {
+      return { outcome: "room_deleted" as const };
+    }
+
+    if (
+      !message
+      || message.status === "deleted"
+      || message.status === "recalled"
+      || hiddenConversationId
+    ) {
+      return { outcome: "message_unavailable" as const, conversationId };
+    }
+
+    return {
+      outcome: "ok" as const,
+      conversationId,
+      messageId: normalizedMessageId,
+    };
   }
 
   private normalizeMentions(conversationId: string, mentions: NonNullable<SendMessageRequest["mentions"]>) {
@@ -1277,12 +1313,18 @@ export class ChatService {
       return null;
     }
 
-    const finalBlock = this.repo.updateMessageBlock(visibleReply.block.id, { content, status: "success" });
+    const enrichedReply = enrichAssistantContentWithWorkspaceResourceLinks(content, userMessage.mentions);
+    const finalContent = enrichedReply.content;
+    const finalBlock = this.repo.updateMessageBlock(visibleReply.block.id, { content: finalContent, status: "success" });
     appendThinking("", true);
-    const finalMessage = this.repo.updateMessage(visibleReply.message.id, { content, status: "success" });
+    const finalMessage = this.repo.updateMessage(visibleReply.message.id, {
+      content: finalContent,
+      status: "success",
+      ...(enrichedReply.mentions.length ? { mentions: enrichedReply.mentions } : {}),
+    });
     const finalRun = this.repo.updateAgentRun(run.id, { status: "completed" });
     if (!finalRun) return null;
-    this.repo.touchConversation(conversationId, content);
+    this.repo.touchConversation(conversationId, finalContent);
     if (finalMessage) {
       this.workspaces.recordInteractionMemory({
         conversation,

@@ -1,7 +1,7 @@
 import type { Artifact, Message, Participant, PrivateTaskSnapshot, Identity } from "@group-chat/shared";
 import type { BackgroundTask } from "./background-tasks.js";
 import { truncateMiddle } from "./formatting.js";
-import { loadUserProfile } from "./user-profile.js";
+import { loadUserProfile, resolveDefaultDisplayName, resolveProfileDisplayName } from "./user-profile.js";
 import { attachmentLabel, t } from "./i18n/index.js";
 
 export const SUMMARY_LINK_MIME = "text/x-group-chat-summary-link";
@@ -131,16 +131,10 @@ export function resolveMessageAgentParticipant(
 
 export function resolveLocalUserDisplayName(explicitName?: string | null) {
   const explicit = explicitName?.trim();
-  if (explicit) return explicit;
-  return loadUserProfile().displayName.trim() || t("common.me");
+  if (explicit) return resolveProfileDisplayName(explicit);
+  return resolveProfileDisplayName(loadUserProfile().displayName) || resolveDefaultDisplayName();
 }
 
-const LEGACY_USER_SENDER_NAMES = new Set(["You", "Group Chat", "我"]);
-
-function isLegacyUserSenderName(name: string | null | undefined) {
-  const trimmed = name?.trim();
-  return !trimmed || LEGACY_USER_SENDER_NAMES.has(trimmed);
-}
 
 export function resolveMessageSenderLabel(
   message: Message,
@@ -149,8 +143,6 @@ export function resolveMessageSenderLabel(
   userDisplayName?: string | null,
 ) {
   if (message.role === "user") {
-    const stored = message.senderName?.trim();
-    if (stored && !isLegacyUserSenderName(stored)) return stored;
     return resolveLocalUserDisplayName(userDisplayName);
   }
   const roomAlias = participant?.displayName?.trim();

@@ -5,6 +5,13 @@ import { appPaths, ensureBaseDirs } from "../local/paths.js";
 
 let db: DatabaseSync | null = null;
 
+export function closeDb() {
+  if (db) {
+    db.close();
+    db = null;
+  }
+}
+
 export function getDb() {
   if (db) return db;
   ensureBaseDirs();

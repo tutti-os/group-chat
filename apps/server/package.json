@@ -10,6 +10,8 @@
     "core:smoke": "node scripts/core-flow-smoke.mjs",
     "local-agent:smoke": "node scripts/local-agent-smoke.mjs",
     "workspace:smoke": "node scripts/workspace-smoke.mjs",
+    "backfill:assistant-links": "tsx src/scripts/backfill-assistant-reference-links.ts --all",
+    "backfill:assistant-links:dry-run": "tsx src/scripts/backfill-assistant-reference-links.ts --all --dry-run",
     "start": "node dist/apps/server/src/main.js"
   },
   "dependencies": {

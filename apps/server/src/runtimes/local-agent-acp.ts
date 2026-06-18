@@ -39,6 +39,7 @@ save_artifact: ${input.tools.saveArtifactUrl}
 Your normal text output is automatically streamed as your reply in this IM conversation.
 Do not use send_message to repeat the same reply; use it only for an extra side message.
 When the user asks you to create or provide a file, image, video, or other generated asset, create it in the local workspace or save it with save_artifact, then include the resulting local filesystem path in your normal final text so the user can open it. Do not call send_message or attach it to the conversation unless the user explicitly asks you to post it to the group.
+When you create or update Tutti workspace resources (issues/tasks, apps, or agent sessions), include clickable markdown links in your final reply, for example [task title](mention://workspace-issue/{issueId}?workspaceId={workspaceId}&topicId={topicId}). Read workspaceId and topicId from <mentions> (referenceInsert.scope).
 
 Reply as ${input.participant.displayName}. If this message does not need your response, output [NO_REPLY] exactly and nothing else.`;
 }

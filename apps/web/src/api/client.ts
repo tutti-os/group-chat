@@ -33,8 +33,30 @@ export interface SendMessageResponse {
   targets?: Participant[];
 }
 
+export interface RemoteUserProfile {
+  displayName: string;
+  avatarPreset: string;
+  customAvatarUrl: string | null;
+  bio: string;
+}
+
+export interface LocalUserProfileResponse {
+  profile: RemoteUserProfile | null;
+}
+
 export async function fetchSnapshot(): Promise<ChatSnapshot> {
   return fetchJson("/api/bootstrap");
+}
+
+export async function fetchUserProfile(): Promise<LocalUserProfileResponse> {
+  return fetchJson("/api/user-profile");
+}
+
+export async function saveUserProfileRemote(profile: RemoteUserProfile) {
+  return fetchJson<{ profile: RemoteUserProfile }>("/api/user-profile", {
+    method: "PUT",
+    body: JSON.stringify(profile),
+  });
 }
 
 export async function fetchLocalAgentProviders(): Promise<LocalAgentProviderStatusResponse> {
@@ -79,6 +101,24 @@ export async function deleteMessage(messageId: string): Promise<HideMessageRespo
   return fetchJson(`/api/messages/${messageId}`, {
     method: "DELETE",
   });
+}
+
+export type MessageDeepLinkResponse =
+  | { outcome: "ok"; conversationId: string; messageId: string }
+  | { outcome: "message_unavailable"; conversationId: string }
+  | { outcome: "room_deleted" }
+  | { outcome: "not_found" };
+
+export async function fetchMessageDeepLink(
+  messageId: string,
+  conversationId?: string | null,
+): Promise<MessageDeepLinkResponse> {
+  const params = new URLSearchParams();
+  if (conversationId?.trim()) {
+    params.set("conversationId", conversationId.trim());
+  }
+  const query = params.toString();
+  return fetchJson(`/api/messages/${messageId}/deep-link${query ? `?${query}` : ""}`);
 }
 
 export async function cancelRun(runId: string) {

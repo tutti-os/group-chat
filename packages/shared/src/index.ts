@@ -770,3 +770,8 @@ export function uniqueParticipantDisplayNameInRoom(
     .filter(Boolean);
   return uniqueDisplayName(baseName, taken);
 }
+
+export {
+  enrichAssistantContentWithWorkspaceResourceLinks,
+  resolveTriggerUserMentions,
+} from "./assistant-reference-enrichment.js";

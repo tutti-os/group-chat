@@ -261,6 +261,16 @@ function createMockBridge() {
         console.info("[tuttiExternal mock] references.open", input);
       },
     },
+    workspace: {
+      async openFeature(input: {
+        autoSubmit?: boolean;
+        draftPrompt?: string;
+        feature: string;
+        provider?: string;
+      }) {
+        console.info("[tuttiExternal mock] workspace.openFeature", input);
+      },
+    },
   };
 }
 

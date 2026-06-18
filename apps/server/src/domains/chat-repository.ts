@@ -111,6 +111,14 @@ export class ChatRepository {
     return result.changes > 0;
   }
 
+  getHiddenMessageConversationId(messageId: string): string | null {
+    const row = getDb()
+      .prepare(`SELECT conversation_id FROM hidden_messages WHERE message_id = ?`)
+      .get(messageId) as { conversation_id?: string } | undefined;
+    const conversationId = row?.conversation_id?.trim() ?? "";
+    return conversationId || null;
+  }
+
   filterHiddenFromSnapshot(snapshot: ChatSnapshot): ChatSnapshot {
     const hiddenIds = this.listHiddenMessageIds();
     if (hiddenIds.size === 0) return snapshot;

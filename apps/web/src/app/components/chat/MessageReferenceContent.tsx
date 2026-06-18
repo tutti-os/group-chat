@@ -1,4 +1,4 @@
-import type { Artifact, MentionTarget } from "@group-chat/shared";
+import type { Artifact, MentionTarget, Participant, RuntimeProfile } from "@group-chat/shared";
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -25,11 +25,17 @@ export function MessageReferenceContent(props: {
   content: string;
   mentions?: Array<Pick<MentionTarget, "participantId" | "mentionType" | "referenceProviderId" | "referenceEntityId" | "referenceInsert">>;
   artifacts?: Artifact[];
+  participants?: Participant[];
+  runtimeProfiles?: RuntimeProfile[];
+  onOpenAgentProfile?: (participant: Participant) => void;
   tightSpacing?: boolean;
 }) {
   const markdownComponents = createReferenceMentionMarkdownComponents({
     mentions: props.mentions,
     artifacts: props.artifacts,
+    participants: props.participants,
+    runtimeProfiles: props.runtimeProfiles,
+    onOpenAgentProfile: props.onOpenAgentProfile,
     tightSpacing: props.tightSpacing,
   });
 
@@ -48,6 +54,9 @@ export function MessageReferenceContent(props: {
               href={segment.href}
               mentions={props.mentions}
               artifacts={props.artifacts}
+              participants={props.participants}
+              runtimeProfiles={props.runtimeProfiles}
+              onOpenAgentProfile={props.onOpenAgentProfile}
             >
               {segment.label}
             </ReferenceMentionLink>

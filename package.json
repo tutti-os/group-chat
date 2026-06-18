@@ -14,6 +14,7 @@
     "dev:tutti:reload": "node scripts/dev-tutti.mjs reload",
     "dev:tutti:serve": "node scripts/dev-tutti.mjs serve",
     "dev:tutti:status": "node scripts/dev-tutti.mjs status",
+    "dev:tutti:stop": "node scripts/dev-tutti.mjs stop",
     "check": "pnpm -r check",
     "test:package": "node --test tests/*.test.mjs",
     "test": "pnpm test:package",

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AppWindow, Bot, Ear, FileOutput, FileText, ImageIcon, LayoutList, LoaderCircle, Paperclip, Send, Square, Users, Video, X } from "lucide-react";
+import { AppWindow, AtSign, Bot, Ear, FileOutput, FileText, ImageIcon, LayoutList, LoaderCircle, Paperclip, Send, Square, Video, X } from "lucide-react";
 import type { AgentRun, Artifact, Conversation, Identity, LocalAgentProviderStatus, MentionTarget, Message, Participant, Room, RuntimeProfile, TuttiAtProviderId } from "@group-chat/shared";
 import { resolveArtifactLinkedMessageId } from "@group-chat/shared";
 import { cancelRun, sendMessage, updateMessage, uploadArtifact } from "../../../api/client.js";
@@ -26,6 +26,7 @@ import { AgentAvatar } from "../ui/AgentAvatar.js";
 import { resolveAgentAvatarFromContext } from "../../identity-avatar.js";
 import { WHISPER_FEATURE_ENABLED } from "../../feature-flags.js";
 import { attachmentLabel, useTranslation, t } from "../../i18n/index.js";
+import { dispatchAgentGuiTask, resolveAgentGuiDispatchFromMentions } from "../../agent-gui-dispatch.js";
 import { tryOpenArtifactInTutti, tryOpenFileInTuttiSync, buildTuttiMentionHref, isOpenableTuttiReferenceProvider } from "../../tutti-bridge.js";
 import { openReferenceMentionTarget } from "../../reference-mention-open.js";
 import {
@@ -223,14 +224,29 @@ export function Composer(props: {
       const artifacts = await uploadQueuedItems(uploadItems);
       const editorMentions = collectMentionTargetsFromEditor(editorRef.current, allMentionableParticipants);
       const isWhisper = WHISPER_FEATURE_ENABLED && hasWhisperChipInEditor(editorRef.current);
+      const messageContent = quotes.length ? `${formatQuotesForMessage(quotes)}\n\n${text}` : text;
+      const agentGuiDispatch = resolveAgentGuiDispatchFromMentions(
+        messageContent,
+        editorMentions,
+        {
+          messages: props.allMessages,
+          participants: allMentionableParticipants,
+          identities: props.identities,
+          userDisplayName: props.userDisplayName,
+          summaryTasks: props.summaryTasks,
+        },
+      );
       const result = await props.onSend(props.conversationId, {
-        content: quotes.length ? `${formatQuotesForMessage(quotes)}\n\n${text}` : text,
+        content: messageContent,
         artifactIds: artifacts.map((artifact) => artifact.id),
         parentMessageId: quotes.length === 1 ? quotes[0]!.messageId : null,
         mentions: editorMentions,
         visibility: isWhisper ? "whisper" : "public",
         senderName: props.userDisplayName.trim() || undefined,
       });
+      if (agentGuiDispatch) {
+        void dispatchAgentGuiTask(agentGuiDispatch);
+      }
       if (composerIdleBreakPendingRef.current && result.message?.id) {
         markMessageGroupBreak(result.message.id);
         composerIdleBreakPendingRef.current = false;
@@ -1156,15 +1172,35 @@ export function Composer(props: {
               {t("composer.atTabEmpty")}
             </div>
           ) : null}
-          {mentionOptions.map((option, index) => (
-            option.kind === "all" ? (
+          {(() => {
+            let participantHeaderShown = false;
+            return mentionOptions.flatMap((option, index) => {
+              const nodes: ReactNode[] = [];
+              if (
+                activeMentionTab === "members"
+                && option.kind === "participant"
+                && !participantHeaderShown
+              ) {
+                participantHeaderShown = true;
+                nodes.push(
+                  <div
+                    key="mention-likely-header"
+                    role="presentation"
+                    className={"[padding:8px_10px_4px] [color:var(--muted)] [font-size:11px] [font-weight:500] [line-height:16px]"}
+                  >
+                    {t("composer.likelyMentions")}
+                  </div>,
+                );
+              }
+              nodes.push(
+                option.kind === "all" ? (
               <button
                 key={option.key}
                 type="button"
                 role="option"
                 aria-selected={index === activeMentionIndex}
                 data-active={index === activeMentionIndex || undefined}
-                className={"[display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:9px] [width:100%] [min-width:0] [height:38px] [border:0] [border-radius:12px] [padding:0_8px] [color:var(--text)] [text-align:left] [background:transparent] [transition:background-color_0.12s_ease] [&[data-active=true]]:[background:#00000014] [&:hover]:[background:#00000014] [&_strong]:[display:block] [&_strong]:[min-width:0] [&_strong]:[overflow:hidden] [&_strong]:[font-size:12px] [&_strong]:[font-weight:500] [&_strong]:[line-height:16px] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap]"}
+                className={"[display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:9px] [width:100%] [min-width:0] [min-height:38px] [border:0] [border-radius:12px] [padding:0_8px] [color:var(--text)] [text-align:left] [background:transparent] [transition:background-color_0.12s_ease] [&[data-active=true]]:[background:#00000014] [&:hover]:[background:#00000014]"}
                 onMouseDown={(event) => {
                   event.preventDefault();
                   saveMentionSelection();
@@ -1173,10 +1209,13 @@ export function Composer(props: {
                 onMouseEnter={() => setActiveMentionIndex(index)}
               >
                 <span className={"[display:inline-grid] [width:32px] [height:32px] [place-items:center] [border-radius:999px] [color:#ffffff] [background:var(--primary)] [box-shadow:inset_0_0_0_1px_#ffffff66]"}>
-                  <Users size={14} />
+                  <AtSign size={14} />
                 </span>
-                <span className={"[display:inline-flex] [min-width:0] [align-items:center] [gap:6px]"}>
-                  <strong>{option.label}</strong>
+                <span className={"[display:inline-flex] [min-width:0] [align-items:baseline] [gap:6px]"}>
+                  <strong className={"[font-size:12px] [font-weight:500] [line-height:16px]"}>{option.label}</strong>
+                  <span className={"[color:var(--muted)] [font-size:11px] [line-height:16px] [white-space:nowrap]"}>
+                    {t("composer.notifyEveryone")}
+                  </span>
                 </span>
               </button>
             ) : option.kind === "reference" ? (
@@ -1258,8 +1297,11 @@ export function Composer(props: {
                   ) : null}
                 </div>
               </div>
-            ) : null
-            ))}
+            ) : null,
+              );
+              return nodes;
+            });
+          })()}
               </div>
             </div>,
             document.body,

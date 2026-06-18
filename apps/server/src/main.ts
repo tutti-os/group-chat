@@ -23,6 +23,7 @@ import type {
   WsServerMessage,
 } from "@group-chat/shared";
 import { AgentToolGateway } from "./domains/agent-tool-gateway.js";
+import { readUserProfile, writeUserProfile, type StoredUserProfile } from "./domains/user-profile-store.js";
 import { AgentToolTokenStore, AgentToolUnauthorizedError } from "./domains/agent-tool-tokens.js";
 import { ChatRepository } from "./domains/chat-repository.js";
 import { ChatService } from "./domains/chat-service.js";
@@ -66,6 +67,24 @@ server.get("/api/health", async () => ({
 }));
 
 server.get("/api/bootstrap", async () => chat.bootstrap());
+
+server.get("/api/user-profile", async () => ({
+  profile: readUserProfile(),
+}));
+
+server.put<{ Body: Partial<StoredUserProfile> }>("/api/user-profile", async (request, reply) => {
+  const body = request.body ?? {};
+  if (typeof body.displayName !== "string" || !body.displayName.trim()) {
+    return reply.code(400).send({ error: "displayName is required" });
+  }
+  const profile = writeUserProfile({
+    displayName: body.displayName,
+    avatarPreset: typeof body.avatarPreset === "string" ? body.avatarPreset : "saiyan-01",
+    customAvatarUrl: typeof body.customAvatarUrl === "string" ? body.customAvatarUrl : null,
+    bio: typeof body.bio === "string" ? body.bio : "",
+  });
+  return { profile };
+});
 
 server.get("/api/local-agent/providers", async () => chat.listLocalAgentProviders());
 
@@ -196,6 +215,11 @@ server.delete<{ Params: { messageId: string } }>("/api/messages/:messageId", asy
     return reply.code(400).send({ error: message });
   }
 });
+
+server.get<{ Params: { messageId: string }; Querystring: { conversationId?: string } }>(
+  "/api/messages/:messageId/deep-link",
+  async (request) => chat.resolveMessageDeepLink(request.params.messageId, request.query.conversationId ?? null),
+);
 
 server.post<{ Params: { runId: string } }>("/api/runs/:runId/cancel", async (request, reply) => {
   const result = await chat.cancelRun(request.params.runId);

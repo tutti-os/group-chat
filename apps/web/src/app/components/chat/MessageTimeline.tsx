@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Braces, BrainCircuit, CheckSquare, ChevronsDown, Copy, Edit3, Ear, FileText, MoreHorizontal, Reply, RotateCcw, Terminal, Trash2, Wrench, X } from "lucide-react";
 import type { Artifact, AgentRun, AgentRunEvent, Conversation, Identity, Message, MessageBlock, Participant, Room, RuntimeProfile } from "@group-chat/shared";
-import { isLocalUserMessage, resolveMessageVisibility } from "@group-chat/shared";
+import { isLocalUserMessage, resolveMessageVisibility, enrichAssistantContentWithWorkspaceResourceLinks, resolveTriggerUserMentions } from "@group-chat/shared";
 import { revealArtifactInTuttiFileManager } from "../../artifact-actions.js";
 import { formatBytes, formatMessageStatus } from "../../formatting.js";
 import type { LocalUserProfile } from "../../user-profile.js";
@@ -31,7 +31,7 @@ import {
   summaryLinkLabel,
 } from "../../chat-links.js";
 import { collectImageFileArtifactsForMessages } from "../../message-artifacts.js";
-import { enrichContentWithReferenceMentions } from "../../reference-mentions.js";
+import { enrichContentWithParticipantMentions, enrichContentWithReferenceMentions } from "../../reference-mentions.js";
 import { MessageReferenceContent } from "./MessageReferenceContent.js";
 import { isMessageGroupBreak, MESSAGE_GROUP_IDLE_MS } from "../../message-group-breaks.js";
 import { attachmentLabel, t, translateAgentError, translateSystemNotice, useTranslation } from "../../i18n/index.js";
@@ -952,6 +952,9 @@ function MessageRow(props: {
     return whisperFooter !== null && block.id === whisperFooterBlockId;
   });
   const isUserMessage = props.message.role === "user";
+  const triggerUserMentions = props.message.role === "assistant"
+    ? resolveTriggerUserMentions(props.message, props.allMessages)
+    : [];
   const isRemoved = props.message.status === "deleted" || props.message.status === "recalled";
   const participantIdentity = props.participant?.identityId
     ? props.identities.find((identity) => identity.id === props.participant?.identityId) ?? null
@@ -1111,6 +1114,10 @@ function MessageRow(props: {
                     : undefined
                 }
                 referenceMentions={props.message.mentions}
+                messageRole={props.message.role}
+                triggerUserMentions={triggerUserMentions}
+                onOpenAgentProfile={props.onOpenAgentProfile}
+                runtimeProfiles={props.runtimeProfiles}
               />
             ))}
             {showFailureFallback && failureFallbackText ? (
@@ -1141,6 +1148,8 @@ function MessageRow(props: {
                 summaryTasks={props.summaryTasks}
                 quotedMessage={visibleConversationBlocks.length === 0 ? props.quotedMessage : null}
                 onOpenReferencedMessage={(referencedMessage) => props.onOpenReferencedMessage(referencedMessage, props.message)}
+                onOpenAgentProfile={props.onOpenAgentProfile}
+                runtimeProfiles={props.runtimeProfiles}
               />
             ) : null}
             {runtimeEventBlocks.length ? <RuntimeEventGroup blocks={runtimeEventBlocks} artifacts={props.artifacts} onOpenArtifact={props.onOpenArtifact} /> : null}
@@ -2003,6 +2012,10 @@ function MessageBlockRenderer(props: {
   whisperFooter?: { label: string; variant: "user" | "agent" } | null;
   whisperMentionsToStrip?: Message["mentions"];
   referenceMentions?: Message["mentions"];
+  messageRole?: Message["role"];
+  triggerUserMentions?: Message["mentions"];
+  onOpenAgentProfile?: (participant: Participant) => void;
+  runtimeProfiles?: RuntimeProfile[];
 }) {
   const blockShell = (content: ReactNode) => content;
 
@@ -2055,9 +2068,20 @@ function MessageBlockRenderer(props: {
   const bodyContent = props.whisperMentionsToStrip?.length
     ? stripLeadingMentionsFromContent(rawBodyContent, props.whisperMentionsToStrip)
     : rawBodyContent;
-  const enrichedBodyContent = props.referenceMentions?.length
-    ? enrichContentWithReferenceMentions(bodyContent, props.referenceMentions)
-    : bodyContent;
+  const workspaceResourceLinks = props.messageRole === "assistant"
+    ? enrichAssistantContentWithWorkspaceResourceLinks(bodyContent, props.triggerUserMentions ?? [])
+    : { content: bodyContent, mentions: [] as Message["mentions"] };
+  const workspaceLinkedContent = workspaceResourceLinks.content;
+  const mergedReferenceMentions = [
+    ...(props.referenceMentions ?? []),
+    ...workspaceResourceLinks.mentions,
+  ];
+  const enrichedBodyContent = mergedReferenceMentions.length
+    ? enrichContentWithReferenceMentions(
+        enrichContentWithParticipantMentions(workspaceLinkedContent, mergedReferenceMentions),
+        mergedReferenceMentions,
+      )
+    : workspaceLinkedContent;
   const messageLinks = extractMessageLinks(enrichedBodyContent);
   const summaryLinks = extractSummaryLinks(enrichedBodyContent);
   const bodyWithoutLinks = removeEmbeddedLinks(enrichedBodyContent).trim();
@@ -2114,8 +2138,11 @@ function MessageBlockRenderer(props: {
       {collapsed ? (
         <CollapsibleMessageContent
           content={displayContent}
-          mentions={props.referenceMentions}
+          mentions={mergedReferenceMentions}
           artifacts={props.artifacts}
+          participants={props.allParticipants}
+          onOpenAgentProfile={props.onOpenAgentProfile}
+          runtimeProfiles={props.runtimeProfiles}
           tightSpacing={hasWhisperFooter}
         />
       ) : whisperPlainText ? (
@@ -2123,15 +2150,21 @@ function MessageBlockRenderer(props: {
       ) : bodyWithoutLinks ? (
         <MessageReferenceContent
           content={bodyWithoutLinks}
-          mentions={props.referenceMentions}
+          mentions={mergedReferenceMentions}
           artifacts={props.artifacts}
+          participants={props.allParticipants}
+          onOpenAgentProfile={props.onOpenAgentProfile}
+          runtimeProfiles={props.runtimeProfiles}
           tightSpacing={hasWhisperFooter}
         />
       ) : messageLinks.length || summaryLinks.length ? null : (
         <MessageReferenceContent
           content={enrichedBodyContent || " "}
-          mentions={props.referenceMentions}
+          mentions={mergedReferenceMentions}
           artifacts={props.artifacts}
+          participants={props.allParticipants}
+          onOpenAgentProfile={props.onOpenAgentProfile}
+          runtimeProfiles={props.runtimeProfiles}
           tightSpacing={hasWhisperFooter}
         />
       )}
@@ -2258,6 +2291,9 @@ function CollapsibleMessageContent(props: {
   tightSpacing?: boolean;
   mentions?: Message["mentions"];
   artifacts?: Artifact[];
+  participants?: Participant[];
+  onOpenAgentProfile?: (participant: Participant) => void;
+  runtimeProfiles?: RuntimeProfile[];
 }) {
   const [expanded, setExpanded] = useState(false);
   const needsCollapse = props.content.length > COLLAPSED_MESSAGE_CHAR_LIMIT;
@@ -2272,6 +2308,9 @@ function CollapsibleMessageContent(props: {
         content={visibleContent}
         mentions={props.mentions}
         artifacts={props.artifacts}
+        participants={props.participants}
+        onOpenAgentProfile={props.onOpenAgentProfile}
+        runtimeProfiles={props.runtimeProfiles}
         tightSpacing={props.tightSpacing}
       />
       {needsCollapse ? (

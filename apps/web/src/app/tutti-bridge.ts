@@ -66,6 +66,14 @@ declare global {
       references?: {
         open(input: TuttiWorkspaceReferenceOpenRequest): Promise<void>;
       };
+      workspace?: {
+        openFeature(input: {
+          autoSubmit?: boolean;
+          draftPrompt?: string;
+          feature: "agent-chat" | "agent-connect" | "app-center" | "issue-manager" | "message-center";
+          provider?: "claude-code" | "codex" | "nexight" | "hermes" | "gemini" | "openclaw";
+        }): Promise<void>;
+      };
     };
   }
 }

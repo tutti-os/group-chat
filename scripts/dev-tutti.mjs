@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
 import {
@@ -191,6 +191,42 @@ function isProcessRunning(pid) {
   }
 }
 
+async function stopTuttiDevProcesses() {
+  const patterns = [
+    "make dev-gui",
+    "electron-vite dev",
+    "/tutti/apps/desktop/build/tuttid/tuttid",
+    "/tutti/apps/desktop/node_modules/.bin/../electron-vite/bin/electron-vite.js dev",
+  ];
+  const killed = new Set();
+  for (const pattern of patterns) {
+    const result = spawnSync("pgrep", ["-f", pattern], { encoding: "utf8" });
+    for (const line of (result.stdout ?? "").split("\n")) {
+      const pid = Number.parseInt(line.trim(), 10);
+      if (!Number.isFinite(pid) || killed.has(pid)) continue;
+      try {
+        process.kill(pid, "SIGTERM");
+        killed.add(pid);
+      } catch {
+        // ignore
+      }
+    }
+  }
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  for (const pid of killed) {
+    if (!isProcessRunning(pid)) continue;
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // ignore
+    }
+  }
+  log(`stopped ${killed.size} Tutti dev process(es)`);
+  if (killed.size === 0) {
+    log("no Tutti dev GUI processes found");
+  }
+}
+
 async function readServePid() {
   try {
     const raw = (await readFile(servePidPath, "utf8")).trim();
@@ -348,6 +384,7 @@ function printHelp() {
   pnpm dev:tutti         # package, serve artifacts, start Tutti dev GUI
   pnpm dev:tutti:reload  # rebuild package and refresh local catalog
   pnpm dev:tutti:serve   # run local artifact HTTP server only
+  pnpm dev:tutti:stop    # stop Tutti dev GUI / electron-vite / tuttid
   pnpm dev:tutti:status  # show current dev package status
 
 Environment:
@@ -378,6 +415,9 @@ async function main() {
     }
     case "status":
       await printStatus();
+      break;
+    case "stop":
+      await stopTuttiDevProcesses();
       break;
     default:
       printHelp();

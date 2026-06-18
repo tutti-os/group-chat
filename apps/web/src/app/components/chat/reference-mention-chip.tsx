@@ -3,6 +3,14 @@ import type { ReactNode } from "react";
 
 export const REFERENCE_MENTION_COLOR = "#2563eb";
 
+export const PARTICIPANT_MENTION_CLASS = [
+  "[display:inline]",
+  "[color:#2563eb]",
+  "[font-weight:400]",
+  "[vertical-align:baseline]",
+  "[white-space:nowrap]",
+].join(" ");
+
 export const REFERENCE_MENTION_CHIP_CLASS = [
   "[display:inline-flex]",
   "[align-items:center]",

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { MessageSquarePlus, Pin, PinOff, Trash2 } from "lucide-react";
+import { MessageSquarePlus, Pin, PinOff, Settings, Trash2 } from "lucide-react";
 import type { Conversation, Message, Room } from "@group-chat/shared";
 import { formatShortDate } from "../../formatting.js";
 import { t, useTranslation } from "../../i18n/index.js";
@@ -16,6 +16,7 @@ export function ConversationSidebar(props: {
   onCreateRoom: () => void;
   onDeleteRoom: (room: Room, conversation: Conversation) => void;
   onTogglePin: (conversation: Conversation, pinned: boolean) => void;
+  onOpenSettings: () => void;
 }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
@@ -63,7 +64,7 @@ export function ConversationSidebar(props: {
   }, [contextMenu]);
 
   return (
-    <aside className={"[min-width:0] [background:var(--panel)] max-[760px]:[display:none]"}>
+    <aside className={"[display:flex] [flex-direction:column] [min-width:0] [height:100vh] [background:var(--panel)] max-[760px]:[display:none]"}>
       <div className={"[display:flex] [height:52px] [align-items:center] [justify-content:space-between] [gap:12px] [padding:12px_14px_10px_16px] [&_h1]:[margin:0] [&_h1]:[color:var(--text)] [&_h1]:[font-size:16px] [&_h1]:[font-weight:650] [&_h1]:[line-height:1.2] [&_h1]:[letter-spacing:0] [&_span]:[color:var(--muted)] [&_span]:[font-size:12px] [&_span]:[display:none]"}>
         <div>
           <h1>{t("sidebar.title")}</h1>
@@ -81,7 +82,7 @@ export function ConversationSidebar(props: {
           placeholder={t("sidebar.searchPlaceholder")}
         />
       </div>
-      <div className={"[height:calc(100vh_-_98px)] [overflow-y:auto] [padding:2px_8px_12px]"}>
+      <div className={"[min-height:0] [flex:1_1_auto] [overflow-y:auto] [padding:2px_8px_12px]"}>
         {visibleConversations.length === 0 ? (
           <div className={"[display:grid] [gap:10px] [margin:8px_4px] [border:1px_dashed_var(--border)] [border-radius:10px] [padding:24px_14px] [color:var(--muted)] [background:#ffffff99] [font-size:12px] [line-height:1.5] [text-align:center] [&_strong]:[color:var(--text)] [&_strong]:[font-size:13px] [&_button]:[justify-self:center] [&_button]:[height:32px] [&_button]:[border:0] [&_button]:[border-radius:6px] [&_button]:[padding:0_12px] [&_button]:[color:#ffffff] [&_button]:[background:var(--primary)] [&_button]:[font-size:12px] [&_button]:[font-weight:650]"}>
             <strong>{normalizedQuery ? t("sidebar.noMatchTitle") : t("sidebar.emptyTitle")}</strong>
@@ -140,6 +141,17 @@ export function ConversationSidebar(props: {
             </div>
           );
         })}
+      </div>
+      <div className={"[display:flex] [flex:0_0_auto] [align-items:center] [padding:8px_12px_12px_14px] [border-top:1px_solid_var(--border)]"}>
+        <button
+          type="button"
+          className={"[display:inline-grid] [place-items:center] [border:0] [width:34px] [height:34px] [border-radius:12px] [color:var(--muted)] [background:transparent] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text)] [&:hover]:[background:var(--sidebar-hover)]"}
+          title={t("nav.settings")}
+          aria-label={t("nav.settings")}
+          onClick={props.onOpenSettings}
+        >
+          <Settings size={20} />
+        </button>
       </div>
       {contextMenu && contextConversation ? (
         <ConversationContextMenu

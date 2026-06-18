@@ -71,6 +71,8 @@
   "composer.cancelEdit": "取消编辑",
   "composer.input": "消息输入框",
   "composer.everyone": "所有人",
+  "composer.notifyEveryone": "提示所有成员",
+  "composer.likelyMentions": "可能@的人",
   "composer.atMentionLoading": "正在搜索工作区引用…",
   "composer.atProvider.file": "文件",
   "composer.atProvider.workspace-issue": "议题",
