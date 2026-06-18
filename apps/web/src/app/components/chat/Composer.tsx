@@ -4,33 +4,42 @@ import { AppWindow, Bot, Ear, FileOutput, FileText, ImageIcon, LayoutList, Loade
 import type { AgentRun, Artifact, Conversation, Identity, LocalAgentProviderStatus, MentionTarget, Message, Participant, Room, RuntimeProfile, TuttiAtProviderId } from "@group-chat/shared";
 import { resolveArtifactLinkedMessageId } from "@group-chat/shared";
 import { cancelRun, sendMessage, updateMessage, uploadArtifact } from "../../../api/client.js";
-import { getArtifactCategory, openArtifactPreview, resolveArtifactPublicUrl } from "../../artifact-actions.js";
+import { getArtifactCategory, revealArtifactInTuttiFileManager, resolveArtifactPublicUrl } from "../../artifact-actions.js";
 import { formatBytes, fileToBase64 } from "../../formatting.js";
 import {
+  ARTIFACT_CLIPBOARD_MIME,
   findEmbeddedLinks,
   formatMessageLink,
   formatMessageLinkLabel,
   formatSummaryLink,
+  parseArtifactClipboardPayload,
+  parseArtifactIdsFromClipboardHtml,
   parseMessageLinkIds,
+  readStashedArtifactClipboard,
+  readStashedArtifactIds,
   SUMMARY_LINK_MIME,
   readStashedSummaryLink,
   summaryLinkLabel,
 } from "../../chat-links.js";
+import { resolveArtifactsByIds } from "../../message-artifacts.js";
 import type { BackgroundTask } from "../../background-tasks.js";
 import { markMessageGroupBreak, MESSAGE_GROUP_IDLE_MS } from "../../message-group-breaks.js";
 import { AttachmentPreviewDialog, isTextAttachment, type AttachmentPreview } from "./AttachmentPreviewDialog.js";
 import { AgentAvatar } from "../ui/AgentAvatar.js";
-import { getRuntimeProviderAvatarStyle, resolveAgentAvatarFromContext } from "../../identity-avatar.js";
-import { buildLocalAgentMentionOptions, type LocalAgentMentionOption } from "../../local-agent-mention-options.js";
+import { resolveAgentAvatarFromContext } from "../../identity-avatar.js";
 import { WHISPER_FEATURE_ENABLED } from "../../feature-flags.js";
-import { useTranslation, t } from "../../i18n/index.js";
+import { attachmentLabel, useTranslation, t } from "../../i18n/index.js";
+import { tryOpenArtifactInTutti, tryOpenFileInTuttiSync } from "../../tutti-bridge.js";
 import {
   parseTuttiAtMentionKey,
   queryTuttiAtMentions,
+  isTuttiAtMentionCacheReady,
+  resolveMentionThumbnailUrl,
   tuttiAtMentionKey,
   type TuttiAtQueryResult,
   type TuttiAtRoomFileMeta,
 } from "../../tutti-at-mentions.js";
+import { mentionTabProviders } from "../../mention-panel-tabs.js";
 import {
   MENTION_PANEL_TABS,
   mentionTabI18nKey,
@@ -106,17 +115,6 @@ export function Composer(props: {
     () => buildParticipantMentionOptions(roomMembers, mentionQuery, mentionedIds, mentionedAll, { includeEveryone: true }),
     [roomMembers, mentionQuery, mentionedIds, mentionedAll],
   );
-  const localAgentMentionOptions = useMemo(
-    () =>
-      buildLocalAgentMentionOptions(
-        props.runtimeProfiles,
-        props.localAgentProviders,
-        roomMembers,
-        props.identities,
-        mentionQuery,
-      ),
-    [props.runtimeProfiles, props.localAgentProviders, roomMembers, props.identities, mentionQuery],
-  );
   const referenceMentionOptions = useMemo<MentionOption[]>(
     () =>
       externalMentionOptions.map((item) => ({
@@ -143,13 +141,12 @@ export function Composer(props: {
     }
     return {
       members: memberMentionOptions,
-      agent: localAgentMentionOptions,
       files: referencesByTab.files,
       sessions: referencesByTab.sessions,
       apps: referencesByTab.apps,
       tasks: referencesByTab.tasks,
     };
-  }, [memberMentionOptions, localAgentMentionOptions, referenceMentionOptions]);
+  }, [memberMentionOptions, referenceMentionOptions]);
   const mentionOptions = mentionOptionsByTab[activeMentionTab] ?? [];
 
   useEffect(() => {
@@ -158,12 +155,20 @@ export function Composer(props: {
       setExternalMentionsLoading(false);
       return;
     }
+    const tabProviders = mentionTabProviders(activeMentionTab);
+    if (tabProviders === null) {
+      setExternalMentionOptions([]);
+      setExternalMentionsLoading(false);
+      return;
+    }
     let cancelled = false;
-    setExternalMentionsLoading(true);
+    const cacheReady = isTuttiAtMentionCacheReady(tabProviders);
+    setExternalMentionsLoading(!cacheReady);
     void queryTuttiAtMentions({
       keyword: mentionQuery,
       roomId: props.conversation.roomId,
       maxResults: 20,
+      providers: tabProviders,
     }).then((items) => {
       if (cancelled) return;
       setExternalMentionOptions(items);
@@ -173,7 +178,7 @@ export function Composer(props: {
     return () => {
       cancelled = true;
     };
-  }, [mentionQuery, props.conversation.roomId]);
+  }, [mentionQuery, props.conversation.roomId, activeMentionTab]);
   const send = async () => {
     if (sending || (!text.trim() && uploadItems.length === 0)) return;
     setSending(true);
@@ -462,8 +467,22 @@ export function Composer(props: {
     setMentionQuery(null);
   };
 
-  const openFileReferenceFromChip = useCallback(async (element: HTMLElement) => {
+  const openFileReferenceFromChip = useCallback((element: HTMLElement) => {
+    const href = element.dataset.mentionLinkHref?.trim();
+    const label = element.dataset.mentionLabel?.trim();
     const roomFileRaw = element.dataset.mentionRoomFile;
+    if (href) {
+      const locationType = roomFileRaw ? "app-data-relative" : "workspace-relative";
+      if (tryOpenFileInTuttiSync({
+        path: href,
+        location: { type: locationType, path: href },
+        name: label || href.split("/").pop() || href,
+        mode: "reveal",
+      })) {
+        return;
+      }
+    }
+
     if (roomFileRaw) {
       try {
         const roomFile = JSON.parse(roomFileRaw) as TuttiAtRoomFileMeta;
@@ -479,21 +498,12 @@ export function Composer(props: {
             filename: element.dataset.mentionLabel?.trim() || "file",
             mimeType: roomFile.mimeType,
             sizeBytes: 0,
-            localPath: "",
+            localPath: href ?? "",
             publicUrl: roomFile.previewUrl,
             textPreview: null,
             createdAt: new Date().toISOString(),
           } satisfies Artifact);
-        await openArtifactPreview(artifact, setPreview);
-        return;
-      } catch {
-        // fall through to external open
-      }
-    }
-    const href = element.dataset.mentionLinkHref?.trim();
-    if (href && window.tuttiExternal?.files?.open) {
-      try {
-        await window.tuttiExternal.files.open({ path: href, mode: "preview" });
+        revealArtifactInTuttiFileManager(artifact);
       } catch {
         // ignore
       }
@@ -508,23 +518,6 @@ export function Composer(props: {
     } else if (option.kind === "reference") {
       const mentionId = tuttiAtMentionKey(option.providerId, option.item.itemId);
       insertMentionChipAtActiveQuery(option.label, mentionId, option.item);
-    } else if (option.kind === "local-agent") {
-      if (option.participant) {
-        insertMention(option.participant);
-      } else {
-        insertMentionChipAtActiveQuery(option.label, option.runtimeProfile.id, {
-          providerId: "agent-session",
-          itemId: option.runtimeProfile.id,
-          label: option.label,
-          subtitle: option.subtitle,
-          insert: {
-            kind: "mention",
-            entityId: option.runtimeProfile.id,
-            label: option.label,
-            scope: { provider: option.runtimeProfile.provider },
-          },
-        });
-      }
     } else {
       insertMention(option.participant);
     }
@@ -590,6 +583,36 @@ export function Composer(props: {
     setUploadItems((current) => [...current, ...queued]);
   };
 
+  const queueExistingArtifacts = (artifacts: Artifact[]) => {
+    if (!artifacts.length) return;
+    const queued = artifacts.map((artifact) => ({
+      id: crypto.randomUUID(),
+      filename: artifact.filename,
+      mimeType: artifact.mimeType,
+      sizeBytes: artifact.sizeBytes,
+      previewUrl: artifact.mimeType.startsWith("image/") ? artifact.publicUrl : null,
+      status: "uploaded" as const,
+      file: new File([], artifact.filename, { type: artifact.mimeType }),
+      artifact,
+    }));
+    setUploadItems((current) => [...current, ...queued]);
+  };
+
+  const resolvePastedArtifacts = (clipboardData: DataTransfer) => {
+    const fromMime = parseArtifactClipboardPayload(clipboardData.getData(ARTIFACT_CLIPBOARD_MIME));
+    const fromStash = readStashedArtifactClipboard();
+    const fromHtml = parseArtifactIdsFromClipboardHtml(clipboardData.getData("text/html"));
+    const payload = fromMime ?? fromStash;
+    const artifactIds = payload?.artifactIds ?? fromHtml;
+    if (!artifactIds?.length) {
+      return { artifacts: [] as Artifact[], includeText: true };
+    }
+    return {
+      artifacts: resolveArtifactsByIds(artifactIds, props.artifacts),
+      includeText: payload?.includeText ?? true,
+    };
+  };
+
   const uploadQueuedItems = async (items: UploadItem[]) => {
     const artifacts: Artifact[] = [];
     for (const item of items) {
@@ -645,42 +668,69 @@ export function Composer(props: {
 
   const pasteFiles = (event: ClipboardEvent<HTMLDivElement>) => {
     const files = clipboardFiles(event.clipboardData);
-    if (files.length === 0) {
-      const pastedText = event.clipboardData.getData("text/plain");
-      const summaryLinkFromMime = event.clipboardData.getData(SUMMARY_LINK_MIME).trim();
-      const stashedSummaryLink = readStashedSummaryLink();
-      const summaryLink = summaryLinkFromMime.startsWith("group-chat://summary/")
-        ? summaryLinkFromMime
-        : /^【(?:消息总结|Message summary)/.test(pastedText)
-          ? stashedSummaryLink
-          : null;
-      if (summaryLink?.startsWith("group-chat://summary/")) {
-        event.preventDefault();
-        const taskId = summaryLink.replace("group-chat://summary/", "");
-        insertSummaryLinkAtCaret(taskId, summaryLinkLabel(
-          props.summaryTasks.find((task) => task.id === taskId),
-        ));
-        requestAnimationFrame(() => syncEditorText(true));
-        return;
-      }
-      if (!pastedText) return;
+    if (files.length > 0) {
       event.preventDefault();
-      insertTextOrLinkChipsAtCaret(pastedText, {
-        getMessageLabel: (messageIdSegment) => formatMessageLinkLabel(
-          messageIdSegment,
-          props.allMessages,
-          props.allParticipants,
-          props.identities,
-          props.userDisplayName,
-        ),
-        getSummaryLabel: (taskId) => summaryLinkLabel(props.summaryTasks.find((task) => task.id === taskId)),
-      });
+      queueFiles(files);
+      requestAnimationFrame(() => editorRef.current?.focus());
+      return;
+    }
+
+    const { artifacts: pastedArtifacts, includeText: pastedArtifactsIncludeText } = resolvePastedArtifacts(event.clipboardData);
+    const pastedText = event.clipboardData.getData("text/plain");
+    const summaryLinkFromMime = event.clipboardData.getData(SUMMARY_LINK_MIME).trim();
+    const stashedSummaryLink = readStashedSummaryLink();
+    const summaryLink = summaryLinkFromMime.startsWith("group-chat://summary/")
+      ? summaryLinkFromMime
+      : /^【(?:消息总结|Message summary)/.test(pastedText)
+        ? stashedSummaryLink
+        : null;
+    if (summaryLink?.startsWith("group-chat://summary/")) {
+      event.preventDefault();
+      const taskId = summaryLink.replace("group-chat://summary/", "");
+      insertSummaryLinkAtCaret(taskId, summaryLinkLabel(
+        props.summaryTasks.find((task) => task.id === taskId),
+      ));
       requestAnimationFrame(() => syncEditorText(true));
       return;
     }
+
+    if (pastedArtifacts.length > 0) {
+      event.preventDefault();
+      queueExistingArtifacts(pastedArtifacts);
+      if (
+        pastedArtifactsIncludeText
+        && pastedText.trim()
+        && !isPlaceholderAttachmentText(pastedText)
+      ) {
+        insertTextOrLinkChipsAtCaret(pastedText, {
+          getMessageLabel: (messageIdSegment) => formatMessageLinkLabel(
+            messageIdSegment,
+            props.allMessages,
+            props.allParticipants,
+            props.identities,
+            props.userDisplayName,
+          ),
+          getSummaryLabel: (taskId) => summaryLinkLabel(props.summaryTasks.find((task) => task.id === taskId)),
+        });
+        requestAnimationFrame(() => syncEditorText(true));
+      }
+      requestAnimationFrame(() => editorRef.current?.focus());
+      return;
+    }
+
+    if (!pastedText) return;
     event.preventDefault();
-    queueFiles(files);
-    requestAnimationFrame(() => editorRef.current?.focus());
+    insertTextOrLinkChipsAtCaret(pastedText, {
+      getMessageLabel: (messageIdSegment) => formatMessageLinkLabel(
+        messageIdSegment,
+        props.allMessages,
+        props.allParticipants,
+        props.identities,
+        props.userDisplayName,
+      ),
+      getSummaryLabel: (taskId) => summaryLinkLabel(props.summaryTasks.find((task) => task.id === taskId)),
+    });
+    requestAnimationFrame(() => syncEditorText(true));
   };
 
   const removeUploadItem = (itemId: string) => {
@@ -692,6 +742,9 @@ export function Composer(props: {
   };
 
   const openUploadItem = async (item: UploadItem) => {
+    if (item.artifact && await tryOpenArtifactInTutti(item.artifact)) {
+      return;
+    }
     if (item.mimeType.startsWith("image/") && item.previewUrl) {
       setPreview({ title: item.filename, mimeType: item.mimeType, url: item.previewUrl });
       return;
@@ -699,7 +752,10 @@ export function Composer(props: {
     if (isTextAttachment(item.mimeType, item.filename)) {
       setPreview({ title: item.filename, mimeType: item.mimeType, loading: true });
       try {
-        setPreview({ title: item.filename, mimeType: item.mimeType, text: await item.file.text() });
+        const text = item.artifact?.publicUrl
+          ? await (await fetch(item.artifact.publicUrl)).text()
+          : await item.file.text();
+        setPreview({ title: item.filename, mimeType: item.mimeType, text });
       } catch {
         setPreview({ title: item.filename, mimeType: item.mimeType, text: t("composer.previewUnreadable") });
       }
@@ -784,7 +840,7 @@ export function Composer(props: {
 
   const mentionMenuVisible = mentionQuery !== null;
   const mentionMenuOpen = mentionMenuVisible && !mentionMenuDismissed;
-  const referenceTabLoading = externalMentionsLoading && activeMentionTab !== "members" && activeMentionTab !== "agent";
+  const referenceTabLoading = externalMentionsLoading && activeMentionTab !== "members";
 
   const updateMentionMenuPosition = useCallback(() => {
     const anchor = footerRef.current;
@@ -907,7 +963,7 @@ export function Composer(props: {
                 const linkChip = (event.target as Element).closest('[data-mention-display-mode="reference-link"]');
                 if (linkChip instanceof HTMLElement) {
                   event.preventDefault();
-                  void openFileReferenceFromChip(linkChip);
+                  openFileReferenceFromChip(linkChip);
                   return;
                 }
                 syncEditorText(true);
@@ -1084,31 +1140,6 @@ export function Composer(props: {
                   </span>
                 </button>
               </div>
-            ) : option.kind === "local-agent" ? (
-              <div
-                key={option.key}
-                role="option"
-                aria-selected={index === activeMentionIndex}
-                data-active={index === activeMentionIndex || undefined}
-                className={"[display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:9px] [width:100%] [min-width:0] [height:38px] [border-radius:12px] [padding:0_8px] [color:var(--text)] [transition:background-color_0.12s_ease] [&[data-active=true]]:[background:#00000014] [&:hover]:[background:#00000014]"}
-                onMouseEnter={() => setActiveMentionIndex(index)}
-              >
-                <MentionLocalAgentAvatar runtimeProfile={option.runtimeProfile} />
-                <button
-                  type="button"
-                  className={"[display:grid] [min-width:0] [gap:1px] [width:100%] [border:0] [padding:0] [color:inherit] [text-align:left] [background:transparent] [&:focus-visible]:[outline:none]"}
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    saveMentionSelection();
-                    selectMentionOption(option);
-                  }}
-                >
-                  <strong className={"[overflow:hidden] [font-size:12px] [font-weight:500] [line-height:16px] [text-overflow:ellipsis] [white-space:nowrap]"}>{option.label}</strong>
-                  <span className={"[overflow:hidden] [color:var(--muted)] [font-size:11px] [line-height:14px] [text-overflow:ellipsis] [white-space:nowrap]"}>
-                    {option.subtitle}
-                  </span>
-                </button>
-              </div>
             ) : option.kind === "participant" ? (
               <div
                 key={option.key}
@@ -1177,8 +1208,9 @@ function MentionReferenceFileIcon(props: {
   onJump?: () => void;
 }) {
   const size = 14;
+  const [imageFailed, setImageFailed] = useState(false);
   const previewSource = props.roomFile?.previewUrl || props.thumbnailUrl;
-  const previewUrl = previewSource ? resolveArtifactPublicUrl(previewSource) : null;
+  const previewUrl = resolveMentionThumbnailUrl(previewSource);
   const category = props.roomFile
     ? getArtifactCategory({
         mimeType: props.roomFile.mimeType,
@@ -1186,8 +1218,23 @@ function MentionReferenceFileIcon(props: {
       } as Artifact)
     : null;
 
-  const icon = category === "image" && previewUrl ? (
-    <img src={previewUrl} alt="" className={"[width:100%] [height:100%] [object-fit:cover]"} />
+  useEffect(() => {
+    setImageFailed(false);
+  }, [previewUrl]);
+
+  const fallbackIcon = (
+    <span className={"[display:grid] [width:100%] [height:100%] [place-items:center] [color:#6d28d9] [background:#f3e8ff]"}>
+      <MentionReferenceProviderIcon providerId={props.providerId} />
+    </span>
+  );
+
+  const icon = category === "image" && previewUrl && !imageFailed ? (
+    <img
+      src={previewUrl}
+      alt=""
+      className={"[width:100%] [height:100%] [object-fit:cover]"}
+      onError={() => setImageFailed(true)}
+    />
   ) : category === "video" ? (
     <span className={"[display:grid] [width:100%] [height:100%] [place-items:center] [color:#ffffff] [background:#8d96a3]"}>
       <Video size={size} />
@@ -1196,12 +1243,15 @@ function MentionReferenceFileIcon(props: {
     <span className={"[display:grid] [width:100%] [height:100%] [place-items:center] [color:#ffffff] [background:#8d96a3]"}>
       <FileText size={size} />
     </span>
-  ) : props.thumbnailUrl ? (
-    <img src={resolveArtifactPublicUrl(props.thumbnailUrl)} alt="" className={"[width:100%] [height:100%] [object-fit:cover]"} />
+  ) : previewUrl && !imageFailed ? (
+    <img
+      src={previewUrl}
+      alt=""
+      className={"[width:100%] [height:100%] [object-fit:cover]"}
+      onError={() => setImageFailed(true)}
+    />
   ) : (
-    <span className={"[display:grid] [width:100%] [height:100%] [place-items:center] [color:#6d28d9] [background:#f3e8ff]"}>
-      <MentionReferenceProviderIcon providerId={props.providerId} />
-    </span>
+    fallbackIcon
   );
 
   const shellClassName =
@@ -1249,22 +1299,6 @@ function MentionReferenceProviderIcon(props: { providerId: TuttiAtProviderId }) 
   }
 }
 
-function MentionLocalAgentAvatar(props: { runtimeProfile: RuntimeProfile }) {
-  const style = getRuntimeProviderAvatarStyle(props.runtimeProfile.provider);
-  return (
-    <span
-      className={"[display:inline-grid] [width:32px] [height:32px] [overflow:hidden] [border-radius:10px] [background:#f3f4f6] [place-items:center]"}
-      style={style ? { background: style.background } : undefined}
-    >
-      {style?.iconUrl ? (
-        <img src={style.iconUrl} alt="" className={"[width:18px] [height:18px] [object-fit:contain]"} />
-      ) : (
-        <Bot size={14} className={"[color:#ffffff]"} />
-      )}
-    </span>
-  );
-}
-
 function MentionParticipantAvatar(props: {
   participant: Participant;
   identities: Identity[];
@@ -1301,6 +1335,13 @@ function clipboardFiles(dataTransfer: DataTransfer) {
     seen.add(key);
     return true;
   });
+}
+
+function isPlaceholderAttachmentText(text: string) {
+  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (!lines.length) return true;
+  const label = attachmentLabel();
+  return lines.every((line) => line === label);
 }
 
 function editorText(editor: HTMLDivElement | null) {
@@ -2431,7 +2472,6 @@ function revokePreviewUrl(previewUrl: string | null) {
 type MentionOption =
   | { kind: "all"; key: "all"; label: string }
   | { kind: "participant"; key: string; label: string; participant: Participant }
-  | LocalAgentMentionOption
   | {
       kind: "reference";
       key: string;

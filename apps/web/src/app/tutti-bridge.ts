@@ -15,6 +15,10 @@ export interface TuttiWorkspaceAppOpenFileRequest {
   name?: string;
   path: string;
   sizeBytes?: number | null;
+  location?: {
+    type: "app-data-relative" | "app-package-relative" | "workspace-relative";
+    path: string;
+  };
 }
 
 export interface TuttiWorkspaceAppContext {
@@ -63,31 +67,87 @@ export function isTuttiWorkspaceAppEnvironment() {
   return typeof window !== "undefined" && Boolean(window.tuttiExternal?.app);
 }
 
-export async function tryOpenArtifactInTutti(artifact: Artifact): Promise<boolean> {
+export function extractAppDataRelativePath(localPath: string): string | null {
+  const normalized = localPath.replace(/\\/g, "/").trim();
+  if (!normalized) return null;
+
+  const tuttiWorkspaceMatch = normalized.match(/\/apps\/workspaces\/[^/]+\/[^/]+\/data\/(.+)$/);
+  if (tuttiWorkspaceMatch?.[1]) return tuttiWorkspaceMatch[1];
+
+  const groupChatDataMatch = normalized.match(/\/group-chat\/data\/(.+)$/);
+  if (groupChatDataMatch?.[1]) return groupChatDataMatch[1];
+
+  const localHomeMatch = normalized.match(/\/\.group-chat\/(.+)$/);
+  if (localHomeMatch?.[1] && !localHomeMatch[1].includes("..")) return localHomeMatch[1];
+
+  return null;
+}
+
+export function buildTuttiOpenFileRequest(
+  artifact: Pick<Artifact, "localPath" | "filename" | "createdAt" | "sizeBytes">,
+  mode: TuttiWorkspaceAppOpenFileRequest["mode"] = "reveal",
+): TuttiWorkspaceAppOpenFileRequest | null {
+  const relativePath = extractAppDataRelativePath(artifact.localPath);
+  if (relativePath) {
+    return {
+      path: relativePath,
+      location: { type: "app-data-relative", path: relativePath },
+      name: artifact.filename,
+      mtimeMs: Date.parse(artifact.createdAt),
+      sizeBytes: artifact.sizeBytes,
+      mode,
+    };
+  }
+
+  const absolutePath = artifact.localPath?.trim();
+  if (!absolutePath) return null;
+
+  return {
+    path: absolutePath,
+    name: artifact.filename,
+    mtimeMs: Date.parse(artifact.createdAt),
+    sizeBytes: artifact.sizeBytes,
+    mode,
+  };
+}
+
+export function tryOpenFileInTuttiSync(input: TuttiWorkspaceAppOpenFileRequest): boolean {
   const bridge = window.tuttiExternal;
-  if (!bridge?.files?.open || !artifact.localPath?.trim()) {
+  if (!bridge?.files?.open) {
     return false;
   }
 
   try {
-    const context = bridge.app?.getContext
-      ? normalizeExternalAppContext(await bridge.app.getContext())
-      : null;
-    if (!context?.workspaceId) {
-      return false;
-    }
-
-    await bridge.files.open({
-      path: artifact.localPath,
-      name: artifact.filename,
-      mtimeMs: Date.parse(artifact.createdAt),
-      sizeBytes: artifact.sizeBytes,
-      mode: "auto",
-    });
+    void bridge.files.open(input);
     return true;
   } catch {
     return false;
   }
+}
+
+export async function tryOpenFileInTutti(
+  input: TuttiWorkspaceAppOpenFileRequest,
+): Promise<boolean> {
+  if (tryOpenFileInTuttiSync(input)) {
+    return true;
+  }
+  return false;
+}
+
+export function tryOpenArtifactInTuttiSync(
+  artifact: Artifact,
+  mode: TuttiWorkspaceAppOpenFileRequest["mode"] = "reveal",
+): boolean {
+  const request = buildTuttiOpenFileRequest(artifact, mode);
+  if (!request) return false;
+  return tryOpenFileInTuttiSync(request);
+}
+
+export async function tryOpenArtifactInTutti(
+  artifact: Artifact,
+  mode: TuttiWorkspaceAppOpenFileRequest["mode"] = "reveal",
+): Promise<boolean> {
+  return tryOpenArtifactInTuttiSync(artifact, mode);
 }
 
 function normalizeExternalAppContext(
