@@ -379,6 +379,7 @@ export interface AppFileReference {
   mtimeMs?: number;
   mimeType?: string;
   score?: number;
+  parentGroupLabel?: string;
   artifactId?: string;
   messageId?: string;
   previewUrl?: string;
@@ -392,6 +393,14 @@ export interface AppReferenceListTimeRange {
 export interface AppReferenceListRequest {
   parentGroupId?: string | null;
   filterText?: string | null;
+  limit?: number;
+  cursor?: string | null;
+  kinds?: AppReferenceKind[];
+  timeRange?: AppReferenceListTimeRange | null;
+}
+
+export interface AppReferenceSearchRequest {
+  query: string;
   limit?: number;
   cursor?: string | null;
   kinds?: AppReferenceKind[];
