@@ -4,17 +4,18 @@
  *
  * 这是 group-chat 侧的镜像。权威来源在 Tutti:
  *   packages/workspace/file-reference/src/core/referenceFilterCategories.ts
- *   packages/workspace/referencefilter/categories.go
- * 三处扩展名清单必须保持一致 —— 改一处务必同步另外两处。
+ *   services/tuttid/data/workspace/reference_filter_categories.go
+ * 各处扩展名清单必须保持一致 —— 改一处务必同步全部。
+ *
+ * 分类口径:image(图片)/ video(视频)/ document(文档,含表格)/ webpage(网页)/ other(其他)。
+ * 音频、代码、压缩包等不单列,统一归入 "other" 兜底。
  */
 
 export type ReferenceFilterCategoryId =
   | "image"
+  | "video"
   | "document"
-  | "spreadsheet"
-  | "code"
-  | "media"
-  | "archive"
+  | "webpage"
   | "other";
 
 interface ReferenceFilterCategory {
@@ -29,51 +30,34 @@ const REFERENCE_FILTER_CATEGORIES: readonly ReferenceFilterCategory[] = [
     extensions: ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "heic"],
   },
   {
+    id: "video",
+    extensions: ["mp4", "mov", "avi", "mkv", "webm"],
+  },
+  {
     id: "document",
-    extensions: ["pdf", "doc", "docx", "txt", "md", "markdown", "rtf", "odt", "pages", "key", "ppt", "pptx"],
-  },
-  {
-    id: "spreadsheet",
-    extensions: ["xls", "xlsx", "csv", "tsv", "numbers"],
-  },
-  {
-    id: "code",
     extensions: [
-      "js",
-      "jsx",
-      "ts",
-      "tsx",
-      "py",
-      "go",
-      "java",
-      "c",
-      "h",
-      "cpp",
-      "cc",
-      "rs",
-      "rb",
-      "php",
-      "swift",
-      "kt",
-      "sh",
-      "json",
-      "yaml",
-      "yml",
-      "toml",
-      "xml",
-      "html",
-      "css",
-      "scss",
-      "sql",
+      "pdf",
+      "doc",
+      "docx",
+      "txt",
+      "md",
+      "markdown",
+      "rtf",
+      "odt",
+      "pages",
+      "key",
+      "ppt",
+      "pptx",
+      "xls",
+      "xlsx",
+      "csv",
+      "tsv",
+      "numbers",
     ],
   },
   {
-    id: "media",
-    extensions: ["mp3", "wav", "flac", "aac", "ogg", "m4a", "mp4", "mov", "avi", "mkv", "webm"],
-  },
-  {
-    id: "archive",
-    extensions: ["zip", "tar", "gz", "tgz", "rar", "7z", "bz2"],
+    id: "webpage",
+    extensions: ["html", "htm", "mhtml", "url", "webloc"],
   },
   { id: "other", extensions: [] },
 ];

@@ -402,7 +402,7 @@ export interface AppReferenceListRequest {
 export interface AppReferenceSearchRequest {
   query: string;
   /**
-   * 已选「文件类型筛选分类」id(image/document/spreadsheet/code/media/archive/other)。
+   * 已选「文件类型筛选分类」id(image/video/document/webpage/other)。
    * 筛选与搜索是同一能力:query 可空、filters 非空时即「仅按类型查」。未知 id 忽略。
    */
   filters?: string[];
