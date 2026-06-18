@@ -7,6 +7,7 @@ import type {
   AppReferenceListRequest,
   AppReferenceListResponse,
   AppReferenceListTimeRange,
+  AppReferenceSearchRequest,
   AgentRun,
   Artifact,
   ChatSnapshot,
@@ -20,6 +21,14 @@ import { appPaths } from "../local/paths.js";
 interface ReferenceListInput {
   parentGroupId: string | null;
   filterText: string;
+  limit: number;
+  cursor: number;
+  kinds: string[];
+  timeRange: ReferenceListTimeRange | null;
+}
+
+interface ReferenceSearchInput {
+  query: string;
   limit: number;
   cursor: number;
   kinds: string[];
@@ -72,29 +81,13 @@ export function listAppReferences(
     return { items: [], nextCursor: null };
   }
 
-  const messagesById = new Map(snapshot.messages.map((message) => [message.id, message]));
-  const runsById = new Map(snapshot.agentRuns.map((run) => [run.id, run]));
-  const conversationsById = new Map(snapshot.conversations.map((conversation) => [conversation.id, conversation]));
-  const roomsById = new Map(snapshot.rooms.map((room) => [room.id, room]));
-  const entries = snapshot.artifacts
-    .map((artifact) => {
-      if (!isVisibleGroupChatFile(artifact, snapshot.messages, snapshot.messageBlocks, snapshot.agentRuns)) return null;
-      const linkedMessageId = resolveArtifactLinkedMessageId(artifact, snapshot.agentRuns, snapshot.messages);
-      return artifactToFileReferenceEntry(
-        artifact,
-        linkedMessageId ? messagesById.get(linkedMessageId) : undefined,
-        runsById,
-        conversationsById.get(artifact.conversationId),
-        roomsById.get(artifact.roomId),
-        linkedMessageId,
-      );
-    })
-    .filter((entry): entry is AppFileReferenceEntry => entry !== null);
+  const entries = buildFileReferenceEntries(snapshot);
 
   if (!input.parentGroupId) {
     return listRoomGroups(snapshot.rooms, snapshot.conversations, entries, input);
   }
 
+  const roomsById = new Map(snapshot.rooms.map((room) => [room.id, room]));
   const room = roomsById.get(input.parentGroupId);
   if (!room) return { items: [], nextCursor: null };
 
@@ -113,6 +106,66 @@ export function listAppReferences(
     })),
     nextCursor: nextOffset < matchingEntries.length ? String(nextOffset) : null,
   };
+}
+
+export function searchAppReferences(
+  snapshot: ChatSnapshot,
+  body: unknown,
+): AppReferenceListResponse | ReferenceListError {
+  const input = normalizeReferenceSearchInput(body);
+  if (isReferenceListError(input)) return input;
+  if (input.kinds.length > 0 && !input.kinds.includes("file")) {
+    return { items: [], nextCursor: null };
+  }
+
+  const entries = buildFileReferenceEntries(snapshot);
+  const roomsById = new Map(snapshot.rooms.map((room) => [room.id, room]));
+
+  // Search is a flat, relevance-ordered file list across every room (the host
+  // drops group items defensively). Only keep entries that actually match.
+  const scored = entries
+    .filter((entry) => matchesTimeRange(entry.reference.mtimeMs, input.timeRange))
+    .map((entry) => ({ entry, score: fileReferenceMatchScore(entry, input.query) }))
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score || compareFileReferenceEntriesDesc(left.entry, right.entry));
+
+  const page = scored.slice(input.cursor, input.cursor + input.limit);
+  const nextOffset = input.cursor + page.length;
+  return {
+    items: page.map(({ entry, score }) => {
+      const parentGroupLabel = roomsById.get(entry.artifact.roomId)?.title?.trim();
+      return {
+        type: "reference",
+        reference: {
+          ...entry.reference,
+          score: normalizeReferenceScore(score),
+          ...(parentGroupLabel ? { parentGroupLabel: truncateRunes(parentGroupLabel, DISPLAY_NAME_MAX_RUNES) } : {}),
+        },
+      };
+    }),
+    nextCursor: nextOffset < scored.length ? String(nextOffset) : null,
+  };
+}
+
+function buildFileReferenceEntries(snapshot: ChatSnapshot): AppFileReferenceEntry[] {
+  const messagesById = new Map(snapshot.messages.map((message) => [message.id, message]));
+  const runsById = new Map(snapshot.agentRuns.map((run) => [run.id, run]));
+  const conversationsById = new Map(snapshot.conversations.map((conversation) => [conversation.id, conversation]));
+  const roomsById = new Map(snapshot.rooms.map((room) => [room.id, room]));
+  return snapshot.artifacts
+    .map((artifact) => {
+      if (!isVisibleGroupChatFile(artifact, snapshot.messages, snapshot.messageBlocks, snapshot.agentRuns)) return null;
+      const linkedMessageId = resolveArtifactLinkedMessageId(artifact, snapshot.agentRuns, snapshot.messages);
+      return artifactToFileReferenceEntry(
+        artifact,
+        linkedMessageId ? messagesById.get(linkedMessageId) : undefined,
+        runsById,
+        conversationsById.get(artifact.conversationId),
+        roomsById.get(artifact.roomId),
+        linkedMessageId,
+      );
+    })
+    .filter((entry): entry is AppFileReferenceEntry => entry !== null);
 }
 
 export function isReferenceListError(output: unknown): output is ReferenceListError {
@@ -243,6 +296,47 @@ function normalizeReferenceListInput(body: unknown): ReferenceListInput | Refere
     kinds: (typed.kinds ?? []).map((kind) => kind.trim()).filter(Boolean),
     timeRange,
   };
+}
+
+function normalizeReferenceSearchInput(body: unknown): ReferenceSearchInput | ReferenceListError {
+  if (!isRecord(body)) {
+    return referenceError("invalid_input", "Reference search request body must be an object");
+  }
+  const typed = body as Partial<AppReferenceSearchRequest>;
+  if (typeof typed.query !== "string" || !typed.query.trim()) {
+    return referenceError("invalid_input", "query is required");
+  }
+  if (typed.cursor !== undefined && typed.cursor !== null && typeof typed.cursor !== "string") {
+    return referenceError("invalid_input", "cursor must be a string or null");
+  }
+  if (typed.limit !== undefined && (typeof typed.limit !== "number" || !Number.isInteger(typed.limit))) {
+    return referenceError("invalid_input", "limit must be an integer");
+  }
+  if (typed.kinds !== undefined && (!Array.isArray(typed.kinds) || typed.kinds.some((kind) => typeof kind !== "string"))) {
+    return referenceError("invalid_input", "kinds must be an array of strings");
+  }
+  const timeRange = normalizeTimeRange(typed.timeRange);
+  if (isReferenceListError(timeRange)) return timeRange;
+  const cursor = typed.cursor?.trim() ? Number(typed.cursor) : 0;
+  if (!Number.isInteger(cursor) || cursor < 0) {
+    return referenceError("invalid_input", "cursor must be a non-negative integer string");
+  }
+  return {
+    query: typed.query.trim().toLocaleLowerCase().slice(0, 200),
+    limit: clampLimit(typed.limit ?? DEFAULT_REFERENCE_LIMIT),
+    cursor,
+    kinds: (typed.kinds ?? []).map((kind) => kind.trim()).filter(Boolean),
+    timeRange,
+  };
+}
+
+// The host rejects (drops) any file reference whose score falls outside [0, 1],
+// so map the raw match score (0..1000) onto that range.
+function normalizeReferenceScore(rawScore: number): number {
+  const normalized = rawScore / 1000;
+  if (normalized <= 0) return 0;
+  if (normalized >= 1) return 1;
+  return normalized;
 }
 
 function normalizeTimeRange(value: AppReferenceListTimeRange | null | undefined): ReferenceListTimeRange | null | ReferenceListError {
