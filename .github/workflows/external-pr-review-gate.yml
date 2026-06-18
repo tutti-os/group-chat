@@ -7,11 +7,6 @@ on:
       - reopened
       - ready_for_review
       - synchronize
-  pull_request_review:
-    types:
-      - submitted
-      - edited
-      - dismissed
 
 permissions:
   contents: read
