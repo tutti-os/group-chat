@@ -41,6 +41,7 @@ import { attachmentLabel, t, translateAgentError, translateSystemNotice, useTran
 const COLLAPSED_MESSAGE_CHAR_LIMIT = 800;
 const COPY_TIP_OFFSET_PX = 8;
 const MESSAGE_GROUP_GAP_MS = MESSAGE_GROUP_IDLE_MS;
+const EMPTY_MESSAGE_BLOCKS: MessageBlock[] = [];
 
 type CopyTipPosition = { x: number; y: number };
 type CopyMessageInput = { position: CopyTipPosition; anchorEl?: HTMLElement | null };
@@ -165,18 +166,42 @@ export function MessageTimeline(props: {
   const [copyTipPosition, setCopyTipPosition] = useState<CopyTipPosition | null>(null);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [summaryAgentPickerMessages, setSummaryAgentPickerMessages] = useState<Message[] | null>(null);
-  const visibleMessages = props.messages.filter(shouldShowMessage);
+  const visibleMessages = useMemo(
+    () => props.messages.filter(shouldShowMessage),
+    [props.messages],
+  );
+  const blocksByMessageId = useMemo(
+    () => groupMessageBlocksByMessageId(props.blocks),
+    [props.blocks],
+  );
+  const artifactsById = useMemo(
+    () => new Map(props.artifacts.map((artifact) => [artifact.id, artifact])),
+    [props.artifacts],
+  );
   const messageGroupLayout = useMemo(
     () => buildMessageGroupLayout(visibleMessages, props.messages),
     [visibleMessages, props.messages],
   );
-  const selectedMessages = visibleMessages.filter(
-    (message) => selectedMessageIds.has(message.id) && !isRemovedMessage(message),
+  const selectedMessages = useMemo(
+    () => visibleMessages.filter(
+      (message) => selectedMessageIds.has(message.id) && !isRemovedMessage(message),
+    ),
+    [selectedMessageIds, visibleMessages],
   );
-  const detailReplyMessage = detailReplyMessageId ? props.messages.find((message) => message.id === detailReplyMessageId) ?? null : null;
-  const detailMessages = detailReplyMessage
-    ? buildReferencedThread(detailReplyMessage, props.messages, props.allParticipants, props.identities)
-    : [];
+  const detailReplyMessage = useMemo(
+    () => detailReplyMessageId ? props.messages.find((message) => message.id === detailReplyMessageId) ?? null : null,
+    [detailReplyMessageId, props.messages],
+  );
+  const detailMessages = useMemo(
+    () => detailReplyMessage
+      ? buildReferencedThread(detailReplyMessage, props.messages, props.allParticipants, props.identities)
+      : [],
+    [detailReplyMessage, props.allParticipants, props.identities, props.messages],
+  );
+  const summaryTaskIds = useMemo(
+    () => collectSummaryTaskIds(props.messages, props.blocks),
+    [props.blocks, props.messages],
+  );
 
   const captureTimelineScroll = useCallback(() => {
     if (scrollRef.current) {
@@ -208,17 +233,20 @@ export function MessageTimeline(props: {
   }, [props.onMentionParticipant]);
 
   useEffect(() => {
-    const taskIds = collectSummaryTaskIds(props.messages, props.blocks);
-    for (const taskId of taskIds) {
+    for (const taskId of summaryTaskIds) {
       if (props.summaryTasks.some((task) => task.id === taskId)) continue;
       void props.onEnsureSummaryTask(taskId);
     }
-  }, [props.messages, props.blocks, props.summaryTasks, props.onEnsureSummaryTask]);
-  const summaryImages = props.openBackgroundTask?.sourceMessageIds.length
-    ? props.openBackgroundTask.sourceMessageIds.flatMap((messageId) => imageArtifactsForMessage(messageId, props.blocks, props.artifacts))
-    : props.openBackgroundTask?.sourceMessageId
-      ? imageArtifactsForMessage(props.openBackgroundTask.sourceMessageId, props.blocks, props.artifacts)
-      : [];
+  }, [props.onEnsureSummaryTask, props.summaryTasks, summaryTaskIds]);
+  const summaryImages = useMemo(() => {
+    if (!props.openBackgroundTask) return [];
+    const messageIds = props.openBackgroundTask.sourceMessageIds.length
+      ? props.openBackgroundTask.sourceMessageIds
+      : props.openBackgroundTask.sourceMessageId
+        ? [props.openBackgroundTask.sourceMessageId]
+        : [];
+    return imageArtifactsForMessages(messageIds, blocksByMessageId, artifactsById);
+  }, [artifactsById, blocksByMessageId, props.openBackgroundTask]);
   const updateJumpToBottomVisibility = () => {
     const element = scrollRef.current;
     if (!element) return;
@@ -493,7 +521,7 @@ export function MessageTimeline(props: {
           showHeader={groupLayout.showHeader}
           isLastInGroup={groupLayout.isLastInGroup}
           quotedMessage={resolveReferencedMessage(message, props.messages, props.allParticipants, props.identities)}
-          blocks={props.blocks.filter((block) => block.messageId === message.id)}
+          blocks={blocksByMessageId.get(message.id) ?? EMPTY_MESSAGE_BLOCKS}
           artifacts={props.artifacts}
           agentRunEvents={props.agentRunEvents}
           agentRuns={props.agentRuns}
@@ -589,7 +617,7 @@ export function MessageTimeline(props: {
       {detailMessages.length ? (
         <ReferencedMessagePanel
           messages={detailMessages}
-          blocks={props.blocks}
+          blocksByMessageId={blocksByMessageId}
           participants={props.participants}
           artifacts={props.artifacts}
           userProfile={props.userProfile}
@@ -1560,7 +1588,7 @@ function ReferencedMessagePreview(props: {
 
 function ReferencedMessagePanel(props: {
   messages: Message[];
-  blocks: MessageBlock[];
+  blocksByMessageId: Map<string, MessageBlock[]>;
   participants: Participant[];
   allParticipants: Participant[];
   identities: Identity[];
@@ -1588,7 +1616,7 @@ function ReferencedMessagePanel(props: {
             <DetailMessageCard
               key={message.id}
               message={message}
-              blocks={props.blocks.filter((block) => block.messageId === message.id)}
+              blocks={props.blocksByMessageId.get(message.id) ?? EMPTY_MESSAGE_BLOCKS}
               artifacts={props.artifacts}
               participant={resolveMessageAgentParticipant(message, props.participants, props.allParticipants)}
               identities={props.identities}
@@ -2329,14 +2357,34 @@ function CollapsibleMessageContent(props: {
 }
 
 
-function imageArtifactsForMessage(messageId: string, blocks: MessageBlock[], artifacts: Artifact[]) {
-  return blocks
-    .filter((block) => block.messageId === messageId && block.type === "image")
-    .map((block) => {
-      const artifactId = typeof block.metadata?.artifactId === "string" ? block.metadata.artifactId : null;
-      return artifactId ? artifacts.find((artifact) => artifact.id === artifactId) ?? null : null;
-    })
-    .filter((artifact): artifact is Artifact => Boolean(artifact));
+function groupMessageBlocksByMessageId(blocks: MessageBlock[]) {
+  const grouped = new Map<string, MessageBlock[]>();
+  for (const block of blocks) {
+    const existing = grouped.get(block.messageId);
+    if (existing) {
+      existing.push(block);
+    } else {
+      grouped.set(block.messageId, [block]);
+    }
+  }
+  return grouped;
+}
+
+function imageArtifactsForMessages(
+  messageIds: string[],
+  blocksByMessageId: Map<string, MessageBlock[]>,
+  artifactsById: Map<string, Artifact>,
+) {
+  return messageIds.flatMap((messageId) => {
+    const blocks = blocksByMessageId.get(messageId) ?? EMPTY_MESSAGE_BLOCKS;
+    return blocks
+      .filter((block) => block.type === "image")
+      .map((block) => {
+        const artifactId = typeof block.metadata?.artifactId === "string" ? block.metadata.artifactId : null;
+        return artifactId ? artifactsById.get(artifactId) ?? null : null;
+      })
+      .filter((artifact): artifact is Artifact => Boolean(artifact));
+  });
 }
 
 function normalizeMarkdownContent(content: string) {

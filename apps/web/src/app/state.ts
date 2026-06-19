@@ -1,15 +1,12 @@
 import type { ChatSnapshot, Identity, Message, Participant, StreamEvent, UpdateRoomRequest, AgentRun } from "@group-chat/shared";
-import { enrichAgentRun, enrichAgentRuns, resolveMessageVisibility } from "@group-chat/shared";
+import { enrichAgentRun, enrichAgentRuns } from "@group-chat/shared";
 
 export interface AppState extends ChatSnapshot {
   ready: boolean;
 }
 
 export function normalizeSnapshot(snapshot: ChatSnapshot): AppState {
-  const messages = snapshot.messages.map((message) => ({
-    ...message,
-    visibility: resolveMessageVisibility(message, snapshot.messages),
-  }));
+  const messages = resolveMessagesVisibility(snapshot.messages);
   return {
     ...snapshot,
     messages,
@@ -160,23 +157,23 @@ export function removeActiveRun(state: AppState, runId: string): AppState {
 
 export function upsert<T extends { id: string }>(items: T[], item: T | null | undefined): T[] {
   if (!item) return items;
-  const exists = items.some((current) => current.id === item.id);
-  return exists ? items.map((current) => (current.id === item.id ? item : current)) : [...items, item];
+  const existingIndex = items.findIndex((current) => current.id === item.id);
+  return existingIndex === -1
+    ? [...items, item]
+    : items.map((current) => (current.id === item.id ? item : current));
 }
 
 export function upsertMessage(messages: Message[], incoming: Message | null | undefined): Message[] {
   if (!incoming) return messages;
   const mergedMessages = upsert(messages, incoming);
-  return mergedMessages.map((message) => ({
-    ...message,
-    visibility: resolveMessageVisibility(message, mergedMessages),
-  }));
+  return resolveMessagesVisibility(mergedMessages);
 }
 
 export function upsertIdentity(identities: Identity[], incoming: Identity | null | undefined): Identity[] {
   if (!incoming) return identities;
-  const existing = identities.find((item) => item.id === incoming.id);
-  if (!existing) return [...identities, incoming];
+  const existingIndex = identities.findIndex((item) => item.id === incoming.id);
+  if (existingIndex === -1) return [...identities, incoming];
+  const existing = identities[existingIndex]!;
   if (existing.updatedAt > incoming.updatedAt) {
     return identities.map((item) => (item.id === incoming.id ? existing : item));
   }
@@ -185,8 +182,9 @@ export function upsertIdentity(identities: Identity[], incoming: Identity | null
 
 export function upsertParticipant(participants: Participant[], incoming: Participant | null | undefined): Participant[] {
   if (!incoming) return participants;
-  const existing = participants.find((item) => item.id === incoming.id);
-  if (!existing) return [...participants, incoming];
+  const existingIndex = participants.findIndex((item) => item.id === incoming.id);
+  if (existingIndex === -1) return [...participants, incoming];
+  const existing = participants[existingIndex]!;
   if (existing.updatedAt > incoming.updatedAt) {
     return participants.map((item) => (item.id === incoming.id ? existing : item));
   }
@@ -194,7 +192,69 @@ export function upsertParticipant(participants: Participant[], incoming: Partici
 }
 
 export function upsertMany<T extends { id: string }>(items: T[], nextItems: T[]): T[] {
-  return nextItems.reduce((current, item) => upsert(current, item), items);
+  if (nextItems.length === 0) return items;
+  const incomingById = new Map(nextItems.map((item) => [item.id, item]));
+  const existingIds = new Set(items.map((item) => item.id));
+  const result = items.map((item) => incomingById.get(item.id) ?? item);
+
+  for (const item of nextItems) {
+    if (existingIds.has(item.id)) continue;
+    result.push(incomingById.get(item.id) ?? item);
+    existingIds.add(item.id);
+  }
+
+  return result;
+}
+
+function resolveMessagesVisibility(messages: Message[]): Message[] {
+  const whisperAssistantCreatedAtByParticipant = new Map<string, string[]>();
+  for (const message of messages) {
+    if (message.role !== "assistant" || message.visibility !== "whisper" || !message.senderParticipantId) continue;
+    const createdAts = whisperAssistantCreatedAtByParticipant.get(message.senderParticipantId);
+    if (createdAts) {
+      createdAts.push(message.createdAt);
+    } else {
+      whisperAssistantCreatedAtByParticipant.set(message.senderParticipantId, [message.createdAt]);
+    }
+  }
+  for (const createdAts of whisperAssistantCreatedAtByParticipant.values()) {
+    createdAts.sort();
+  }
+  return messages.map((message) => ({
+    ...message,
+    visibility: resolveMessageVisibilityFromIndex(message, whisperAssistantCreatedAtByParticipant),
+  }));
+}
+
+function resolveMessageVisibilityFromIndex(
+  message: Message,
+  whisperAssistantCreatedAtByParticipant: Map<string, string[]>,
+): Message["visibility"] {
+  if (message.visibility === "whisper") return "whisper";
+  if (message.role !== "user") return "public";
+
+  for (const mention of message.mentions) {
+    const createdAts = whisperAssistantCreatedAtByParticipant.get(mention.participantId);
+    if (createdAts && hasCreatedAtAtOrAfter(createdAts, message.createdAt)) {
+      return "whisper";
+    }
+  }
+
+  return "public";
+}
+
+function hasCreatedAtAtOrAfter(sortedCreatedAts: string[], createdAt: string) {
+  let low = 0;
+  let high = sortedCreatedAts.length;
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (sortedCreatedAts[mid]! < createdAt) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+  return low < sortedCreatedAts.length;
 }
 
 export function applyRoomUpdate(state: AppState, roomId: string, input: UpdateRoomRequest): AppState {

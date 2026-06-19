@@ -194,10 +194,19 @@ export function Composer(props: {
   const composerCaretOffsetRef = useRef<number | null>(null);
   const lastComposerInputAtRef = useRef(Date.now());
   const composerIdleBreakPendingRef = useRef(false);
-  const roomMembers = props.participants.filter((participant) => participant.status !== "removed");
-  const mentionableAgents = roomMembers.filter((participant) => participant.kind === "ai");
-  const realRoomMembers = roomMembers.filter((participant) => participant.kind !== "ai");
-  const allMentionableParticipants = useMemo(() => roomMembers, [roomMembers]);
+  const roomMembers = useMemo(
+    () => props.participants.filter((participant) => participant.status !== "removed"),
+    [props.participants],
+  );
+  const mentionableAgents = useMemo(
+    () => roomMembers.filter((participant) => participant.kind === "ai"),
+    [roomMembers],
+  );
+  const realRoomMembers = useMemo(
+    () => roomMembers.filter((participant) => participant.kind !== "ai"),
+    [roomMembers],
+  );
+  const allMentionableParticipants = roomMembers;
   const memberMentionOptions = useMemo(
     () => buildParticipantMentionOptions(realRoomMembers, mentionQuery, mentionedIds, mentionedAll, { includeEveryone: false }),
     [realRoomMembers, mentionQuery, mentionedIds, mentionedAll],

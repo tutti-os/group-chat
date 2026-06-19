@@ -340,58 +340,97 @@ export function App() {
     };
   }, [state.ready, handleStreamEvent, applyEvents]);
 
-  const currentConversation = state.conversations.find((item) => item.id === currentConversationId) ?? null;
-  const currentRoom = currentConversation
-    ? state.rooms.find((item) => item.id === currentConversation.roomId) ?? null
-    : null;
-  const currentParticipants = currentConversation
-    ? state.participants.filter((item) => item.conversationId === currentConversation.id && item.status !== "removed")
-    : [];
-  const currentAgents = currentParticipants.filter((item) => item.kind === "ai");
-  const currentMessages = currentConversation
-    ? state.messages
-        .filter((item) => item.conversationId === currentConversation.id)
-        .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
-    : [];
-  const currentArtifacts = currentConversation
-    ? state.artifacts.filter((artifact) => artifact.conversationId === currentConversation.id)
-    : [];
-  const currentActiveRuns = currentConversation
-    ? visibleActiveRuns(
-        state.activeRuns.filter((run) => run.conversationId === currentConversation.id),
-        state.messages,
-      )
-    : [];
-  const currentBackgroundTasks = currentConversation
-    ? backgroundTasks.filter(
-        (task) =>
-          task.conversationId === currentConversation.id
-          && loadLocalTaskBarTaskIds().has(task.id)
-          && !dismissedBackgroundTaskIds.has(task.id),
-      )
-    : [];
-  const openBackgroundTask = openBackgroundTaskId && currentConversation && !dismissedBackgroundTaskIds.has(openBackgroundTaskId)
-    ? backgroundTasks.find(
-        (task) =>
-          task.id === openBackgroundTaskId
-          && task.panelOpen
-          && task.conversationId === currentConversation.id,
-      ) ?? null
-    : null;
-  const enrichedOpenBackgroundTask = openBackgroundTask
-    ? {
-        ...openBackgroundTask,
-        sourceMessage:
-          openBackgroundTask.sourceMessage
-          ?? (openBackgroundTask.sourceMessageId
-            ? state.messages.find((message) => message.id === openBackgroundTask.sourceMessageId) ?? null
-            : null),
-        targetParticipant:
-          openBackgroundTask.targetParticipant
-          ?? currentParticipants.find((participant) => participant.id === openBackgroundTask.participantId)
-          ?? null,
-      }
-    : null;
+  const currentConversation = useMemo(
+    () => state.conversations.find((item) => item.id === currentConversationId) ?? null,
+    [currentConversationId, state.conversations],
+  );
+  const currentRoom = useMemo(
+    () => currentConversation
+      ? state.rooms.find((item) => item.id === currentConversation.roomId) ?? null
+      : null,
+    [currentConversation, state.rooms],
+  );
+  const currentParticipants = useMemo(
+    () => currentConversation
+      ? state.participants.filter((item) => item.conversationId === currentConversation.id && item.status !== "removed")
+      : [],
+    [currentConversation, state.participants],
+  );
+  const currentAgents = useMemo(
+    () => currentParticipants.filter((item) => item.kind === "ai"),
+    [currentParticipants],
+  );
+  const currentMessages = useMemo(
+    () => currentConversation
+      ? state.messages
+          .filter((item) => item.conversationId === currentConversation.id)
+          .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
+      : [],
+    [currentConversation, state.messages],
+  );
+  const currentMessageIdSet = useMemo(
+    () => new Set(currentMessages.map((message) => message.id)),
+    [currentMessages],
+  );
+  const currentMessageBlocks = useMemo(
+    () => currentMessageIdSet.size
+      ? state.messageBlocks.filter((block) => currentMessageIdSet.has(block.messageId))
+      : [],
+    [currentMessageIdSet, state.messageBlocks],
+  );
+  const currentArtifacts = useMemo(
+    () => currentConversation
+      ? state.artifacts.filter((artifact) => artifact.conversationId === currentConversation.id)
+      : [],
+    [currentConversation, state.artifacts],
+  );
+  const currentActiveRuns = useMemo(
+    () => currentConversation
+      ? visibleActiveRuns(
+          state.activeRuns.filter((run) => run.conversationId === currentConversation.id),
+          state.messages,
+        )
+      : [],
+    [currentConversation, state.activeRuns, state.messages],
+  );
+  const currentBackgroundTasks = useMemo(() => {
+    if (!currentConversation) return [];
+    const localTaskIds = loadLocalTaskBarTaskIds();
+    return backgroundTasks.filter(
+      (task) =>
+        task.conversationId === currentConversation.id
+        && localTaskIds.has(task.id)
+        && !dismissedBackgroundTaskIds.has(task.id),
+    );
+  }, [backgroundTasks, currentConversation, dismissedBackgroundTaskIds]);
+  const openBackgroundTask = useMemo(
+    () => openBackgroundTaskId && currentConversation && !dismissedBackgroundTaskIds.has(openBackgroundTaskId)
+      ? backgroundTasks.find(
+          (task) =>
+            task.id === openBackgroundTaskId
+            && task.panelOpen
+            && task.conversationId === currentConversation.id,
+        ) ?? null
+      : null,
+    [backgroundTasks, currentConversation, dismissedBackgroundTaskIds, openBackgroundTaskId],
+  );
+  const enrichedOpenBackgroundTask = useMemo(
+    () => openBackgroundTask
+      ? {
+          ...openBackgroundTask,
+          sourceMessage:
+            openBackgroundTask.sourceMessage
+            ?? (openBackgroundTask.sourceMessageId
+              ? state.messages.find((message) => message.id === openBackgroundTask.sourceMessageId) ?? null
+              : null),
+          targetParticipant:
+            openBackgroundTask.targetParticipant
+            ?? currentParticipants.find((participant) => participant.id === openBackgroundTask.participantId)
+            ?? null,
+        }
+      : null,
+    [currentParticipants, openBackgroundTask, state.messages],
+  );
   const agentRunTasks: AgentRunTaskItem[] = useMemo(() => {
     const runTasks = currentActiveRuns.map((run) => {
       const visibility = resolveAgentRunVisibility(run, currentMessages);
@@ -1247,9 +1286,7 @@ export function App() {
                   conversationId={currentConversation.id}
                   artifacts={currentArtifacts}
                   messages={currentMessages}
-                  messageBlocks={state.messageBlocks.filter((block) =>
-                    currentMessages.some((message) => message.id === block.messageId),
-                  )}
+                  messageBlocks={currentMessageBlocks}
                   agentRuns={state.agentRuns}
                   onClose={() => setFilesPanelOpen(false)}
                   onFocusMessage={({ messageId, artifactId }) => {
@@ -1288,7 +1325,7 @@ export function App() {
                   key={currentConversation.id}
                   messages={currentMessages}
                   allMessages={state.messages}
-                  blocks={state.messageBlocks}
+                  blocks={currentMessageBlocks}
                   artifacts={currentArtifacts}
                   agentRunEvents={state.agentRunEvents}
                   agentRuns={state.agentRuns}
