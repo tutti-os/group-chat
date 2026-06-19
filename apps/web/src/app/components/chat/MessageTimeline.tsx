@@ -6,7 +6,9 @@ import { Braces, BrainCircuit, CheckSquare, ChevronsDown, Copy, Edit3, Ear, File
 import type { Artifact, AgentRun, AgentRunEvent, Conversation, Identity, Message, MessageBlock, Participant, Room, RuntimeProfile } from "@group-chat/shared";
 import { isLocalUserMessage, resolveMessageVisibility, enrichAssistantContentWithWorkspaceResourceLinks, resolveTriggerUserMentions } from "@group-chat/shared";
 import { revealArtifactInTuttiFileManager } from "../../artifact-actions.js";
+import { enrichMessageContentForCopy } from "../../composer-paste-content.js";
 import { formatBytes, formatMessageStatus } from "../../formatting.js";
+import { TuttiMessageLinkIcon } from "../../tutti-reference-icons.js";
 import type { LocalUserProfile } from "../../user-profile.js";
 import { UserAvatar, type UserAvatarSize } from "../ui/UserAvatar.js";
 import { resolveAgentAvatarFromContext } from "../../identity-avatar.js";
@@ -348,7 +350,7 @@ export function MessageTimeline(props: {
     }
 
     const text = visibleMessages
-      .map((message) => message.content.trim() || attachmentLabel())
+      .map((message) => enrichMessageContentForCopy(message.content.trim() || attachmentLabel(), message.mentions ?? []).trim() || attachmentLabel())
       .join("\n");
     const artifacts = collectImageFileArtifactsForMessages(visibleMessages, props.blocks, props.artifacts);
     await copyMessagesToClipboard({
@@ -2271,7 +2273,7 @@ function MessageLinkCard(props: {
       onClick={props.onOpen}
     >
       <span className={"[display:flex] [align-items:center] [gap:5px] [color:#2563eb] [font-size:12px] [font-weight:700] [line-height:1.3]"}>
-        <Reply size={13} />
+        <TuttiMessageLinkIcon />
         <span>{linkLabel}</span>
       </span>
       <span className={"[display:block] [overflow:hidden] [color:var(--text)] [font-size:13px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>

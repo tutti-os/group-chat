@@ -733,7 +733,7 @@ export class ChatService {
     const activeAi = this.repo
       .listParticipants(conversation.id)
       .filter((participant) => participant.kind === "ai" && participant.status === "active");
-    if (mentions.some((mention) => mention.mentionType === "all")) return activeAi;
+    if (mentions.some((mention) => mention.mentionType === "all")) return [];
     const mentionedIds = new Set(mentions.map((mention) => mention.participantId));
     if (mentionedIds.size > 0) return activeAi.filter((participant) => mentionedIds.has(participant.id));
     if (conversation.replyPolicy.mode === "mentioned" || conversation.replyPolicy.mode === "selected") return [];

@@ -1,7 +1,13 @@
 import type { Artifact, MentionTarget, Participant, RuntimeProfile } from "@group-chat/shared";
 import type { ReactNode } from "react";
+import { openAgentGuiProvider } from "../../agent-gui-dispatch.js";
+import {
+  resolveAgentGuiProviderFromAppId,
+  resolveAgentLauncherRuntimeProvider,
+} from "../../agent-launcher-mentions.js";
 import { parseTuttiAtMentionKey } from "../../tutti-at-mentions.js";
 import {
+  formatParticipantMentionMarkdown,
   isParticipantMentionHref,
   isReferenceMentionHref,
   parseParticipantMentionHref,
@@ -9,26 +15,7 @@ import {
 } from "../../reference-mentions.js";
 import { openReferenceMentionTarget } from "../../reference-mention-open.js";
 import { buildTuttiMentionHref, isOpenableTuttiReferenceProvider } from "../../tutti-bridge.js";
-import { PARTICIPANT_MENTION_CLASS, ReferenceMentionChip } from "./reference-mention-chip.js";
-
-const AGENT_LAUNCHER_APP_IDS = {
-  "agent-claude-code": "claude",
-  "agent-codex": "codex",
-} as const;
-
-function resolveAgentLauncherParticipant(
-  entityId: string,
-  participants: Participant[] | undefined,
-  runtimeProfiles: RuntimeProfile[] | undefined,
-): Participant | null {
-  const runtimeProvider = AGENT_LAUNCHER_APP_IDS[entityId as keyof typeof AGENT_LAUNCHER_APP_IDS];
-  if (!runtimeProvider || !participants?.length) return null;
-  return participants.find((participant) => {
-    if (participant.kind !== "ai" || participant.status === "removed") return false;
-    const profile = runtimeProfiles?.find((item) => item.id === participant.runtimeProfileId);
-    return profile?.provider?.trim().toLowerCase() === runtimeProvider;
-  }) ?? null;
-}
+import { AgentLauncherMentionChip, PARTICIPANT_MENTION_CLASS, ReferenceMentionChip } from "./reference-mention-chip.js";
 
 function resolveMentionMeta(
   href: string,
@@ -76,6 +63,7 @@ function resolveParticipantMentionTarget(
 function ParticipantMentionLink(props: {
   children?: ReactNode;
   participant: Participant;
+  pasteMarkdown?: string;
   onOpenAgentProfile: (participant: Participant) => void;
 }) {
   const openProfile = () => {
@@ -86,6 +74,7 @@ function ParticipantMentionLink(props: {
     <span
       role="button"
       tabIndex={0}
+      data-composer-paste-markdown={props.pasteMarkdown}
       className={`${PARTICIPANT_MENTION_CLASS} [cursor:pointer] hover:[opacity:0.85]`}
       onClick={(event) => {
         event.preventDefault();
@@ -116,17 +105,27 @@ export function ReferenceMentionLink(props: {
   const href = props.href ?? "";
   if (isParticipantMentionHref(href)) {
     const participant = resolveParticipantMentionTarget(href, props.participants);
+    const label = referenceLabel(props.children) || participant?.displayName || "";
+    const participantId = parseParticipantMentionHref(href)?.participantId ?? participant?.id;
+    const pasteMarkdown = participantId
+      ? formatParticipantMentionMarkdown(participantId, label || participant?.displayName || "")
+      : undefined;
     if (participant && props.onOpenAgentProfile) {
       return (
         <ParticipantMentionLink
           participant={participant}
+          pasteMarkdown={pasteMarkdown}
           onOpenAgentProfile={props.onOpenAgentProfile}
         >
           {props.children}
         </ParticipantMentionLink>
       );
     }
-    return <span className={PARTICIPANT_MENTION_CLASS}>{props.children}</span>;
+    return (
+      <span className={PARTICIPANT_MENTION_CLASS} data-composer-paste-markdown={pasteMarkdown}>
+        {props.children}
+      </span>
+    );
   }
   if (!isReferenceMentionHref(href)) {
     return (
@@ -138,6 +137,7 @@ export function ReferenceMentionLink(props: {
 
   const mention = resolveMentionMeta(href, props.mentions ?? []);
   const label = referenceLabel(props.children) || String(props.children ?? "");
+  const pasteMarkdown = `[${label}](${href})`;
   const parsed = href.startsWith("mention://")
     ? (() => {
         try {
@@ -157,19 +157,19 @@ export function ReferenceMentionLink(props: {
   }
 
   const entityId = mention?.referenceEntityId?.trim() || parsed?.entityId || "";
-  const agentLauncherParticipant =
-    providerId === "workspace-app" && entityId
-      ? resolveAgentLauncherParticipant(entityId, props.participants, props.runtimeProfiles)
-      : null;
+  const guiProvider = providerId === "workspace-app" ? resolveAgentGuiProviderFromAppId(entityId) : null;
+  const launcherRuntimeProvider = resolveAgentLauncherRuntimeProvider(entityId);
 
-  if (agentLauncherParticipant && props.onOpenAgentProfile) {
+  if (guiProvider && launcherRuntimeProvider) {
     return (
-      <ParticipantMentionLink
-        participant={agentLauncherParticipant}
-        onOpenAgentProfile={props.onOpenAgentProfile}
-      >
-        {props.children}
-      </ParticipantMentionLink>
+      <AgentLauncherMentionChip
+        label={label || props.children}
+        runtimeProvider={launcherRuntimeProvider}
+        pasteMarkdown={pasteMarkdown}
+        onClick={() => {
+          void openAgentGuiProvider(guiProvider);
+        }}
+      />
     );
   }
 
@@ -190,6 +190,9 @@ export function ReferenceMentionLink(props: {
     <ReferenceMentionChip
       providerId={providerId}
       label={props.children}
+      entityId={entityId}
+      iconUrl={mention?.referenceScope?.iconUrl}
+      pasteMarkdown={pasteMarkdown}
       onClick={handleOpen}
     />
   );

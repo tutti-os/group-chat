@@ -3,14 +3,10 @@ import {
   buildAgentGuiDraftPrompt,
   type AgentGuiDraftPromptContext,
 } from "./agent-gui-draft-prompt.js";
+import { resolveAgentGuiProviderFromAppId } from "./agent-launcher-mentions.js";
 import { isTuttiWorkspaceAppEnvironment } from "./tutti-bridge.js";
 
 export type TuttiAgentGuiProvider = "claude-code" | "codex";
-
-const AGENT_LAUNCHER_APP_IDS: Record<string, TuttiAgentGuiProvider> = {
-  "agent-claude-code": "claude-code",
-  "agent-codex": "codex",
-};
 
 export interface AgentGuiDispatchRequest {
   provider: TuttiAgentGuiProvider;
@@ -31,7 +27,7 @@ export function resolveAgentGuiDispatchFromMentions(
   for (const mention of mentions) {
     if (mention.mentionType !== "reference") continue;
     if (mention.referenceProviderId !== "workspace-app") continue;
-    const provider = AGENT_LAUNCHER_APP_IDS[mention.referenceEntityId?.trim() ?? ""];
+    const provider = resolveAgentGuiProviderFromAppId(mention.referenceEntityId);
     if (!provider) continue;
     const prompt = buildAgentGuiDraftPrompt(stripQuotePrefix(content), mentions, context);
     if (!prompt) continue;
@@ -41,7 +37,10 @@ export function resolveAgentGuiDispatchFromMentions(
   return null;
 }
 
-export async function dispatchAgentGuiTask(request: AgentGuiDispatchRequest): Promise<boolean> {
+export async function openAgentGuiProvider(
+  provider: TuttiAgentGuiProvider,
+  draftPrompt?: string,
+): Promise<boolean> {
   if (!isTuttiWorkspaceAppEnvironment()) return false;
   const bridge = window.tuttiExternal?.workspace;
   if (!bridge?.openFeature) return false;
@@ -49,12 +48,16 @@ export async function dispatchAgentGuiTask(request: AgentGuiDispatchRequest): Pr
   try {
     await bridge.openFeature({
       feature: "agent-chat",
-      provider: request.provider,
-      draftPrompt: request.prompt,
+      provider,
+      ...(draftPrompt?.trim() ? { draftPrompt: draftPrompt.trim() } : {}),
       autoSubmit: false,
     });
     return true;
   } catch {
     return false;
   }
+}
+
+export async function dispatchAgentGuiTask(request: AgentGuiDispatchRequest): Promise<boolean> {
+  return openAgentGuiProvider(request.provider, request.prompt);
 }

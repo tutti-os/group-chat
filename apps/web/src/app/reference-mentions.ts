@@ -1,5 +1,9 @@
 import type { MentionTarget, TuttiAtProviderId, TuttiReferenceInsert } from "@group-chat/shared";
 import { TUTTI_AT_PROVIDER_IDS } from "@group-chat/shared";
+import {
+  formatAgentLauncherMentionLabel,
+  isAgentLauncherAppId,
+} from "./agent-launcher-mentions.js";
 import { parseTuttiAtMentionKey } from "./tutti-at-mentions.js";
 import { buildTuttiMentionHref, isOpenableTuttiReferenceProvider } from "./tutti-bridge.js";
 
@@ -119,7 +123,10 @@ export function enrichContentWithReferenceMentions(
     if (mention.mentionType !== "reference") continue;
     if (!isStyledReferenceProvider(mention.referenceProviderId)) continue;
     const entityId = mention.referenceEntityId?.trim();
-    const label = mention.displayNameSnapshot.trim();
+    const rawLabel = mention.displayNameSnapshot.trim();
+    const label = entityId && isAgentLauncherAppId(entityId)
+      ? formatAgentLauncherMentionLabel(rawLabel)
+      : rawLabel;
     if (!entityId || !label) continue;
     const markdown = formatReferenceMentionMarkdown(mention.referenceProviderId, entityId, label, {
       referenceInsert: mention.referenceInsert,
@@ -145,6 +152,10 @@ export function serializeReferenceMentionChip(element: HTMLElement) {
   const entityId = element.dataset.mentionReferenceEntityId?.trim() || parsed?.itemId || "";
   if (!entityId) return label;
 
+  const displayLabel = isAgentLauncherAppId(entityId)
+    ? formatAgentLauncherMentionLabel(label)
+    : label;
+
   let referenceInsert: MentionTarget["referenceInsert"];
   let referenceScope: MentionTarget["referenceScope"];
   if (element.dataset.mentionReferenceInsert) {
@@ -158,7 +169,7 @@ export function serializeReferenceMentionChip(element: HTMLElement) {
     }
   }
 
-  return formatReferenceMentionMarkdown(providerId, entityId, label, {
+  return formatReferenceMentionMarkdown(providerId, entityId, displayLabel, {
     referenceInsert,
     referenceScope,
   });

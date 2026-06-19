@@ -9,8 +9,8 @@ export interface RuntimeProviderAvatarStyle {
 }
 
 const RUNTIME_PROVIDER_ICONS: Record<string, string> = {
-  codex: "/runtime-icons/codex.svg",
-  claude: "/runtime-icons/claude-code.svg",
+  codex: "/runtime-icons/codex.png",
+  claude: "/runtime-icons/claude-code.png",
 };
 
 export function getRuntimeProviderAvatarIconUrl(provider: string | null | undefined): string | null {
@@ -23,10 +23,10 @@ export function getRuntimeProviderAvatarStyle(provider: string | null | undefine
   const normalized = provider.trim().toLowerCase();
   const iconUrl = getRuntimeProviderAvatarIconUrl(normalized);
   if (normalized === "codex") {
-    return { label: "Cx", background: "#ffffff", color: "#ffffff", iconUrl };
+    return { label: "Cx", background: "transparent", color: "#ffffff", iconUrl };
   }
   if (normalized === "claude") {
-    return { label: "Cc", background: "#C4B5A8", color: "#ffffff", iconUrl };
+    return { label: "Cc", background: "transparent", color: "#ffffff", iconUrl };
   }
   return {
     label: normalized.slice(0, 2).toUpperCase() || "AI",

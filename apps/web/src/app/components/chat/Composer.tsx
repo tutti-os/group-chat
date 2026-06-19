@@ -8,7 +8,6 @@ import { getArtifactCategory, revealArtifactInTuttiFileManager, resolveArtifactP
 import { formatBytes, fileToBase64 } from "../../formatting.js";
 import {
   clearArtifactClipboardStash,
-  findEmbeddedLinks,
   formatMessageLink,
   formatMessageLinkLabel,
   formatSummaryLink,
@@ -23,17 +22,23 @@ import type { BackgroundTask } from "../../background-tasks.js";
 import { markMessageGroupBreak, MESSAGE_GROUP_IDLE_MS } from "../../message-group-breaks.js";
 import { AttachmentPreviewDialog, isTextAttachment, type AttachmentPreview } from "./AttachmentPreviewDialog.js";
 import { AgentAvatar } from "../ui/AgentAvatar.js";
-import { resolveAgentAvatarFromContext } from "../../identity-avatar.js";
+import { getRuntimeProviderAvatarIconUrl, getRuntimeProviderAvatarStyle, resolveAgentAvatarFromContext } from "../../identity-avatar.js";
 import { WHISPER_FEATURE_ENABLED } from "../../feature-flags.js";
 import { attachmentLabel, useTranslation, t } from "../../i18n/index.js";
-import { dispatchAgentGuiTask, resolveAgentGuiDispatchFromMentions } from "../../agent-gui-dispatch.js";
+import { dispatchAgentGuiTask, openAgentGuiProvider, resolveAgentGuiDispatchFromMentions } from "../../agent-gui-dispatch.js";
+import {
+  isAgentLauncherAppId,
+  resolveAgentGuiProviderFromAppId,
+  resolveAgentLauncherRuntimeProvider,
+} from "../../agent-launcher-mentions.js";
 import { tryOpenArtifactInTutti, tryOpenFileInTuttiSync, buildTuttiMentionHref, isOpenableTuttiReferenceProvider } from "../../tutti-bridge.js";
 import { openReferenceMentionTarget } from "../../reference-mention-open.js";
+import { buildLocalAgentLauncherReference, buildLocalAgentMentionOptions, type LocalAgentMentionOption } from "../../local-agent-mention-options.js";
 import {
   parseTuttiAtMentionKey,
+  isTuttiAtMentionCacheReady,
   queryTuttiAtMentions,
   readCachedTuttiAtMentions,
-  isTuttiAtMentionCacheReady,
   roomFileMentionCacheFingerprint,
   resolveMentionThumbnailUrl,
   tuttiAtMentionKey,
@@ -41,8 +46,10 @@ import {
   type TuttiAtRoomFileMeta,
 } from "../../tutti-at-mentions.js";
 import { serializeReferenceMentionChip } from "../../reference-mentions.js";
+import { buildReferencePasteTarget, normalizeComposerPasteText, splitComposerPasteContent, type ComposerPasteContext } from "../../composer-paste-content.js";
 import { mentionTabProviders } from "../../mention-panel-tabs.js";
-import { REFERENCE_MENTION_CHIP_CLASS, REFERENCE_MENTION_COLOR } from "./reference-mention-chip.js";
+import { createTuttiMessageLinkIconElement, createTuttiReferenceIconElement } from "../../tutti-reference-icons.js";
+import { AGENT_LAUNCHER_MENTION_ICON_CLASS, PARTICIPANT_MENTION_CLASS, REFERENCE_MENTION_CHIP_CLASS, REFERENCE_MENTION_ICON_CLASS, REFERENCE_MENTION_LABEL_CLASS, splitAgentLauncherMentionLabel } from "./reference-mention-chip.js";
 import {
   MENTION_PANEL_TABS,
   mentionTabI18nKey,
@@ -52,6 +59,68 @@ import {
 
 const MENTION_MENU_Z_INDEX = 90;
 
+let cachedAvailableAgentLauncherAppIds: Set<string> | null = null;
+let availableAgentLauncherAppIdsRequest: Promise<Set<string>> | null = null;
+
+function fetchAvailableAgentLauncherAppIds(options?: { force?: boolean }) {
+  if (!options?.force && cachedAvailableAgentLauncherAppIds) {
+    return Promise.resolve(cachedAvailableAgentLauncherAppIds);
+  }
+  if (!options?.force && availableAgentLauncherAppIdsRequest) {
+    return availableAgentLauncherAppIdsRequest;
+  }
+  availableAgentLauncherAppIdsRequest = queryTuttiAtMentions({
+    keyword: "",
+    maxResults: 50,
+    providers: ["workspace-app"],
+    forceRefresh: options?.force ?? false,
+  })
+    .then((items) => {
+      const ids = new Set(
+        items
+          .map((item) => item.itemId)
+          .filter((itemId) => isAgentLauncherAppId(itemId)),
+      );
+      cachedAvailableAgentLauncherAppIds = ids;
+      return ids;
+    })
+    .finally(() => {
+      availableAgentLauncherAppIdsRequest = null;
+    });
+  return availableAgentLauncherAppIdsRequest;
+}
+
+function mentionPanelCacheKey(tab: MentionPanelTab, roomId: string, roomFileFingerprint: string) {
+  return tab === "files"
+    ? `${tab}:${roomId}:${roomFileFingerprint}`
+    : tab;
+}
+
+function tuttiAtQueryResultSignature(item: TuttiAtQueryResult) {
+  return JSON.stringify({
+    providerId: item.providerId,
+    itemId: item.itemId,
+    label: item.label,
+    subtitle: item.subtitle ?? "",
+    thumbnailUrl: item.thumbnailUrl ?? "",
+    insert: item.insert,
+    roomFile: item.roomFile ?? null,
+  });
+}
+
+function sameTuttiAtQueryResults(left: TuttiAtQueryResult[], right: TuttiAtQueryResult[]) {
+  if (left.length !== right.length) return false;
+  return left.every((item, index) => tuttiAtQueryResultSignature(item) === tuttiAtQueryResultSignature(right[index]!));
+}
+
+function sameStringSet(left: ReadonlySet<string>, right: ReadonlySet<string>) {
+  if (left.size !== right.size) return false;
+  for (const item of left) {
+    if (!right.has(item)) return false;
+  }
+  return true;
+}
+
 export function Composer(props: {
   conversation: Conversation;
   conversationId: string;
@@ -59,6 +128,7 @@ export function Composer(props: {
   identities: Identity[];
   runtimeProfiles: RuntimeProfile[];
   localAgentProviders: LocalAgentProviderStatus[];
+  onRefreshLocalAgentProviders?: () => void | Promise<void>;
   allMessages: Message[];
   allParticipants: Participant[];
   conversations: Conversation[];
@@ -70,6 +140,7 @@ export function Composer(props: {
   onUpload: typeof uploadArtifact;
   onCancelRun: typeof cancelRun;
   mentionRequest: { participantId: string; seq: number } | null;
+  focusRequest: { seq: number } | null;
   summaryTasks: BackgroundTask[];
   userDisplayName: string;
   artifacts: Artifact[];
@@ -92,6 +163,9 @@ export function Composer(props: {
   const [mentionedAll, setMentionedAll] = useState(false);
   const [externalMentionOptions, setExternalMentionOptions] = useState<TuttiAtQueryResult[]>([]);
   const [externalMentionsLoading, setExternalMentionsLoading] = useState(false);
+  const [availableAgentLauncherAppIds, setAvailableAgentLauncherAppIds] = useState<Set<string>>(
+    () => cachedAvailableAgentLauncherAppIds ?? new Set(),
+  );
   const [activeMentionTab, setActiveMentionTab] = useState<MentionPanelTab>("members");
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const [uploadItems, setUploadItems] = useState<UploadItem[]>([]);
@@ -99,13 +173,22 @@ export function Composer(props: {
   const [sending, setSending] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const editorRef = useRef<HTMLDivElement | null>(null);
+  const composerDraftsRef = useRef<Map<string, ComposerDraft>>(new Map());
+  const activeDraftConversationIdRef = useRef(props.conversationId);
+  const pendingFocusSeqRef = useRef(0);
   const handledMentionRequestSeqRef = useRef(0);
+  const handledFocusRequestSeqRef = useRef(0);
   const handledComposerRequestSeqRef = useRef(0);
   const removedUploadIdsRef = useRef<Set<string>>(new Set());
   const previewUrlsRef = useRef<Set<string>>(new Set());
   const mentionSelectionRef = useRef<Range | null>(null);
   const mentionQueryRangeRef = useRef<Range | null>(null);
   const mentionMenuRef = useRef<HTMLDivElement | null>(null);
+  const mentionMenuListRef = useRef<HTMLDivElement | null>(null);
+  const prefetchedMentionPanelKeysRef = useRef<Set<string>>(new Set());
+  const lastActiveReferenceTabRef = useRef<MentionPanelTab | null>(null);
+  const lastLocalAgentProviderRefreshAtRef = useRef(0);
+  const localAgentProviderRefreshTimersRef = useRef<number[]>([]);
   const footerRef = useRef<HTMLElement | null>(null);
   const [mentionMenuStyle, setMentionMenuStyle] = useState<CSSProperties>({ visibility: "hidden" });
   const composerCaretOffsetRef = useRef<number | null>(null);
@@ -113,11 +196,46 @@ export function Composer(props: {
   const composerIdleBreakPendingRef = useRef(false);
   const roomMembers = props.participants.filter((participant) => participant.status !== "removed");
   const mentionableAgents = roomMembers.filter((participant) => participant.kind === "ai");
+  const realRoomMembers = roomMembers.filter((participant) => participant.kind !== "ai");
   const allMentionableParticipants = useMemo(() => roomMembers, [roomMembers]);
   const memberMentionOptions = useMemo(
-    () => buildParticipantMentionOptions(roomMembers, mentionQuery, mentionedIds, mentionedAll, { includeEveryone: true }),
-    [roomMembers, mentionQuery, mentionedIds, mentionedAll],
+    () => buildParticipantMentionOptions(realRoomMembers, mentionQuery, mentionedIds, mentionedAll, { includeEveryone: false }),
+    [realRoomMembers, mentionQuery, mentionedIds, mentionedAll],
   );
+  const groupAgentMentionOptions = useMemo(
+    () => buildParticipantMentionOptions(mentionableAgents, mentionQuery, mentionedIds, mentionedAll, { includeEveryone: false }),
+    [mentionableAgents, mentionQuery, mentionedIds, mentionedAll],
+  );
+  const localAgentMentionOptions = useMemo(
+    () =>
+      buildLocalAgentMentionOptions(
+        props.runtimeProfiles,
+        props.localAgentProviders,
+        roomMembers,
+        props.identities,
+        mentionQuery,
+        availableAgentLauncherAppIds,
+      ),
+    [props.runtimeProfiles, props.localAgentProviders, roomMembers, props.identities, mentionQuery, availableAgentLauncherAppIds],
+  );
+  const composerPasteContext = useMemo<ComposerPasteContext>(
+    () => ({
+      participants: roomMembers,
+      runtimeProfiles: props.runtimeProfiles,
+      localAgentProviders: props.localAgentProviders,
+      identities: props.identities,
+    }),
+    [roomMembers, props.runtimeProfiles, props.localAgentProviders, props.identities],
+  );
+  const bindEditorRef = useCallback((node: HTMLDivElement | null) => {
+    editorRef.current = node;
+    if (!node) return;
+    if (pendingFocusSeqRef.current <= handledFocusRequestSeqRef.current) return;
+    focusEditorAtEnd(node, { preventScroll: true });
+    if (isComposerEditorFocused(node)) {
+      handledFocusRequestSeqRef.current = pendingFocusSeqRef.current;
+    }
+  }, []);
   const referenceMentionOptions = useMemo<MentionOption[]>(
     () =>
       externalMentionOptions.map((item) => ({
@@ -142,14 +260,21 @@ export function Composer(props: {
       if (tab === "files" && !option.item.roomFile) continue;
       referencesByTab[tab].push(option);
     }
+    const allOption = memberMentionOptions.find((option) => option.kind === "all") ?? null;
+    const realMemberOptions = memberMentionOptions.filter((option) => option.kind !== "all");
     return {
-      members: memberMentionOptions,
+      members: [
+        ...(allOption ? [allOption] : []),
+        ...localAgentMentionOptions,
+        ...groupAgentMentionOptions,
+        ...realMemberOptions,
+      ],
       files: referencesByTab.files,
       sessions: referencesByTab.sessions,
-      apps: referencesByTab.apps,
+      apps: referencesByTab.apps.filter((option) => option.kind !== "reference" || !isAgentLauncherAppId(option.item.itemId)),
       tasks: referencesByTab.tasks,
     };
-  }, [memberMentionOptions, referenceMentionOptions]);
+  }, [memberMentionOptions, localAgentMentionOptions, groupAgentMentionOptions, referenceMentionOptions]);
   const mentionOptions = mentionOptionsByTab[activeMentionTab] ?? [];
   const roomArtifacts = useMemo(
     () => props.artifacts.filter((artifact) => artifact.roomId === props.conversation.roomId),
@@ -160,23 +285,65 @@ export function Composer(props: {
     [roomArtifacts, props.conversation.roomId],
   );
 
+  const refreshAvailableAgentLauncherApps = useCallback((options?: { force?: boolean }) => {
+    void fetchAvailableAgentLauncherAppIds(options).then((ids) => {
+      setAvailableAgentLauncherAppIds((current) => sameStringSet(current, ids) ? current : new Set(ids));
+    });
+  }, []);
+
+  const refreshLocalAgentProvidersForComposer = useCallback((options?: { force?: boolean }) => {
+    const now = Date.now();
+    if (!options?.force && now - lastLocalAgentProviderRefreshAtRef.current < 3000) return;
+    lastLocalAgentProviderRefreshAtRef.current = now;
+    void props.onRefreshLocalAgentProviders?.();
+  }, [props.onRefreshLocalAgentProviders]);
+
+  const scheduleLocalAgentProviderRefreshBurst = useCallback(() => {
+    for (const timer of localAgentProviderRefreshTimersRef.current) {
+      window.clearTimeout(timer);
+    }
+    localAgentProviderRefreshTimersRef.current = [0, 250, 900, 1800, 3200].map((delayMs) =>
+      window.setTimeout(() => refreshLocalAgentProvidersForComposer({ force: true }), delayMs),
+    );
+    refreshAvailableAgentLauncherApps({ force: true });
+  }, [refreshAvailableAgentLauncherApps, refreshLocalAgentProvidersForComposer]);
+
+  useEffect(() => () => {
+    for (const timer of localAgentProviderRefreshTimersRef.current) {
+      window.clearTimeout(timer);
+    }
+    localAgentProviderRefreshTimersRef.current = [];
+  }, []);
+
+  useEffect(() => {
+    refreshAvailableAgentLauncherApps();
+  }, [refreshAvailableAgentLauncherApps]);
+
   useEffect(() => {
     if (mentionQuery === null) {
       setExternalMentionOptions([]);
       setExternalMentionsLoading(false);
+      prefetchedMentionPanelKeysRef.current.clear();
+      lastActiveReferenceTabRef.current = null;
       return;
     }
     const tabProviders = mentionTabProviders(activeMentionTab);
     if (tabProviders === null) {
       setExternalMentionOptions([]);
       setExternalMentionsLoading(false);
+      lastActiveReferenceTabRef.current = null;
       return;
     }
     let cancelled = false;
+    const isFilesTab = tabProviders.includes("file");
     const cacheReady = isTuttiAtMentionCacheReady(tabProviders, {
       roomId: props.conversation.roomId,
       roomFileFingerprint,
     });
+    const shouldForceRefresh = isFilesTab
+      ? !cacheReady
+      : lastActiveReferenceTabRef.current !== activeMentionTab;
+    lastActiveReferenceTabRef.current = activeMentionTab;
     const cachedItems = readCachedTuttiAtMentions({
       keyword: mentionQuery,
       roomId: props.conversation.roomId,
@@ -188,17 +355,21 @@ export function Composer(props: {
       setExternalMentionOptions(cachedItems);
       setActiveMentionIndex(0);
     }
-    setExternalMentionsLoading(!cacheReady);
-    if (cacheReady && cachedItems) return;
+    if (cachedItems && isFilesTab) {
+      setExternalMentionsLoading(false);
+      return;
+    }
+    setExternalMentionsLoading(!cachedItems && !isFilesTab);
     void queryTuttiAtMentions({
       keyword: mentionQuery,
       roomId: props.conversation.roomId,
       maxResults: 20,
       providers: tabProviders,
       roomArtifacts,
+      forceRefresh: shouldForceRefresh,
     }).then((items) => {
       if (cancelled) return;
-      setExternalMentionOptions(items);
+      setExternalMentionOptions((current) => sameTuttiAtQueryResults(current, items) ? current : items);
       setExternalMentionsLoading(false);
       setActiveMentionIndex(0);
     });
@@ -206,6 +377,42 @@ export function Composer(props: {
       cancelled = true;
     };
   }, [mentionQuery, props.conversation.roomId, activeMentionTab, roomArtifacts, roomFileFingerprint]);
+
+  useEffect(() => {
+    if (mentionQuery === null) return;
+    scheduleLocalAgentProviderRefreshBurst();
+  }, [mentionQuery, scheduleLocalAgentProviderRefreshBurst]);
+
+  useEffect(() => {
+    if (mentionQuery === null) return;
+    const prefetchInputs = MENTION_PANEL_TABS
+      .map((tab) => ({
+        key: mentionPanelCacheKey(tab, props.conversation.roomId, roomFileFingerprint),
+        providers: mentionTabProviders(tab),
+        forceRefresh: tab !== "files",
+      }))
+      .filter((input): input is { key: string; providers: readonly TuttiAtProviderId[]; forceRefresh: boolean } => Boolean(input.providers));
+
+    for (const input of prefetchInputs) {
+      if (prefetchedMentionPanelKeysRef.current.has(input.key)) continue;
+      prefetchedMentionPanelKeysRef.current.add(input.key);
+      void queryTuttiAtMentions({
+        keyword: "",
+        roomId: props.conversation.roomId,
+        maxResults: 20,
+        providers: input.providers,
+        roomArtifacts,
+        forceRefresh: input.forceRefresh,
+      }).finally(() => {
+        if (!isTuttiAtMentionCacheReady(input.providers, {
+          roomId: props.conversation.roomId,
+          roomFileFingerprint,
+        })) {
+          prefetchedMentionPanelKeysRef.current.delete(input.key);
+        }
+      });
+    }
+  }, [mentionQuery, props.conversation.roomId, roomArtifacts, roomFileFingerprint]);
   const send = async () => {
     if (sending || (!text.trim() && uploadItems.length === 0)) return;
     setSending(true);
@@ -229,6 +436,7 @@ export function Composer(props: {
         messageContent,
         editorMentions,
         {
+          artifacts: [...props.artifacts, ...artifacts],
           messages: props.allMessages,
           participants: allMentionableParticipants,
           identities: props.identities,
@@ -510,6 +718,16 @@ export function Composer(props: {
   };
 
   const openFileReferenceFromChip = useCallback((element: HTMLElement) => {
+    const parsedMention = parseTuttiAtMentionKey(element.dataset.mentionId ?? "");
+    const entityId = parsedMention?.itemId ?? "";
+    const guiProvider = parsedMention?.providerId === "workspace-app"
+      ? resolveAgentGuiProviderFromAppId(entityId)
+      : null;
+    if (guiProvider) {
+      void openAgentGuiProvider(guiProvider);
+      return;
+    }
+
     const href = element instanceof HTMLAnchorElement ? element.href : "";
     const mentionHref = href.startsWith("mention://") ? href : element.dataset.mentionLinkHref?.trim() || "";
     if (mentionHref.startsWith("mention://")) {
@@ -570,6 +788,9 @@ export function Composer(props: {
     } else if (option.kind === "reference") {
       const mentionId = tuttiAtMentionKey(option.providerId, option.item.itemId);
       insertMentionChipAtActiveQuery(option.label, mentionId, option.item);
+    } else if (option.kind === "local-agent") {
+      const reference = buildLocalAgentLauncherReference(option);
+      insertMentionChipAtActiveQuery(option.label, tuttiAtMentionKey(reference.providerId, reference.itemId), reference);
     } else {
       insertMention(option.participant);
     }
@@ -694,17 +915,25 @@ export function Composer(props: {
       && pastedText.trim()
       && !isPlaceholderAttachmentText(pastedText)
     ) {
-      insertTextOrLinkChipsAtCaret(pastedText, {
-        getMessageLabel: (messageIdSegment) => formatMessageLinkLabel(
-          messageIdSegment,
-          props.allMessages,
-          props.allParticipants,
-          props.identities,
-          props.userDisplayName,
-        ),
-        getSummaryLabel: (taskId) => summaryLinkLabel(props.summaryTasks.find((task) => task.id === taskId)),
+      insertComposerPasteAtCaret(
+        pastedText,
+        {
+          getMessageLabel: (messageIdSegment) => formatMessageLinkLabel(
+            messageIdSegment,
+            props.allMessages,
+            props.allParticipants,
+            props.identities,
+            props.userDisplayName,
+          ),
+          getSummaryLabel: (taskId) => summaryLinkLabel(props.summaryTasks.find((task) => task.id === taskId)),
+        },
+        composerPasteContext,
+      );
+      requestAnimationFrame(() => {
+        const editor = editorRef.current;
+        if (editor) syncMentionedIdsFromEditor(editor);
+        syncEditorText(true);
       });
-      requestAnimationFrame(() => syncEditorText(true));
     }
     focusComposerAfterAttachmentInsert();
   };
@@ -764,7 +993,8 @@ export function Composer(props: {
 
   const pasteFiles = (event: ClipboardEvent<HTMLDivElement>) => {
     const pastedArtifactClipboard = resolvePastedArtifacts(event.clipboardData);
-    const pastedText = event.clipboardData.getData("text/plain");
+    const pastedHtml = event.clipboardData.getData("text/html");
+    const pastedText = normalizeComposerPasteText(pastedHtml, event.clipboardData.getData("text/plain"));
     const summaryLinkFromMime = event.clipboardData.getData(SUMMARY_LINK_MIME).trim();
     const stashedSummaryLink = readStashedSummaryLink();
     const summaryLink = summaryLinkFromMime.startsWith("group-chat://summary/")
@@ -804,17 +1034,25 @@ export function Composer(props: {
 
     if (!pastedText) return;
     event.preventDefault();
-    insertTextOrLinkChipsAtCaret(pastedText, {
-      getMessageLabel: (messageIdSegment) => formatMessageLinkLabel(
-        messageIdSegment,
-        props.allMessages,
-        props.allParticipants,
-        props.identities,
-        props.userDisplayName,
-      ),
-      getSummaryLabel: (taskId) => summaryLinkLabel(props.summaryTasks.find((task) => task.id === taskId)),
+    insertComposerPasteAtCaret(
+      pastedText,
+      {
+        getMessageLabel: (messageIdSegment) => formatMessageLinkLabel(
+          messageIdSegment,
+          props.allMessages,
+          props.allParticipants,
+          props.identities,
+          props.userDisplayName,
+        ),
+        getSummaryLabel: (taskId) => summaryLinkLabel(props.summaryTasks.find((task) => task.id === taskId)),
+      },
+      composerPasteContext,
+    );
+    requestAnimationFrame(() => {
+      const editor = editorRef.current;
+      if (editor) syncMentionedIdsFromEditor(editor);
+      syncEditorText(true);
     });
-    requestAnimationFrame(() => syncEditorText(true));
   };
 
   const removeUploadItem = (itemId: string) => {
@@ -848,12 +1086,36 @@ export function Composer(props: {
     if (item.previewUrl) window.open(item.previewUrl, "_blank", "noopener,noreferrer");
   };
 
+  const saveCurrentComposerDraft = useCallback((conversationId = activeDraftConversationIdRef.current) => {
+    const editor = editorRef.current;
+    const html = editor?.innerHTML ?? "";
+    const draft: ComposerDraft = {
+      html,
+      text,
+      editingMessageId,
+      editingMentions,
+      quotes,
+      uploadItems,
+      mentionedIds: [...mentionedIds],
+      mentionedAll,
+    };
+    if (isEmptyComposerDraft(draft)) {
+      composerDraftsRef.current.delete(conversationId);
+      return;
+    }
+    composerDraftsRef.current.set(conversationId, draft);
+  }, [editingMentions, editingMessageId, mentionedAll, mentionedIds, quotes, text, uploadItems]);
+
   useEffect(() => {
     return () => {
       for (const previewUrl of previewUrlsRef.current) revokePreviewUrl(previewUrl);
       previewUrlsRef.current.clear();
     };
   }, []);
+
+  useEffect(() => {
+    saveCurrentComposerDraft();
+  }, [saveCurrentComposerDraft]);
 
   useEffect(() => {
     setActiveMentionIndex((current) => (mentionOptions.length ? Math.min(current, mentionOptions.length - 1) : 0));
@@ -864,7 +1126,29 @@ export function Composer(props: {
   }, [activeMentionTab]);
 
   useEffect(() => {
+    saveCurrentComposerDraft(activeDraftConversationIdRef.current);
+    activeDraftConversationIdRef.current = props.conversationId;
+    const draft = composerDraftsRef.current.get(props.conversationId) ?? null;
+    setText(draft?.text ?? "");
+    setEditingMessageId(draft?.editingMessageId ?? null);
+    setEditingMentions(draft?.editingMentions ?? []);
+    setQuotes(draft?.quotes ?? []);
+    setUploadItems(draft?.uploadItems ?? []);
+    setMentionedIds(new Set(draft?.mentionedIds ?? []));
+    setMentionedAll(draft?.mentionedAll ?? false);
+    restoreEditorDraft(editorRef.current, draft);
     handledMentionRequestSeqRef.current = 0;
+    setMentionQuery(null);
+    setMentionMenuDismissed(false);
+    setExternalMentionOptions([]);
+    setExternalMentionsLoading(false);
+    setActiveMentionIndex(0);
+    setActiveMentionTab("members");
+    mentionSelectionRef.current = null;
+    mentionQueryRangeRef.current = null;
+    composerCaretOffsetRef.current = null;
+    prefetchedMentionPanelKeysRef.current.clear();
+    lastActiveReferenceTabRef.current = null;
   }, [props.conversationId]);
 
   useLayoutEffect(() => {
@@ -893,6 +1177,36 @@ export function Composer(props: {
       cancelled = true;
     };
   }, [mentionableAgents, props.mentionRequest]);
+
+  useLayoutEffect(() => {
+    const request = props.focusRequest;
+    if (!request || request.seq === handledFocusRequestSeqRef.current) return;
+    pendingFocusSeqRef.current = request.seq;
+    let cancelled = false;
+    const cancelFocus = focusComposerWhenReady(() => editorRef.current, {
+      preventScroll: true,
+      isCancelled: () => cancelled || pendingFocusSeqRef.current !== request.seq,
+      onSuccess: () => {
+        handledFocusRequestSeqRef.current = request.seq;
+      },
+    });
+    return () => {
+      cancelled = true;
+      cancelFocus();
+    };
+  }, [props.focusRequest]);
+
+  useLayoutEffect(() => {
+    let cancelled = false;
+    const cancelFocus = focusComposerWhenReady(() => editorRef.current, {
+      preventScroll: true,
+      isCancelled: () => cancelled,
+    });
+    return () => {
+      cancelled = true;
+      cancelFocus();
+    };
+  }, [props.conversationId]);
 
   useEffect(() => {
     const request = props.composerRequest;
@@ -925,6 +1239,11 @@ export function Composer(props: {
   const mentionMenuVisible = mentionQuery !== null;
   const mentionMenuOpen = mentionMenuVisible && !mentionMenuDismissed;
   const referenceTabLoading = externalMentionsLoading && activeMentionTab !== "members";
+
+  useLayoutEffect(() => {
+    if (!mentionMenuOpen || activeMentionTab !== "members") return;
+    mentionMenuListRef.current?.scrollTo({ top: 0 });
+  }, [mentionMenuOpen, activeMentionTab, localAgentMentionOptions.length]);
 
   const updateMentionMenuPosition = useCallback(() => {
     const anchor = footerRef.current;
@@ -1025,20 +1344,20 @@ export function Composer(props: {
               onRemoveUpload={removeUploadItem}
               onOpenUpload={openUploadItem}
             />
-            <div className={"[position:relative] [min-width:160px] [flex:1_1_180px] [min-height:28px] [display:grid] [align-items:start]"}>
+            <div className={"[position:relative] [min-width:0] [flex:1_1_180px] [min-height:28px] [display:grid] [align-items:start] [overflow:hidden]"}>
             {!text && t("composer.placeholder").trim() ? (
               <span className={"[pointer-events:none] [position:absolute] [left:0] [top:4px] [color:#17171755] [font-size:13px] [line-height:20px]"}>
                 {t("composer.placeholder")}
               </span>
             ) : null}
             <div
-              ref={editorRef}
+              ref={bindEditorRef}
               role="textbox"
               aria-label={t("composer.input")}
               aria-multiline="true"
               contentEditable
               suppressContentEditableWarning
-              className={"[min-height:28px] [max-height:168px] [overflow-y:hidden] [outline:none] [white-space:pre-wrap] [overflow-wrap:anywhere] [color:var(--text)] [font-size:13px] [line-height:20px] [padding:4px_0] empty:before:[content:'']"}
+              className={"[width:100%] [min-width:0] [min-height:28px] [max-height:168px] [overflow-y:hidden] [outline:none] [white-space:pre-wrap] [overflow-wrap:anywhere] [word-break:break-word] [color:var(--text)] [font-size:13px] [line-height:20px] [padding:4px_0] empty:before:[content:'']"}
               onInput={() => syncEditorText(true)}
               onMouseDown={(event) => {
                 const linkChip = (event.target as Element).closest('[data-mention-display-mode="reference-link"]');
@@ -1056,6 +1375,7 @@ export function Composer(props: {
               onPaste={pasteFiles}
               onKeyUp={() => syncEditorText(true)}
               onFocus={() => {
+                scheduleLocalAgentProviderRefreshBurst();
                 syncEditorText();
                 setMentionMenuDismissed(false);
               }}
@@ -1161,7 +1481,7 @@ export function Composer(props: {
                   </button>
                 ))}
               </div>
-              <div className={"[overflow-y:auto] [padding:6px]"}>
+              <div ref={mentionMenuListRef} className={"[overflow-y:auto] [overflow-anchor:none] [padding:6px]"}>
           {referenceTabLoading ? (
             <div className={"[display:flex] [align-items:center] [gap:8px] [padding:8px_10px] [color:var(--muted)] [font-size:12px]"}>
               <LoaderCircle size={14} className={"animate-spin"} />
@@ -1173,9 +1493,42 @@ export function Composer(props: {
             </div>
           ) : null}
           {(() => {
+            let localAgentHeaderShown = false;
+            let memberDividerShown = false;
             let participantHeaderShown = false;
             return mentionOptions.flatMap((option, index) => {
               const nodes: ReactNode[] = [];
+              if (
+                activeMentionTab === "members"
+                && option.kind === "local-agent"
+                && !localAgentHeaderShown
+              ) {
+                localAgentHeaderShown = true;
+                nodes.push(
+                  <div
+                    key="mention-local-agent-header"
+                    role="presentation"
+                    className={"[padding:8px_10px_4px] [color:var(--muted)] [font-size:11px] [font-weight:500] [line-height:16px]"}
+                  >
+                    {t("composer.atSection.agent")}
+                  </div>,
+                );
+              }
+              if (
+                activeMentionTab === "members"
+                && option.kind === "participant"
+                && localAgentHeaderShown
+                && !memberDividerShown
+              ) {
+                memberDividerShown = true;
+                nodes.push(
+                  <div
+                    key="mention-member-divider"
+                    role="presentation"
+                    className={"[margin:6px_6px_4px] [border-top:1px_solid_var(--border)]"}
+                  />,
+                );
+              }
               if (
                 activeMentionTab === "members"
                 && option.kind === "participant"
@@ -1246,6 +1599,31 @@ export function Composer(props: {
                   <strong className={"[overflow:hidden] [font-size:12px] [font-weight:500] [line-height:16px] [text-overflow:ellipsis] [white-space:nowrap]"}>{option.label}</strong>
                   <span className={"[overflow:hidden] [color:var(--muted)] [font-size:11px] [line-height:14px] [text-overflow:ellipsis] [white-space:nowrap]"}>
                     {option.subtitle || t(`composer.atProvider.${option.providerId}`)}
+                  </span>
+                </button>
+              </div>
+            ) : option.kind === "local-agent" ? (
+              <div
+                key={option.key}
+                role="option"
+                aria-selected={index === activeMentionIndex}
+                data-active={index === activeMentionIndex || undefined}
+                className={"[display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:9px] [width:100%] [min-width:0] [height:38px] [border-radius:12px] [padding:0_8px] [color:var(--text)] [transition:background-color_0.12s_ease] [&[data-active=true]]:[background:#00000014] [&:hover]:[background:#00000014]"}
+                onMouseEnter={() => setActiveMentionIndex(index)}
+              >
+                <MentionLocalAgentAvatar runtimeProfile={option.runtimeProfile} />
+                <button
+                  type="button"
+                  className={"[display:grid] [min-width:0] [gap:1px] [width:100%] [border:0] [padding:0] [color:inherit] [text-align:left] [background:transparent] [&:focus-visible]:[outline:none]"}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    saveMentionSelection();
+                    selectMentionOption(option);
+                  }}
+                >
+                  <strong className={"[overflow:hidden] [font-size:12px] [font-weight:500] [line-height:16px] [text-overflow:ellipsis] [white-space:nowrap]"}>{option.label}</strong>
+                  <span className={"[overflow:hidden] [color:var(--muted)] [font-size:11px] [line-height:14px] [text-overflow:ellipsis] [white-space:nowrap]"}>
+                    {option.subtitle}
                   </span>
                 </button>
               </div>
@@ -1411,6 +1789,27 @@ function MentionReferenceProviderIcon(props: { providerId: TuttiAtProviderId }) 
   }
 }
 
+function MentionLocalAgentAvatar(props: { runtimeProfile: RuntimeProfile }) {
+  const style = getRuntimeProviderAvatarStyle(props.runtimeProfile.provider);
+  const usesAppIcon = Boolean(style?.iconUrl);
+  return (
+    <span
+      className={`[display:inline-grid] [width:32px] [height:32px] [overflow:hidden] [border-radius:10px] [place-items:center] ${usesAppIcon ? "[background:transparent]" : "[background:#f3f4f6]"}`}
+      style={style && !usesAppIcon ? { background: style.background } : undefined}
+    >
+      {style?.iconUrl ? (
+        <img
+          src={style.iconUrl}
+          alt=""
+          className={usesAppIcon ? "[width:32px] [height:32px] [object-fit:cover]" : "[width:18px] [height:18px] [object-fit:contain]"}
+        />
+      ) : (
+        <Bot size={14} className={"[color:#ffffff]"} />
+      )}
+    </span>
+  );
+}
+
 function MentionParticipantAvatar(props: {
   participant: Participant;
   identities: Identity[];
@@ -1463,18 +1862,8 @@ function editorText(editor: HTMLDivElement | null) {
 const COMPOSER_EDITOR_MIN_HEIGHT = 28;
 const COMPOSER_EDITOR_MAX_HEIGHT = 168;
 
-function editorHasExplicitLineBreak(editor: HTMLDivElement) {
-  if (editorText(editor).includes("\n")) return true;
-  return editor.querySelector("br") !== null;
-}
-
 function resizeComposerEditor(editor: HTMLDivElement | null) {
   if (!editor) return;
-  if (!editorHasExplicitLineBreak(editor)) {
-    editor.style.height = `${COMPOSER_EDITOR_MIN_HEIGHT}px`;
-    editor.style.overflowY = "hidden";
-    return;
-  }
   editor.style.height = "0px";
   const scrollHeight = editor.scrollHeight;
   const nextHeight = Math.min(
@@ -1493,9 +1882,67 @@ function setEditorText(editor: HTMLDivElement | null, value: string, cursor: num
   resizeComposerEditor(editor);
 }
 
-function focusEditorAtEnd(editor: HTMLDivElement | null) {
+function restoreEditorDraft(editor: HTMLDivElement | null, draft: ComposerDraft | null) {
   if (!editor) return;
-  placeCaretAtEditorEnd(editor);
+  if (!draft) {
+    setEditorText(editor, "", 0);
+    return;
+  }
+  editor.innerHTML = draft.html;
+  placeCaretAtEditorEnd(editor, { preventScroll: true });
+  resizeComposerEditor(editor);
+}
+
+function isComposerEditorFocused(editor: HTMLDivElement) {
+  const active = document.activeElement;
+  return active === editor || (active instanceof Node && editor.contains(active));
+}
+
+function focusComposerWhenReady(
+  getEditor: () => HTMLDivElement | null,
+  options?: {
+    preventScroll?: boolean;
+    isCancelled?: () => boolean;
+    onSuccess?: () => void;
+  },
+) {
+  let attempt = 0;
+  let cancelled = false;
+  let frameId: number | null = null;
+  let timerId: number | null = null;
+
+  const tryFocus = () => {
+    frameId = null;
+    timerId = null;
+    if (cancelled || options?.isCancelled?.()) return;
+    const editor = getEditor();
+    if (editor?.isConnected) {
+      focusEditorAtEnd(editor, { preventScroll: options?.preventScroll });
+      if (isComposerEditorFocused(editor)) {
+        options?.onSuccess?.();
+        return;
+      }
+    }
+    attempt += 1;
+    const delay = attempt <= 8 ? 0 : Math.min(80 * (attempt - 8), 500);
+    if (delay === 0) {
+      frameId = requestAnimationFrame(tryFocus);
+    } else {
+      timerId = window.setTimeout(tryFocus, delay);
+    }
+  };
+
+  tryFocus();
+  return () => {
+    cancelled = true;
+    if (frameId !== null) cancelAnimationFrame(frameId);
+    if (timerId !== null) window.clearTimeout(timerId);
+  };
+}
+
+function focusEditorAtEnd(editor: HTMLDivElement | null, options?: { preventScroll?: boolean }) {
+  if (!editor) return;
+  placeCaretAtEditorEnd(editor, options);
 }
 
 function placeCaretAtEditorEnd(editor: HTMLDivElement, options?: { preventScroll?: boolean }) {
@@ -1834,6 +2281,10 @@ function collectMentionTargetsFromEditor(editor: HTMLDivElement | null, particip
           referenceInsert = undefined;
         }
       }
+      const referenceScope = {
+        ...(referenceInsert?.kind === "mention" ? referenceInsert.scope : {}),
+        ...(element.dataset.mentionIconUrl?.trim() ? { iconUrl: element.dataset.mentionIconUrl.trim() } : {}),
+      };
       mentions.push({
         participantId: mentionId,
         displayNameSnapshot: label,
@@ -1841,7 +2292,7 @@ function collectMentionTargetsFromEditor(editor: HTMLDivElement | null, particip
         referenceProviderId: parsedReference?.providerId,
         referenceEntityId: parsedReference?.itemId,
         referenceInsert,
-        ...(referenceInsert?.kind === "mention" ? { referenceScope: referenceInsert.scope } : {}),
+        ...(Object.keys(referenceScope).length ? { referenceScope } : {}),
       });
       continue;
     }
@@ -1910,101 +2361,57 @@ function tuttiMentionUrl(reference: TuttiAtQueryResult) {
   });
 }
 
-function createFileReferenceLinkIcon() {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "14");
-  svg.setAttribute("height", "14");
-  svg.setAttribute("viewBox", "0 0 14 14");
-  svg.setAttribute("aria-hidden", "true");
-
-  const body = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  body.setAttribute(
-    "d",
-    "M3.25 1.75h4.75l2.75 2.75v7a.75.75 0 0 1-.75.75H3.25a.75.75 0 0 1-.75-.75V2.5a.75.75 0 0 1 .75-.75Z",
-  );
-  body.setAttribute("fill", REFERENCE_MENTION_COLOR);
-
-  const fold = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  fold.setAttribute("d", "M8 1.75V4.5H10.75");
-  fold.setAttribute("fill", "#7dd3fc");
-
-  const line = (y: number, width: number) => {
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", `M4.25 ${y}h${width}`);
-    path.setAttribute("stroke", "#ffffff");
-    path.setAttribute("stroke-width", "1");
-    path.setAttribute("stroke-linecap", "round");
-    return path;
-  };
-
-  svg.append(body, fold, line(6.75, 5.5), line(8.75, 5.5), line(10.75, 3.5));
-  return svg;
+function createReferenceLinkIcon(reference: Pick<TuttiAtQueryResult, "providerId" | "itemId" | "thumbnailUrl">) {
+  return createTuttiReferenceIconElement(reference.providerId, {
+    appId: reference.itemId,
+    iconUrl: resolveMentionThumbnailUrl(reference.thumbnailUrl),
+  });
 }
 
-function createReferenceLinkIcon(providerId: TuttiAtProviderId) {
-  if (providerId === "file" || providerId === "agent-generated-file") {
-    return createFileReferenceLinkIcon();
+function createAgentLauncherLinkIcon(runtimeProvider: string) {
+  const iconUrl = getRuntimeProviderAvatarIconUrl(runtimeProvider);
+  if (iconUrl) {
+    const img = document.createElement("img");
+    img.src = iconUrl;
+    img.alt = "";
+    img.width = 14;
+    img.height = 14;
+    img.style.objectFit = "cover";
+    img.style.borderRadius = "3px";
+    return img;
   }
-
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "14");
-  svg.setAttribute("height", "14");
-  svg.setAttribute("viewBox", "0 0 14 14");
-  svg.setAttribute("aria-hidden", "true");
-
-  const stroke = (d: string) => {
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", d);
-    path.setAttribute("stroke", REFERENCE_MENTION_COLOR);
-    path.setAttribute("stroke-width", "1.2");
-    path.setAttribute("stroke-linecap", "round");
-    path.setAttribute("stroke-linejoin", "round");
-    path.setAttribute("fill", "none");
-    return path;
-  };
-
-  switch (providerId) {
-    case "agent-session":
-      svg.append(
-        stroke("M4.5 4.75a2.25 2.25 0 1 1 4.5 0 2.25 2.25 0 0 1-4.5 0Z"),
-        stroke("M2.75 11.25c0-1.75 1.9-2.75 4.25-2.75s4.25 1 4.25 2.75"),
-      );
-      break;
-    case "workspace-app":
-      svg.append(
-        stroke("M3 3.25h8v7.5H3z"),
-        stroke("M3 5.75h8"),
-        stroke("M5.25 3.25V2.25h3.5v1"),
-      );
-      break;
-    case "workspace-issue":
-      svg.append(
-        stroke("M3.25 2.75h7.5"),
-        stroke("M3.25 5.75h7.5"),
-        stroke("M3.25 8.75h5"),
-        stroke("M3.25 11.25h7.5"),
-      );
-      break;
-    default:
-      return createFileReferenceLinkIcon();
-  }
-
-  return svg;
+  return createTuttiReferenceIconElement("agent-session");
 }
 
 function appendStyledReferenceChipContent(chip: HTMLAnchorElement, label: string, reference: TuttiAtQueryResult) {
   chip.className = REFERENCE_MENTION_CHIP_CLASS;
   chip.style.color = "var(--accent)";
 
-  const iconWrap = document.createElement("span");
-  iconWrap.className = "[display:inline-flex] [flex:0_0_auto] [align-items:center] [justify-content:center]";
-  iconWrap.append(createReferenceLinkIcon(reference.providerId));
+  const launcherRuntimeProvider = reference.providerId === "workspace-app"
+    ? resolveAgentLauncherRuntimeProvider(reference.itemId)
+    : null;
+  const displayLabel = launcherRuntimeProvider
+    ? splitAgentLauncherMentionLabel(label).name
+    : label;
 
   const labelEl = document.createElement("span");
-  labelEl.className = "[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]";
+  labelEl.className = REFERENCE_MENTION_LABEL_CLASS;
   labelEl.style.color = "var(--accent)";
-  labelEl.textContent = label;
+  labelEl.textContent = displayLabel;
 
+  if (launcherRuntimeProvider) {
+    const atEl = document.createElement("span");
+    atEl.textContent = "@";
+    const iconWrap = document.createElement("span");
+    iconWrap.className = AGENT_LAUNCHER_MENTION_ICON_CLASS;
+    iconWrap.append(createAgentLauncherLinkIcon(launcherRuntimeProvider));
+    chip.append(atEl, iconWrap, labelEl);
+    return;
+  }
+
+  const iconWrap = document.createElement("span");
+  iconWrap.className = REFERENCE_MENTION_ICON_CLASS;
+  iconWrap.append(createReferenceLinkIcon(reference));
   chip.append(iconWrap, labelEl);
 }
 
@@ -2027,6 +2434,10 @@ function createMentionChip(label: string, mentionId: string, reference?: TuttiAt
     chip.dataset.mentionReferenceProvider = reference.providerId;
     chip.dataset.mentionReferenceInsert = JSON.stringify(reference.insert);
     chip.dataset.mentionLinkHref = referenceLinkHref(reference);
+    const iconUrl = resolveMentionThumbnailUrl(reference.thumbnailUrl);
+    if (iconUrl) {
+      chip.dataset.mentionIconUrl = iconUrl;
+    }
     if (reference.roomFile) {
       chip.dataset.mentionRoomFile = JSON.stringify(reference.roomFile);
     }
@@ -2045,21 +2456,13 @@ function createMentionChip(label: string, mentionId: string, reference?: TuttiAt
     chip.dataset.mentionKind = "reference";
     chip.dataset.mentionReferenceInsert = JSON.stringify(reference.insert);
     chip.className = [
-      "[display:inline]",
+      PARTICIPANT_MENTION_CLASS,
       "[color:#7c3aed]",
       "[font-weight:500]",
-      "[vertical-align:baseline]",
-      "[white-space:nowrap]",
     ].join(" ");
     return chip;
   }
-  chip.className = [
-    "[display:inline]",
-    "[color:#2563eb]",
-    "[font-weight:400]",
-    "[vertical-align:baseline]",
-    "[white-space:nowrap]",
-  ].join(" ");
+  chip.className = PARTICIPANT_MENTION_CLASS;
   return chip;
 }
 
@@ -2207,6 +2610,26 @@ function childIndex(node: Node) {
   return index;
 }
 
+function isEmptyTextNode(node: Node): node is Text {
+  return node.nodeType === Node.TEXT_NODE && (node.textContent ?? "") === "";
+}
+
+function skipEmptyTextBackward(node: Node | null) {
+  let current = node;
+  while (current && isEmptyTextNode(current)) {
+    current = current.previousSibling;
+  }
+  return current;
+}
+
+function skipEmptyTextForward(node: Node | null) {
+  let current = node;
+  while (current && isEmptyTextNode(current)) {
+    current = current.nextSibling;
+  }
+  return current;
+}
+
 function deleteAdjacentMentionChip(editor: HTMLDivElement | null, key: "Backspace" | "Delete") {
   if (!editor) return false;
   const selection = window.getSelection();
@@ -2219,7 +2642,9 @@ function deleteAdjacentMentionChip(editor: HTMLDivElement | null, key: "Backspac
   if (!candidate || !isAtomicEditorChip(candidate)) return false;
   const nextCaretParent = candidate.parentNode ?? editor;
   const nextCaretOffset = childIndex(candidate);
+  const trailingEmpty = candidate.nextSibling;
   candidate.remove();
+  if (trailingEmpty && isEmptyTextNode(trailingEmpty)) trailingEmpty.remove();
   const nextRange = document.createRange();
   nextRange.setStart(nextCaretParent, Math.min(nextCaretOffset, nextCaretParent.childNodes.length));
   nextRange.collapse(true);
@@ -2230,26 +2655,42 @@ function deleteAdjacentMentionChip(editor: HTMLDivElement | null, key: "Backspac
 
 function previousEditableNode(container: Node, offset: number, editor: HTMLDivElement) {
   if (container.nodeType === Node.TEXT_NODE && offset > 0) return null;
-  let node: Node | null = container.nodeType === Node.TEXT_NODE ? container : container.childNodes[offset - 1] ?? null;
-  if (node) return deepestRight(node);
-  node = container;
-  while (node && node !== editor) {
-    if (node.previousSibling) return deepestRight(node.previousSibling);
-    node = node.parentNode;
+  let node: Node | null = null;
+  if (container.nodeType === Node.TEXT_NODE) {
+    node = skipEmptyTextBackward(container.previousSibling);
+  } else {
+    node = skipEmptyTextBackward(container.childNodes[offset - 1] ?? null);
   }
-  return null;
+  if (!node) {
+    let parent: Node | null = container.nodeType === Node.TEXT_NODE ? container.parentNode : container;
+    while (parent && parent !== editor) {
+      node = skipEmptyTextBackward(parent.previousSibling);
+      if (node) break;
+      parent = parent.parentNode;
+    }
+  }
+  if (!node || !editor.contains(node)) return null;
+  return deepestRight(node);
 }
 
 function nextEditableNode(container: Node, offset: number, editor: HTMLDivElement) {
   if (container.nodeType === Node.TEXT_NODE && offset < (container.textContent?.length ?? 0)) return null;
-  let node: Node | null = container.nodeType === Node.TEXT_NODE ? container.nextSibling : container.childNodes[offset] ?? null;
-  if (node) return deepestLeft(node);
-  node = container;
-  while (node && node !== editor) {
-    if (node.nextSibling) return deepestLeft(node.nextSibling);
-    node = node.parentNode;
+  let node: Node | null = null;
+  if (container.nodeType === Node.TEXT_NODE) {
+    node = skipEmptyTextForward(container.nextSibling);
+  } else {
+    node = skipEmptyTextForward(container.childNodes[offset] ?? null);
   }
-  return null;
+  if (!node) {
+    let parent: Node | null = container.nodeType === Node.TEXT_NODE ? container.parentNode : container;
+    while (parent && parent !== editor) {
+      node = skipEmptyTextForward(parent.nextSibling);
+      if (node) break;
+      parent = parent.parentNode;
+    }
+  }
+  if (!node || !editor.contains(node)) return null;
+  return deepestLeft(node);
 }
 
 function deepestRight(node: Node): Node {
@@ -2277,48 +2718,68 @@ function insertPlainTextAtCaret(value: string) {
   selection.addRange(range);
 }
 
-function insertTextOrLinkChipsAtCaret(
+function insertComposerPasteAtCaret(
   value: string,
   labels: {
     getMessageLabel: (messageId: string) => string;
     getSummaryLabel: (taskId: string) => string;
   },
+  context: {
+    participants: Participant[];
+    runtimeProfiles: RuntimeProfile[];
+    localAgentProviders: LocalAgentProviderStatus[];
+    identities: Identity[];
+  },
 ) {
   const selection = window.getSelection();
   if (!selection?.rangeCount) return;
-  const normalized = value.replace(/\r\n?/g, "\n");
-  const matches = findEmbeddedLinks(normalized);
-  if (matches.length === 0) {
-    insertPlainTextAtCaret(normalized);
-    return;
-  }
+  const segments = splitComposerPasteContent(value, context);
   const range = selection.getRangeAt(0);
   range.deleteContents();
   const fragment = document.createDocumentFragment();
   const inserted: Node[] = [];
-  let cursor = 0;
-  for (const match of matches) {
-    if (match.index > cursor) {
-      const textNode = document.createTextNode(normalized.slice(cursor, match.index));
+  for (const segment of segments) {
+    if (segment.kind === "text") {
+      if (!segment.text) continue;
+      const textNode = document.createTextNode(segment.text);
       fragment.append(textNode);
       inserted.push(textNode);
+      continue;
     }
-    if (match.kind === "message") {
-      const linkChip = createMessageLinkChip(match.id, labels.getMessageLabel(match.id));
+    if (segment.kind === "message") {
+      const linkChip = createMessageLinkChip(segment.id, labels.getMessageLabel(segment.id));
       fragment.append(linkChip);
       inserted.push(linkChip);
-    } else {
-      const linkChip = createSummaryLinkChip(match.id, labels.getSummaryLabel(match.id));
+      continue;
+    }
+    if (segment.kind === "summary") {
+      const linkChip = createSummaryLinkChip(segment.id, labels.getSummaryLabel(segment.id));
       fragment.append(linkChip);
       inserted.push(linkChip);
+      continue;
     }
-    cursor = match.index + match.length;
+    if (segment.kind === "participant") {
+      const chip = createMentionChip(segment.label, segment.participantId);
+      fragment.append(chip);
+      inserted.push(chip);
+      continue;
+    }
+    const referenceTarget = buildReferencePasteTarget(segment.href, segment.label);
+    if (referenceTarget) {
+      const chip = createMentionChip(
+        referenceTarget.chipLabel,
+        referenceTarget.mentionId,
+        referenceTarget.reference,
+      );
+      fragment.append(chip);
+      inserted.push(chip);
+      continue;
+    }
+    const fallbackText = document.createTextNode(segment.label);
+    fragment.append(fallbackText);
+    inserted.push(fallbackText);
   }
-  if (cursor < normalized.length) {
-    const textNode = document.createTextNode(normalized.slice(cursor));
-    fragment.append(textNode);
-    inserted.push(textNode);
-  }
+  if (!inserted.length) return;
   const trailingText = document.createTextNode("");
   fragment.append(trailingText);
   inserted.push(trailingText);
@@ -2390,7 +2851,9 @@ function createMessageLinkChip(messageId: string, label: string) {
     "[white-space:nowrap]",
     "[box-shadow:0_1px_2px_rgb(0_0_0_/_4%)]",
   ].join(" ");
-  chip.textContent = label;
+  const labelEl = document.createElement("span");
+  labelEl.textContent = label;
+  chip.append(createTuttiMessageLinkIconElement(), labelEl);
   return chip;
 }
 
@@ -2410,6 +2873,28 @@ interface ComposerQuote {
   messageId: string;
   sender: string;
   content: string;
+}
+
+interface ComposerDraft {
+  html: string;
+  text: string;
+  editingMessageId: string | null;
+  editingMentions: MentionTarget[];
+  quotes: ComposerQuote[];
+  uploadItems: UploadItem[];
+  mentionedIds: string[];
+  mentionedAll: boolean;
+}
+
+function isEmptyComposerDraft(draft: ComposerDraft) {
+  return !draft.text.trim()
+    && !draft.html.trim()
+    && !draft.editingMessageId
+    && draft.editingMentions.length === 0
+    && draft.quotes.length === 0
+    && draft.uploadItems.length === 0
+    && draft.mentionedIds.length === 0
+    && !draft.mentionedAll;
 }
 
 function QuoteComposerBar(props: { quotes: ComposerQuote[]; onRemove: () => void }) {
@@ -2587,6 +3072,7 @@ function revokePreviewUrl(previewUrl: string | null) {
 type MentionOption =
   | { kind: "all"; key: "all"; label: string }
   | { kind: "participant"; key: string; label: string; participant: Participant }
+  | LocalAgentMentionOption
   | {
       kind: "reference";
       key: string;
@@ -2611,7 +3097,7 @@ function buildParticipantMentionOptions(
   if (
     options?.includeEveryone
     && !mentionedAll
-    && (everyoneLabel.toLowerCase().includes(normalizedQuery) || "所有人".includes(normalizedQuery) || "all".includes(normalizedQuery) || "all agents".includes(normalizedQuery))
+    && (everyoneLabel.toLowerCase().includes(normalizedQuery) || "所有人".includes(normalizedQuery) || "all".includes(normalizedQuery))
   ) {
     results.push({ kind: "all", key: "all", label: everyoneLabel });
   }

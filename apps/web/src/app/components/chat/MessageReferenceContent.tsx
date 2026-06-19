@@ -23,7 +23,7 @@ function renderMarkdownSegment(
 
 export function MessageReferenceContent(props: {
   content: string;
-  mentions?: Array<Pick<MentionTarget, "participantId" | "mentionType" | "referenceProviderId" | "referenceEntityId" | "referenceInsert">>;
+  mentions?: Array<Pick<MentionTarget, "participantId" | "mentionType" | "referenceProviderId" | "referenceEntityId" | "referenceInsert" | "referenceScope">>;
   artifacts?: Artifact[];
   participants?: Participant[];
   runtimeProfiles?: RuntimeProfile[];

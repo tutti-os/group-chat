@@ -1,20 +1,23 @@
 import type { TuttiAtProviderId } from "@group-chat/shared";
 import type { ReactNode } from "react";
+import { formatAgentLauncherMentionLabel } from "../../agent-launcher-mentions.js";
+import { getRuntimeProviderAvatarIconUrl } from "../../identity-avatar.js";
+import { TuttiReferenceIcon } from "../../tutti-reference-icons.js";
 
 export const REFERENCE_MENTION_COLOR = "#2563eb";
 
 export const PARTICIPANT_MENTION_CLASS = [
   "[display:inline]",
   "[color:#2563eb]",
+  "[font-size:13px]",
   "[font-weight:400]",
+  "[line-height:20px]",
   "[vertical-align:baseline]",
   "[white-space:nowrap]",
 ].join(" ");
 
 export const REFERENCE_MENTION_CHIP_CLASS = [
-  "[display:inline-flex]",
-  "[align-items:center]",
-  "[gap:4px]",
+  "[display:inline]",
   "[max-width:100%]",
   "[border:0]",
   "[border-radius:0]",
@@ -28,83 +31,137 @@ export const REFERENCE_MENTION_CHIP_CLASS = [
   "[text-decoration:none]",
   "[cursor:pointer]",
   "[vertical-align:baseline]",
+  "[white-space:nowrap]",
   "[opacity:0.95]",
   "hover:[text-decoration:none]",
   "hover:[opacity:1]",
 ].join(" ");
 
-function FileReferenceMentionIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-      <path
-        d="M3.25 1.75h4.75l2.75 2.75v7a.75.75 0 0 1-.75.75H3.25a.75.75 0 0 1-.75-.75V2.5a.75.75 0 0 1 .75-.75Z"
-        fill={REFERENCE_MENTION_COLOR}
-      />
-      <path d="M8 1.75V4.5H10.75" fill="#93c5fd" />
-      <path d="M4.25 6.75h5.5" stroke="#ffffff" strokeWidth="1" strokeLinecap="round" />
-      <path d="M4.25 8.75h5.5" stroke="#ffffff" strokeWidth="1" strokeLinecap="round" />
-      <path d="M4.25 10.75h3.5" stroke="#ffffff" strokeWidth="1" strokeLinecap="round" />
-    </svg>
-  );
-}
+export const REFERENCE_MENTION_ICON_CLASS = [
+  "[display:inline-block]",
+  "[width:14px]",
+  "[height:14px]",
+  "[margin-right:4px]",
+  "[vertical-align:-0.2em]",
+].join(" ");
 
-function StrokeIcon(props: { d: string }) {
-  return (
-    <path
-      d={props.d}
-      stroke={REFERENCE_MENTION_COLOR}
-      strokeWidth="1.2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      fill="none"
-    />
-  );
-}
+export const REFERENCE_MENTION_ICON_AFTER_CLASS = [
+  "[display:inline-block]",
+  "[width:14px]",
+  "[height:14px]",
+  "[margin-left:4px]",
+  "[vertical-align:-0.2em]",
+].join(" ");
 
-export function ReferenceMentionIcon(props: { providerId: TuttiAtProviderId }) {
-  if (props.providerId === "file" || props.providerId === "agent-generated-file") {
-    return <FileReferenceMentionIcon />;
+export const AGENT_LAUNCHER_MENTION_ICON_CLASS = [
+  "[display:inline-block]",
+  "[width:14px]",
+  "[height:14px]",
+  "[margin:0_4px]",
+  "[vertical-align:-0.2em]",
+].join(" ");
+
+export const REFERENCE_MENTION_LABEL_CLASS = [
+  "[min-width:0]",
+  "[overflow:hidden]",
+  "[text-overflow:ellipsis]",
+  "[white-space:nowrap]",
+  "[line-height:20px]",
+  "[vertical-align:baseline]",
+].join(" ");
+
+function AgentLauncherMentionIcon(props: { runtimeProvider: string }) {
+  const iconUrl = getRuntimeProviderAvatarIconUrl(props.runtimeProvider);
+  if (!iconUrl) {
+    return <ReferenceMentionIcon providerId="agent-session" />;
   }
+  return <img src={iconUrl} alt="" className="[width:14px] [height:14px] [border-radius:3px] [object-fit:cover]" />;
+}
+
+export function splitAgentLauncherMentionLabel(label: string) {
+  const displayLabel = formatAgentLauncherMentionLabel(label);
+  return {
+    prefix: "@",
+    name: displayLabel.replace(/^@+/, ""),
+  };
+}
+
+export function AgentLauncherMentionChip(props: {
+  label: ReactNode;
+  runtimeProvider: string;
+  pasteMarkdown?: string;
+  onClick?: () => void;
+}) {
+  const displayLabel = typeof props.label === "string"
+    ? splitAgentLauncherMentionLabel(props.label)
+    : null;
 
   return (
-    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-      {props.providerId === "agent-session" ? (
-        <>
-          <StrokeIcon d="M4.5 4.75a2.25 2.25 0 1 1 4.5 0 2.25 2.25 0 0 1-4.5 0Z" />
-          <StrokeIcon d="M2.75 11.25c0-1.75 1.9-2.75 4.25-2.75s4.25 1 4.25 2.75" />
-        </>
+    <span
+      role="button"
+      tabIndex={0}
+      data-mention-display-mode="agent-launcher"
+      data-composer-paste-markdown={props.pasteMarkdown}
+      className={REFERENCE_MENTION_CHIP_CLASS}
+      style={{ color: "var(--accent)" }}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        props.onClick?.();
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        event.stopPropagation();
+        props.onClick?.();
+      }}
+    >
+      {displayLabel ? (
+        <span aria-hidden="true">@</span>
       ) : null}
-      {props.providerId === "workspace-app" ? (
-        <>
-          <StrokeIcon d="M3 3.25h8v7.5H3z" />
-          <StrokeIcon d="M3 5.75h8" />
-          <StrokeIcon d="M5.25 3.25V2.25h3.5v1" />
-        </>
-      ) : null}
-      {props.providerId === "workspace-issue" ? (
-        <>
-          <StrokeIcon d="M3.25 2.75h7.5" />
-          <StrokeIcon d="M3.25 5.75h7.5" />
-          <StrokeIcon d="M3.25 8.75h5" />
-          <StrokeIcon d="M3.25 11.25h7.5" />
-        </>
-      ) : null}
-    </svg>
+      <span className={displayLabel ? AGENT_LAUNCHER_MENTION_ICON_CLASS : REFERENCE_MENTION_ICON_AFTER_CLASS}>
+        <AgentLauncherMentionIcon runtimeProvider={props.runtimeProvider} />
+      </span>
+      <span className={REFERENCE_MENTION_LABEL_CLASS} style={{ color: "var(--accent)" }}>
+        {displayLabel ? displayLabel.name : props.label}
+      </span>
+    </span>
+  );
+}
+
+export function ReferenceMentionIcon(props: {
+  providerId: TuttiAtProviderId;
+  entityId?: string | null;
+  iconUrl?: string | null;
+}) {
+  return (
+    <TuttiReferenceIcon
+      providerId={props.providerId}
+      appId={props.entityId}
+      iconUrl={props.iconUrl}
+    />
   );
 }
 
 export function ReferenceMentionChip(props: {
   providerId: TuttiAtProviderId;
   label: ReactNode;
+  entityId?: string | null;
+  iconUrl?: string | null;
   href?: string;
+  pasteMarkdown?: string;
   onClick?: () => void;
 }) {
   const content = (
     <>
-      <span className="[display:inline-flex] [flex:0_0_auto] [align-items:center] [justify-content:center]">
-        <ReferenceMentionIcon providerId={props.providerId} />
+      <span className={REFERENCE_MENTION_ICON_CLASS}>
+        <ReferenceMentionIcon
+          providerId={props.providerId}
+          entityId={props.entityId}
+          iconUrl={props.iconUrl}
+        />
       </span>
-      <span className="[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]" style={{ color: "var(--accent)" }}>
+      <span className={REFERENCE_MENTION_LABEL_CLASS} style={{ color: "var(--accent)" }}>
         {props.label}
       </span>
     </>
@@ -134,6 +191,7 @@ export function ReferenceMentionChip(props: {
       role={props.onClick ? "button" : undefined}
       tabIndex={props.onClick ? 0 : undefined}
       data-mention-display-mode="reference-link"
+      data-composer-paste-markdown={props.pasteMarkdown}
       className={REFERENCE_MENTION_CHIP_CLASS}
       style={{ color: "var(--accent)" }}
       onClick={props.onClick}

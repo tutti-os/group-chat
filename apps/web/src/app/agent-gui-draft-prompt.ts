@@ -1,4 +1,4 @@
-import type { Identity, MentionTarget, Message, Participant, PrivateTaskSnapshot } from "@group-chat/shared";
+import type { Artifact, Identity, MentionTarget, Message, Participant, PrivateTaskSnapshot } from "@group-chat/shared";
 import {
   formatMessageLinkLabel,
   primaryMessageLinkId,
@@ -27,6 +27,7 @@ const GROUP_CHAT_REFERENCE_FILE_PATTERN =
   /\[([^\]]+)\]\(group-chat:\/\/reference\/(file|agent-generated-file)\/([^)]+)\)/g;
 
 export interface AgentGuiDraftPromptContext {
+  artifacts?: Array<Pick<Artifact, "id" | "localPath">>;
   messages?: Message[];
   participants?: Participant[];
   identities?: Array<Pick<Identity, "id" | "name">>;
@@ -41,7 +42,7 @@ export function buildAgentGuiDraftPrompt(
   context: AgentGuiDraftPromptContext = {},
 ): string {
   let result = content.trim();
-  result = upgradeGroupChatReferenceFileLinks(result, mentions);
+  result = upgradeGroupChatReferenceFileLinks(result, mentions, context);
   result = upgradeMessageLinks(result, context);
   result = upgradeSummaryLinks(result, context);
   result = stripAgentLauncherMentions(result, mentions);
@@ -132,7 +133,11 @@ function stripPlainLauncherMention(content: string, label: string) {
   return result;
 }
 
-function upgradeGroupChatReferenceFileLinks(content: string, mentions: MentionTarget[]) {
+function upgradeGroupChatReferenceFileLinks(
+  content: string,
+  mentions: MentionTarget[],
+  context: AgentGuiDraftPromptContext,
+) {
   return content.replace(
     GROUP_CHAT_REFERENCE_FILE_PATTERN,
     (full, label, provider, encodedEntityId) => {
@@ -151,10 +156,28 @@ function upgradeGroupChatReferenceFileLinks(content: string, mentions: MentionTa
         mention?.referenceInsert?.kind === "markdown-link"
           ? mention.referenceInsert.href.trim()
           : entityId;
-      if (!fileHref) return full;
-      return `[${label}](${fileHref})`;
+      const artifact = findDraftPromptArtifact(entityId, fileHref, context.artifacts ?? []);
+      const href = artifact?.localPath?.trim() || fileHref;
+      if (!href) return full;
+      return `[${label}](${href})`;
     },
   );
+}
+
+function findDraftPromptArtifact(
+  entityId: string,
+  fileHref: string,
+  artifacts: Array<Pick<Artifact, "id" | "localPath">>,
+) {
+  const normalizedHref = fileHref.replace(/\\/g, "/");
+  return artifacts.find((item) => {
+    if (item.id === entityId) return true;
+    const localPath = item.localPath?.replace(/\\/g, "/") ?? "";
+    return Boolean(
+      normalizedHref
+      && (localPath === normalizedHref || localPath.endsWith(`/${normalizedHref}`)),
+    );
+  }) ?? null;
 }
 
 function upgradeMessageLinks(content: string, context: AgentGuiDraftPromptContext) {

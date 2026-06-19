@@ -1,0 +1,18 @@
+---
+description: After agent-chat code changes, reload the app in Tutti App Center
+alwaysApply: true
+---
+
+# Tutti dev reload after agent-chat changes
+
+When you finish modifying code in this `agent-chat` repository (unless the user explicitly says not to), run:
+
+```bash
+pnpm dev:tutti:reload
+```
+
+This rebuilds the web/server bundle, updates the dev catalog artifact, and makes the new version available in Tutti App Center.
+
+After reload, tell the user the new dev version (from script output, e.g. `0.1.17-dev.45`) and remind them to refresh App Center / reinstall Group Chat if Tutti does not auto-update.
+
+Do not skip this step when delivering implementation work that touches runtime UI or server behavior.

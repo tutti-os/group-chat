@@ -51,6 +51,7 @@ import { DeleteMessageConfirmDialog } from "./components/chat/DeleteMessageConfi
 import { InvitePeopleDialog } from "./components/chat/InvitePeopleDialog.js";
 import { Composer } from "./components/chat/Composer.js";
 import { BackgroundTaskBar } from "./components/chat/BackgroundTaskBar.js";
+import { AppNavRail } from "./components/nav/AppNavRail.js";
 import { ProfileMenu } from "./components/settings/ProfileMenu.js";
 import { SettingsDialog } from "./components/settings/SettingsDialog.js";
 import { createDraftLocalAgent } from "./identity-draft.js";
@@ -74,6 +75,13 @@ const DEFAULT_CONVERSATION_SIDEBAR_WIDTH = 300;
 const MIN_CONVERSATION_SIDEBAR_WIDTH = 240;
 const MIN_CHAT_PANE_WIDTH = 460;
 const SPLITTER_WIDTH = 4;
+const DESKTOP_NAV_WIDTH = 60;
+const COMPACT_NAV_WIDTH = 56;
+
+function sameLocalAgentProviders(left: LocalAgentProviderStatus[], right: LocalAgentProviderStatus[]) {
+  if (left.length !== right.length) return false;
+  return JSON.stringify(left) === JSON.stringify(right);
+}
 
 export type ComposerRequest =
   | { type: "insert"; seq: number; content: string }
@@ -92,7 +100,7 @@ export function App() {
   const [localAgentProviders, setLocalAgentProviders] = useState<LocalAgentProviderStatus[]>([]);
   const [refreshingLocalAgentProviders, setRefreshingLocalAgentProviders] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
-  const [profileMenuPlacement, setProfileMenuPlacement] = useState<"mobile" | "chat">("chat");
+  const [profileMenuPlacement, setProfileMenuPlacement] = useState<"rail" | "mobile" | "chat">("rail");
   const [profileMenuAnchorEl, setProfileMenuAnchorEl] = useState<HTMLElement | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<LocalUserProfile>(() => loadUserProfile());
@@ -114,11 +122,14 @@ export function App() {
   const [resizingConversationSidebar, setResizingConversationSidebar] = useState(false);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [focusMessageRequest, setFocusMessageRequest] = useState<{ messageId: string; artifactId?: string; seq: number } | null>(null);
+  const [focusComposerRequest, setFocusComposerRequest] = useState<{ seq: number } | null>(null);
   const [scrollToBottomRequest, setScrollToBottomRequest] = useState<{ seq: number } | null>(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const lastSeqRef = useRef(0);
   const appShellRef = useRef<HTMLDivElement | null>(null);
+  const profileButtonRef = useRef<HTMLButtonElement | null>(null);
   const mobileProfileButtonRef = useRef<HTMLButtonElement | null>(null);
+  const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const mobileProfileMenuRef = useRef<HTMLDivElement | null>(null);
   const chatProfileMenuRef = useRef<HTMLDivElement | null>(null);
   const deleteDialogRef = useRef<{ resolve: () => void; reject: (reason?: unknown) => void } | null>(null);
@@ -128,7 +139,7 @@ export function App() {
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [pendingReplyTargets, setPendingReplyTargets] = useState<PendingAgentReplyTarget[]>([]);
 
-  const openProfileMenu = useCallback((placement: "mobile" | "chat", anchorEl?: HTMLElement | null) => {
+  const openProfileMenu = useCallback((placement: "rail" | "mobile" | "chat", anchorEl?: HTMLElement | null) => {
     setProfileMenuPlacement(placement);
     setProfileMenuAnchorEl(anchorEl ?? null);
     setProfileMenuOpen(true);
@@ -139,7 +150,7 @@ export function App() {
     setProfileMenuAnchorEl(null);
   }, []);
 
-  const toggleProfileMenu = useCallback((placement: "mobile") => {
+  const toggleProfileMenu = useCallback((placement: "rail" | "mobile") => {
     setProfileMenuPlacement(placement);
     setProfileMenuOpen((current) => !current);
   }, []);
@@ -155,9 +166,9 @@ export function App() {
     setRefreshingLocalAgentProviders(true);
     try {
       const result = await fetchLocalAgentProviders();
-      setLocalAgentProviders(result.providers);
+      setLocalAgentProviders((current) => sameLocalAgentProviders(current, result.providers) ? current : result.providers);
     } catch {
-      setLocalAgentProviders([]);
+      // Keep the last known provider list; transient bridge errors should not make the @ menu jump.
     } finally {
       setRefreshingLocalAgentProviders(false);
     }
@@ -872,7 +883,7 @@ export function App() {
     const shell = appShellRef.current;
     if (!shell) return;
     const shellRect = shell.getBoundingClientRect();
-    const navWidth = 0;
+    const navWidth = window.matchMedia("(max-width: 1080px)").matches ? COMPACT_NAV_WIDTH : DESKTOP_NAV_WIDTH;
     const maxSidebarWidth = Math.max(
       MIN_CONVERSATION_SIDEBAR_WIDTH,
       shellRect.width - navWidth - SPLITTER_WIDTH - MIN_CHAT_PANE_WIDTH,
@@ -1045,7 +1056,9 @@ export function App() {
     clearAgentProfileDialog();
     setMessageSelectionMode(false);
     setMentionRequest(null);
-  }, [currentConversationId]);
+    if (!currentConversationId || !state.ready) return;
+    setFocusComposerRequest((current) => ({ seq: (current?.seq ?? 0) + 1 }));
+  }, [currentConversationId, state.ready]);
 
   useEffect(() => {
     if (!openAgentRunId) return;
@@ -1059,7 +1072,9 @@ export function App() {
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
+      if (profileButtonRef.current?.contains(target)) return;
       if (mobileProfileButtonRef.current?.contains(target)) return;
+      if (profileMenuRef.current?.contains(target)) return;
       if (mobileProfileMenuRef.current?.contains(target)) return;
       if (chatProfileMenuRef.current?.contains(target)) return;
       if (profileMenuAnchorEl?.contains(target)) return;
@@ -1100,6 +1115,11 @@ export function App() {
     return counts;
   }, [conversationReadAt, currentConversationId, state.conversations, state.messages]);
 
+  const totalUnreadCount = useMemo(() => {
+    if (!UNREAD_FEATURE_ENABLED) return 0;
+    return Object.values(unreadCountsByConversation).reduce((sum, count) => sum + count, 0);
+  }, [unreadCountsByConversation]);
+
   useEffect(() => {
     if (!UNREAD_FEATURE_ENABLED) return;
     if (!state.ready) return;
@@ -1128,8 +1148,23 @@ export function App() {
       ref={appShellRef}
       style={shellStyle}
       data-resizing-sidebar={resizingConversationSidebar || undefined}
-      className={"[display:grid] [grid-template-columns:var(--conversation-sidebar-width)_3px_minmax(var(--chat-pane-min-width),_1fr)] [height:100vh] [overflow:hidden] [background:var(--bg)] [&[data-resizing-sidebar=true]_*]:[cursor:col-resize] max-[760px]:[grid-template-columns:1fr]"}
+      className={"[display:grid] [grid-template-columns:60px_var(--conversation-sidebar-width)_3px_minmax(var(--chat-pane-min-width),_1fr)] [height:100vh] [overflow:hidden] [background:var(--bg)] [&[data-resizing-sidebar=true]_*]:[cursor:col-resize] max-[1080px]:[grid-template-columns:56px_var(--conversation-sidebar-width)_3px_minmax(var(--chat-pane-min-width),_1fr)] max-[760px]:[grid-template-columns:1fr]"}
     >
+      <AppNavRail
+        profileMenuOpen={profileMenuOpen && profileMenuPlacement === "rail"}
+        onToggleProfileMenu={() => toggleProfileMenu("rail")}
+        onOpenSettings={() => setSettingsOpen(true)}
+        profileButtonRef={profileButtonRef}
+        profileMenuRef={profileMenuRef}
+        userProfile={userProfile}
+        onSaveProfile={(profile) => {
+          saveUserProfileState(profile);
+          closeProfileMenu();
+        }}
+        onCloseProfileMenu={closeProfileMenu}
+        totalUnreadCount={totalUnreadCount}
+      />
+
       <ConversationSidebar
             rooms={state.rooms}
             conversations={state.conversations}
@@ -1140,7 +1175,6 @@ export function App() {
             onCreateRoom={onCreateRoom}
             onDeleteRoom={onDeleteRoom}
             onTogglePin={onToggleConversationPin}
-            onOpenSettings={() => setSettingsOpen(true)}
           />
 
           <button
@@ -1380,7 +1414,9 @@ export function App() {
                         onUpdateMessage={onUpdateMessage}
                         onUpload={uploadArtifact}
                         onCancelRun={cancelActiveRun}
+                        onRefreshLocalAgentProviders={refreshLocalAgentProviders}
                         mentionRequest={mentionRequest}
+                        focusRequest={focusComposerRequest}
                         composerRequest={composerRequest}
                         summaryTasks={backgroundTasks}
                         userDisplayName={userProfile.displayName}

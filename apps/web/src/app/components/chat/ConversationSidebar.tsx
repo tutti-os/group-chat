@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { MessageSquarePlus, Pin, PinOff, Settings, Trash2 } from "lucide-react";
+import { MessageSquarePlus, Pin, PinOff, Trash2 } from "lucide-react";
 import type { Conversation, Message, Room } from "@group-chat/shared";
 import { formatShortDate } from "../../formatting.js";
 import { t, useTranslation } from "../../i18n/index.js";
@@ -16,7 +16,6 @@ export function ConversationSidebar(props: {
   onCreateRoom: () => void;
   onDeleteRoom: (room: Room, conversation: Conversation) => void;
   onTogglePin: (conversation: Conversation, pinned: boolean) => void;
-  onOpenSettings: () => void;
 }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
@@ -141,17 +140,6 @@ export function ConversationSidebar(props: {
             </div>
           );
         })}
-      </div>
-      <div className={"[display:flex] [flex:0_0_auto] [align-items:center] [padding:8px_12px_12px_14px] [border-top:1px_solid_var(--border)]"}>
-        <button
-          type="button"
-          className={"[display:inline-grid] [place-items:center] [border:0] [width:34px] [height:34px] [border-radius:12px] [color:var(--muted)] [background:transparent] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text)] [&:hover]:[background:var(--sidebar-hover)]"}
-          title={t("nav.settings")}
-          aria-label={t("nav.settings")}
-          onClick={props.onOpenSettings}
-        >
-          <Settings size={20} />
-        </button>
       </div>
       {contextMenu && contextConversation ? (
         <ConversationContextMenu

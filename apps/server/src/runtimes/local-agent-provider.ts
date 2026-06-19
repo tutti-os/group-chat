@@ -26,6 +26,28 @@ import { RuntimeProviderUnsupportedError } from "./runtime-provider.js";
 const DEFAULT_TIMEOUT_MS = 120_000;
 type GroupChatLocalAgentProviderPlugin = LocalAgentProviderPlugin<"local-agent", string>;
 
+type TuttiAgentProviderStatus = {
+  provider: string;
+  availability?: {
+    status?: string;
+    reasonCode?: string | null;
+  };
+  cli?: {
+    binaryPath?: string | null;
+    version?: string | null;
+  };
+  adapter?: {
+    binaryPath?: string | null;
+  };
+  auth?: {
+    status?: string;
+  };
+};
+
+type TuttiAgentProviderStatusListResponse = {
+  providers?: TuttiAgentProviderStatus[];
+};
+
 export class LocalAgentRuntimeProvider implements RuntimeProvider {
   id = "local-agent";
   private readonly processes = new Map<string, { cancel: () => Promise<void> | void }>();
@@ -83,7 +105,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
 
   async listLocalAgentProviders(): Promise<LocalAgentProviderStatus[]> {
     const detections = await this.localAgentRuntime.detect();
-    return detections.map(({ provider, displayName, result }) => {
+    const kitStatuses = detections.map(({ provider, displayName, result }) => {
       const available = Boolean(result && result.supported !== false);
       const status: LocalAgentProviderStatus = {
         provider,
@@ -107,6 +129,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       };
       return enrichLocalAgentProviderStatus(status);
     });
+    return mergeTuttiAgentProviderStatuses(await queryTuttiAgentProviderStatuses(), kitStatuses);
   }
 
   async *streamReply(context: RuntimeReplyContext) {
@@ -323,6 +346,100 @@ function localAgentUnavailableReason(
   if (result.authState === "missing") return `${displayName} is installed but authentication is missing.`;
   if (result.authState === "expired") return `${displayName} authentication has expired.`;
   return `${displayName} is not available.`;
+}
+
+async function queryTuttiAgentProviderStatuses(): Promise<TuttiAgentProviderStatus[] | null> {
+  const baseUrl = process.env.TUTTI_API_BASE_URL?.trim();
+  const token = process.env.TUTTI_APP_SERVER_TOKEN?.trim();
+  if (!baseUrl || !token) return null;
+
+  try {
+    const url = new URL("/v1/agent-providers/status", baseUrl);
+    url.searchParams.append("providers", "codex");
+    url.searchParams.append("providers", "claude-code");
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (!response.ok) return null;
+    const payload = await response.json() as TuttiAgentProviderStatusListResponse;
+    return Array.isArray(payload.providers) ? payload.providers : null;
+  } catch {
+    return null;
+  }
+}
+
+function mergeTuttiAgentProviderStatuses(
+  tuttiStatuses: TuttiAgentProviderStatus[] | null,
+  kitStatuses: LocalAgentProviderStatus[],
+): LocalAgentProviderStatus[] {
+  if (!tuttiStatuses) return kitStatuses;
+  const kitStatusByProvider = new Map(kitStatuses.map((status) => [status.provider, status]));
+  const merged = new Map<string, LocalAgentProviderStatus>();
+
+  for (const tuttiStatus of tuttiStatuses) {
+    const provider = normalizeTuttiAgentProvider(tuttiStatus.provider);
+    if (!provider) continue;
+    const kitStatus = kitStatusByProvider.get(provider);
+    const available = tuttiStatus.availability?.status === "ready";
+    const status: LocalAgentProviderStatus = {
+      provider,
+      displayName: kitStatus?.displayName ?? displayNameForTuttiAgentProvider(provider),
+      available,
+      authState: authStateFromTuttiAgentProvider(tuttiStatus.auth?.status),
+      executablePath: tuttiStatus.cli?.binaryPath ?? tuttiStatus.adapter?.binaryPath ?? kitStatus?.executablePath ?? "",
+      version: tuttiStatus.cli?.version ?? kitStatus?.version ?? (available ? "" : "not-installed"),
+      configDir: kitStatus?.configDir,
+      models: kitStatus?.models ?? [],
+      defaultModelId: kitStatus?.defaultModelId,
+      defaultReasoningEffort: kitStatus?.defaultReasoningEffort,
+      reason: available ? undefined : unavailableReasonFromTuttiAgentProvider(tuttiStatus),
+    };
+    merged.set(provider, enrichLocalAgentProviderStatus(status));
+  }
+
+  for (const kitStatus of kitStatuses) {
+    if (!merged.has(kitStatus.provider)) {
+      merged.set(kitStatus.provider, kitStatus);
+    }
+  }
+
+  return [...merged.values()];
+}
+
+function normalizeTuttiAgentProvider(provider: string) {
+  const normalized = provider.trim().toLowerCase();
+  if (normalized === "claude-code") return "claude";
+  if (normalized === "codex") return "codex";
+  return "";
+}
+
+function displayNameForTuttiAgentProvider(provider: string) {
+  if (provider === "claude") return "Claude Code";
+  if (provider === "codex") return "Codex CLI";
+  return provider;
+}
+
+function authStateFromTuttiAgentProvider(status: string | null | undefined): LocalAgentProviderStatus["authState"] {
+  if (status === "authenticated") return "ok";
+  if (status === "required") return "missing";
+  return "unknown";
+}
+
+function unavailableReasonFromTuttiAgentProvider(status: TuttiAgentProviderStatus) {
+  const displayName = displayNameForTuttiAgentProvider(normalizeTuttiAgentProvider(status.provider));
+  switch (status.availability?.status) {
+    case "not_installed":
+      return `${displayName} is not installed or not discoverable.`;
+    case "auth_required":
+      return `${displayName} is installed but authentication is missing.`;
+    case "unsupported":
+      return status.availability.reasonCode ?? `${displayName} is not supported on this machine.`;
+    case "unknown":
+    default:
+      return status.availability?.reasonCode ?? `${displayName} is not available.`;
+  }
 }
 
 function buildGroupChatMcpServers(context: RuntimeReplyContext): LocalAgentMcpServerConfig[] {

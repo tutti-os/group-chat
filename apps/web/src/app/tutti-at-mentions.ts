@@ -70,6 +70,7 @@ export function scoreTuttiAtMentionMatch(item: TuttiAtQueryResult, keyword: stri
 const STABLE_HOST_PROVIDERS = new Set<TuttiAtProviderId>([
   "workspace-app",
   "agent-session",
+  "agent-generated-file",
   "workspace-issue",
 ]);
 
@@ -116,11 +117,15 @@ export function isTuttiAtMentionCacheReady(
     roomFileFingerprint?: string;
   },
 ) {
-  if (providers.includes("file") && options?.roomId && options.roomFileFingerprint !== undefined) {
-    return isRoomFileMentionCacheReady(options.roomId, options.roomFileFingerprint);
+  const hasFileProvider = providers.includes("file");
+  if (hasFileProvider) {
+    if (!options?.roomId || options.roomFileFingerprint === undefined) return false;
+    if (!isRoomFileMentionCacheReady(options.roomId, options.roomFileFingerprint)) return false;
   }
-  if (!isStableHostProviderQuery(providers)) return false;
-  return stableHostMentionCache.has(hostProviderCacheKey(providers));
+  const hostProviders = providers.filter((providerId) => providerId !== "file");
+  if (hostProviders.length === 0) return hasFileProvider;
+  if (!isStableHostProviderQuery(hostProviders)) return false;
+  return stableHostMentionCache.has(hostProviderCacheKey(hostProviders));
 }
 
 export function readCachedTuttiAtMentions(input: {
@@ -176,10 +181,11 @@ async function queryStableHostAtMentions(
   keyword: string,
   maxResults: number,
   providers: readonly TuttiAtProviderId[],
+  forceRefresh = false,
 ): Promise<TuttiAtQueryResult[]> {
   const cacheKey = hostProviderCacheKey(providers);
   let cached = stableHostMentionCache.get(cacheKey);
-  if (!cached) {
+  if (!cached || forceRefresh) {
     cached = await queryHostAtMentions("", STABLE_HOST_MENTION_CACHE_LIMIT, providers);
     stableHostMentionCache.set(cacheKey, cached);
   }
@@ -192,6 +198,7 @@ export async function queryTuttiAtMentions(input: {
   maxResults?: number;
   providers?: readonly TuttiAtProviderId[];
   roomArtifacts?: ReadonlyArray<Pick<Artifact, "id" | "roomId" | "createdAt">>;
+  forceRefresh?: boolean;
 }): Promise<TuttiAtQueryResult[]> {
   const keyword = input.keyword.trim();
   const maxResults = Math.max(1, input.maxResults ?? 20);
@@ -218,6 +225,7 @@ export async function queryTuttiAtMentions(input: {
       maxResults,
       roomFileFingerprint,
       roomArtifacts,
+      input.forceRefresh ?? false,
     );
     for (const item of localFiles) {
       push(item);
@@ -227,7 +235,7 @@ export async function queryTuttiAtMentions(input: {
   const hostProviders = providers.filter((providerId) => providerId !== "file");
   if (hostProviders.length > 0) {
     const hostItems = isStableHostProviderQuery(hostProviders)
-      ? await queryStableHostAtMentions(keyword, maxResults, hostProviders)
+      ? await queryStableHostAtMentions(keyword, maxResults, hostProviders, input.forceRefresh ?? false)
       : await queryHostAtMentions(keyword, maxResults, hostProviders);
     for (const item of hostItems) {
       push(item);
@@ -333,9 +341,10 @@ async function queryLocalRoomFileReferences(
   maxResults: number,
   fingerprint: string,
   roomArtifacts: ReadonlyArray<Pick<Artifact, "id" | "createdAt">>,
+  forceRefresh = false,
 ): Promise<TuttiAtQueryResult[]> {
   const cached = roomFileMentionCache.get(roomId);
-  if (cached && cached.fingerprint === fingerprint) {
+  if (!forceRefresh && cached && cached.fingerprint === fingerprint) {
     return finalizeRoomFileMentions(cached.items, keyword, maxResults, roomArtifacts);
   }
 
