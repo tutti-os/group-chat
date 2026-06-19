@@ -490,6 +490,7 @@ export async function copySummaryToClipboard(input: {
         new ClipboardItem({
           "text/plain": new Blob([plainText], { type: "text/plain" }),
           "text/html": new Blob([htmlText], { type: "text/html" }),
+          [SUMMARY_LINK_MIME]: new Blob([formatSummaryLink(input.task.id)], { type: SUMMARY_LINK_MIME }),
         }),
       ]);
       return;

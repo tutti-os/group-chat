@@ -66,7 +66,7 @@ import {
 } from "./conversation-read-state.js";
 import { applyEvent, applyRoomUpdate, emptyState, normalizeSnapshot, removeActiveRun, removeDeletedRoom, removeHiddenMessages, upsert, upsertIdentity, upsertMany, upsertMessage, upsertParticipant, type AppState } from "./state.js";
 import { backgroundTaskFromSnapshot, createOptimisticBackgroundTask, createPendingAgentReplyTargets, enrichBackgroundTask, isPendingAgentRunId, loadDismissedBackgroundTaskIds, loadLocalTaskBarTaskIds, mergeBackgroundTask, pendingAgentReplyKey, removeLocalTaskBarTaskId, saveDismissedBackgroundTaskIds, addLocalTaskBarTaskId, type AgentRunTaskItem, type BackgroundTask, type PendingAgentReplyTarget } from "./background-tasks.js";
-import { resolveAgentProfileParticipant, resolveMessageAgentParticipant, resolveMessageSenderLabel, messageSenderLabel } from "./chat-links.js";
+import { formatSummaryLink, resolveAgentProfileParticipant, resolveMessageAgentParticipant, resolveMessageSenderLabel, messageSenderLabel } from "./chat-links.js";
 import { attachmentLabel, subscribeI18n, t } from "./i18n/index.js";
 import { collectMessageProcess } from "./agent-thinking.js";
 import { UNREAD_FEATURE_ENABLED } from "./feature-flags.js";
@@ -84,6 +84,7 @@ import { formatMessageBodyForAgentForward } from "./reference-mentions.js";
 import { collectImageFileArtifactsForMessages } from "./message-artifacts.js";
 import { defaultIdentityNameForRuntime, listCanonicalRuntimeProfiles, localAgentStatus } from "./runtime.js";
 import { localAgentMentionSubtitle } from "./local-agent-mention-options.js";
+import { groupAgentForwardSections } from "./agent-forward-format.js";
 
 const DEFAULT_CONVERSATION_SIDEBAR_WIDTH = 300;
 const MIN_CONVERSATION_SIDEBAR_WIDTH = 240;
@@ -99,6 +100,7 @@ function sameLocalAgentProviders(left: LocalAgentProviderStatus[], right: LocalA
 
 export type ComposerRequest =
   | { type: "insert"; seq: number; content: string }
+  | { type: "insertSummaryLink"; seq: number; taskId: string }
   | { type: "quote"; seq: number; quote: ComposerQuote }
   | { type: "quotes"; seq: number; quotes: ComposerQuote[] }
   | { type: "edit"; seq: number; messageId: string; content: string; mentions: Message["mentions"] };
@@ -470,15 +472,13 @@ export function App() {
     [currentConversation, state.activeRuns, state.messages],
   );
   const currentBackgroundTasks = useMemo(() => {
-    if (!currentConversation) return [];
     const localTaskIds = loadLocalTaskBarTaskIds();
     return backgroundTasks.filter(
       (task) =>
-        task.conversationId === currentConversation.id
-        && localTaskIds.has(task.id)
+        localTaskIds.has(task.id)
         && !dismissedBackgroundTaskIds.has(task.id),
     );
-  }, [backgroundTasks, currentConversation, dismissedBackgroundTaskIds]);
+  }, [backgroundTasks, dismissedBackgroundTaskIds]);
   const openBackgroundTask = useMemo(
     () => openBackgroundTaskId && currentConversation && !dismissedBackgroundTaskIds.has(openBackgroundTaskId)
       ? backgroundTasks.find(
@@ -953,7 +953,7 @@ export function App() {
   }, [backgroundTasks, state.messages, state.participants]);
 
   useEffect(() => {
-    if (!currentConversationId || !state.ready) return;
+    if (!state.ready) return;
     const localTaskIds = [...loadLocalTaskBarTaskIds()].filter((taskId) => !dismissedBackgroundTaskIds.has(taskId));
     if (!localTaskIds.length) return;
     let cancelled = false;
@@ -961,7 +961,7 @@ export function App() {
       for (const taskId of localTaskIds) {
         try {
           const { task } = await getPrivateTask(taskId);
-          if (cancelled || task.conversationId !== currentConversationId) continue;
+          if (cancelled) continue;
           setBackgroundTasks((current) => {
             if (current.some((item) => item.id === taskId)) return current;
             const enriched = enrichBackgroundTask(task, {
@@ -978,7 +978,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [currentConversationId, state.ready, dismissedBackgroundTaskIds, state.messages, state.participants]);
+  }, [state.ready, dismissedBackgroundTaskIds, state.messages, state.participants]);
 
   const openSummaryLink = useCallback(async (taskId: string) => {
     const task = await ensureBackgroundTask(taskId);
@@ -1143,12 +1143,43 @@ export function App() {
     }));
   };
 
+  const insertSummaryLinkToComposer = useCallback((taskId: string) => {
+    setComposerRequest((current) => ({
+      seq: (current?.seq ?? 0) + 1,
+      type: "insertSummaryLink",
+      taskId,
+    }));
+    setFocusComposerRequest((current) => ({ seq: (current?.seq ?? 0) + 1 }));
+  }, []);
+
   const forwardMessagesToAgent = async (messages: Message[], provider: TuttiAgentGuiProvider) => {
     const visibleMessages = messages.filter((message) => message.status !== "deleted" && message.status !== "recalled");
     if (!visibleMessages.length) return;
-    const content = formatMessagesForAgentForward(visibleMessages, state.messageBlocks, state.artifacts);
+    const content = formatMessagesForAgentForward(
+      visibleMessages,
+      state.messageBlocks,
+      state.artifacts,
+      state.participants,
+      state.identities,
+      userProfile.displayName,
+    );
     const mentions = visibleMessages.flatMap((message) => message.mentions ?? []);
     const prompt = buildAgentGuiDraftPrompt(content, mentions, {
+      artifacts: state.artifacts,
+      messages: state.messages,
+      participants: state.participants,
+      identities: state.identities,
+      userDisplayName: userProfile.displayName,
+      summaryTasks: backgroundTasks,
+    });
+    const opened = await dispatchAgentGuiTask({ provider, prompt });
+    if (!opened) {
+      window.alert(t("messageActions.forwardToAgentFailed"));
+    }
+  };
+
+  const forwardSummaryToAgent = async (task: BackgroundTask, provider: TuttiAgentGuiProvider) => {
+    const prompt = buildAgentGuiDraftPrompt(formatSummaryLink(task.id), [], {
       artifacts: state.artifacts,
       messages: state.messages,
       participants: state.participants,
@@ -1459,10 +1490,12 @@ export function App() {
                   onMentionParticipant={requestMention}
                   onOpenMessageLink={openMessageLink}
                   onOpenSummaryLink={(taskId) => void openSummaryLink(taskId)}
+                  onInsertSummaryLink={insertSummaryLinkToComposer}
                   onEnsureSummaryTask={ensureBackgroundTask}
                   summaryTasks={backgroundTasks}
                   onQuoteMessages={requestComposerInsert}
                   onForwardMessagesToAgent={(messages, provider) => void forwardMessagesToAgent(messages, provider)}
+                  onForwardSummaryToAgent={(task, provider) => void forwardSummaryToAgent(task, provider)}
                   onStartSummary={startBackgroundSummary}
                   openBackgroundTask={enrichedOpenBackgroundTask}
                   onCloseBackgroundTaskPanel={closeBackgroundTaskPanel}
@@ -1524,7 +1557,7 @@ export function App() {
                     agentRuns={agentRunTasks}
                     openTaskId={openBackgroundTaskId}
                     openAgentRunId={openAgentRunId}
-                    onOpenTask={openBackgroundTaskPanel}
+                    onOpenTask={(taskId) => void openSummaryLink(taskId)}
                     onDismissTask={dismissBackgroundTask}
                     onDismissAgentRun={dismissAgentRunTask}
                     onOpenAgentRun={openAgentRunPanel}
@@ -1553,6 +1586,7 @@ export function App() {
                         focusRequest={focusComposerRequest}
                         composerRequest={composerRequest}
                         summaryTasks={backgroundTasks}
+                        onOpenSummaryLink={openSummaryLink}
                         userDisplayName={userProfile.displayName}
                         artifacts={currentArtifacts}
                         onFocusRoomFile={({ messageId, artifactId }) => {
@@ -1674,6 +1708,9 @@ function formatMessagesForAgentForward(
   messages: Message[],
   blocks: AppState["messageBlocks"],
   artifacts: AppState["artifacts"],
+  participants: Participant[],
+  identities: Identity[],
+  userDisplayName: string,
 ) {
   const sections = messages
     .filter((message) => message.status !== "deleted" && message.status !== "recalled")
@@ -1683,9 +1720,15 @@ function formatMessagesForAgentForward(
       const messageArtifacts = collectImageFileArtifactsForMessages([message], blocks, artifacts);
       const attachmentLines = messageArtifacts.map(formatArtifactForAgentForward).filter(Boolean);
       const parts = [body, ...attachmentLines].filter(Boolean);
-      return parts.length ? parts.join("\n") : attachmentLabel();
+      return {
+        senderKey: message.role === "user"
+          ? "user"
+          : message.senderParticipantId ?? `${message.role}:${message.senderName ?? ""}`,
+        senderLabel: messageSenderLabel(message, participants, identities, userDisplayName),
+        content: parts.length ? parts.join(" ") : attachmentLabel(),
+      };
     });
-  return sections.join("\n\n").trim();
+  return groupAgentForwardSections(sections);
 }
 
 function formatArtifactForAgentForward(artifact: AppState["artifacts"][number]) {

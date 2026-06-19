@@ -302,6 +302,7 @@
 
   "summary.fromParticipant": "Summary from {name}",
   "summary.title": "Message summary",
+  "summary.cardMetaMulti": "{name} · {count} messages",
   "summary.plainHeader": "【Message summary】{name}",
   "summary.plainSource": "【Source messages】",
   "summary.plainImages": "【Images】",

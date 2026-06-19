@@ -17,7 +17,6 @@ import {
   readRecentArtifactClipboardStashForPaste,
   readStashedSummaryLink,
   SUMMARY_LINK_MIME,
-  summaryLinkLabel,
 } from "../../chat-links.js";
 import { resolveArtifactsByIds } from "../../message-artifacts.js";
 import type { BackgroundTask } from "../../background-tasks.js";
@@ -54,6 +53,7 @@ import {
 } from "../../tutti-at-mentions.js";
 import { serializeReferenceMentionChip } from "../../reference-mentions.js";
 import { buildReferencePasteTarget, normalizeComposerPasteText, splitComposerPasteContent, type ComposerPasteContext } from "../../composer-paste-content.js";
+import { createSummaryLinkChipElement } from "../../summary-link-card.js";
 import { mentionTabProviders } from "../../mention-panel-tabs.js";
 import { createTuttiMessageLinkIconElement, createTuttiReferenceIconElement } from "../../tutti-reference-icons.js";
 import { AGENT_LAUNCHER_MENTION_ICON_CLASS, PARTICIPANT_MENTION_CLASS, REFERENCE_MENTION_CHIP_CLASS, REFERENCE_MENTION_ICON_CLASS, REFERENCE_MENTION_LABEL_CLASS, splitAgentLauncherMentionLabel } from "./reference-mention-chip.js";
@@ -110,11 +110,13 @@ export function Composer(props: {
   mentionRequest: { participantId: string; seq: number } | null;
   focusRequest: { seq: number } | null;
   summaryTasks: BackgroundTask[];
+  onOpenSummaryLink?: (taskId: string) => void;
   userDisplayName: string;
   artifacts: Artifact[];
   onFocusRoomFile?: (input: { messageId: string; artifactId: string }) => void;
   composerRequest:
     | { type: "insert"; seq: number; content: string }
+    | { type: "insertSummaryLink"; seq: number; taskId: string }
     | { type: "quote"; seq: number; quote: ComposerQuote }
     | { type: "quotes"; seq: number; quotes: ComposerQuote[] }
     | { type: "edit"; seq: number; messageId: string; content: string; mentions: MentionTarget[] }
@@ -206,6 +208,16 @@ export function Composer(props: {
     }),
     [roomMembers, props.runtimeProfiles, props.localAgentProviders, props.identities],
   );
+  const composerInsertLabels = useMemo(() => ({
+    getMessageLabel: (messageIdSegment: string) => formatMessageLinkLabel(
+      messageIdSegment,
+      props.allMessages,
+      props.allParticipants,
+      props.identities,
+      props.userDisplayName,
+    ),
+    getSummaryTask: (taskId: string) => props.summaryTasks.find((task) => task.id === taskId) ?? null,
+  }), [props.allMessages, props.allParticipants, props.identities, props.summaryTasks, props.userDisplayName]);
   const bindEditorRef = useCallback((node: HTMLDivElement | null) => {
     editorRef.current = node;
     if (!node) return;
@@ -928,7 +940,7 @@ export function Composer(props: {
             props.identities,
             props.userDisplayName,
           ),
-          getSummaryLabel: (taskId) => summaryLinkLabel(props.summaryTasks.find((task) => task.id === taskId)),
+          getSummaryTask: (taskId) => props.summaryTasks.find((task) => task.id === taskId) ?? null,
         },
         composerPasteContext,
       );
@@ -1036,9 +1048,10 @@ export function Composer(props: {
     if (summaryLink?.startsWith("group-chat://summary/")) {
       event.preventDefault();
       const taskId = summaryLink.replace("group-chat://summary/", "");
-      insertSummaryLinkAtCaret(taskId, summaryLinkLabel(
-        props.summaryTasks.find((task) => task.id === taskId),
-      ));
+      insertSummaryLinkAtCaret(
+        taskId,
+        props.summaryTasks.find((task) => task.id === taskId) ?? null,
+      );
       requestAnimationFrame(() => syncEditorText(true));
       return;
     }
@@ -1081,7 +1094,7 @@ export function Composer(props: {
           props.identities,
           props.userDisplayName,
         ),
-        getSummaryLabel: (taskId) => summaryLinkLabel(props.summaryTasks.find((task) => task.id === taskId)),
+        getSummaryTask: (taskId) => props.summaryTasks.find((task) => task.id === taskId) ?? null,
       },
       composerPasteContext,
     );
@@ -1332,11 +1345,61 @@ export function Composer(props: {
       requestAnimationFrame(() => focusEditorAtEnd(editorRef.current));
       return;
     }
-    const nextText = text ? `${text}${text.endsWith("\n") ? "" : "\n"}${request.content}` : request.content;
-    setText(nextText);
-    setMentionQuery(null);
-    requestAnimationFrame(() => setEditorText(editorRef.current, nextText, nextText.length));
-  }, [props.composerRequest, text]);
+    if (request.type === "insertSummaryLink") {
+      const task = props.summaryTasks.find((item) => item.id === request.taskId) ?? null;
+      requestAnimationFrame(() => {
+        const editor = editorRef.current;
+        if (!editor) return;
+        focusEditorAtEnd(editor);
+        insertSummaryLinkAtCaret(request.taskId, task);
+        syncEditorText(true);
+      });
+      return;
+    }
+    if (request.type === "insert") {
+      requestAnimationFrame(() => {
+        const editor = editorRef.current;
+        if (!editor) return;
+        const labels = {
+          getMessageLabel: composerInsertLabels.getMessageLabel,
+          getSummaryTask: composerInsertLabels.getSummaryTask,
+        };
+        if (!text.trim()) {
+          insertComposerPasteAtCaret(request.content, labels, composerPasteContext);
+        } else {
+          focusEditorAtEnd(editor);
+          const separator = text.endsWith("\n") ? "" : "\n";
+          if (separator) {
+            const selection = window.getSelection();
+            if (selection?.rangeCount) {
+              const range = selection.getRangeAt(0);
+              const separatorNode = document.createTextNode(separator);
+              range.insertNode(separatorNode);
+              range.setStartAfter(separatorNode);
+              range.collapse(true);
+              selection.removeAllRanges();
+              selection.addRange(range);
+            }
+          }
+          insertComposerPasteAtCaret(request.content, labels, composerPasteContext);
+        }
+        syncEditorText(true);
+      });
+      return;
+    }
+  }, [props.composerRequest, text, props.summaryTasks, composerInsertLabels, composerPasteContext]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.querySelectorAll("[data-summary-link-id]").forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+      const taskId = node.dataset.summaryLinkId ?? "";
+      if (!taskId) return;
+      const task = props.summaryTasks.find((item) => item.id === taskId) ?? null;
+      node.replaceWith(createSummaryLinkChipElement(taskId, task));
+    });
+  }, [props.summaryTasks]);
 
   const mentionMenuVisible = mentionQuery !== null;
   const mentionMenuOpen = mentionMenuVisible && !mentionMenuDismissed;
@@ -1467,10 +1530,19 @@ export function Composer(props: {
                 syncEditorText(true);
               }}
               onMouseDown={(event) => {
+                const summaryChip = (event.target as Element).closest("[data-summary-link-id]");
+                if (summaryChip) event.preventDefault();
                 const linkChip = (event.target as Element).closest('[data-mention-display-mode="reference-link"]');
                 if (linkChip) event.preventDefault();
               }}
               onClick={(event) => {
+                const summaryChip = (event.target as Element).closest("[data-summary-link-id]");
+                if (summaryChip instanceof HTMLElement) {
+                  event.preventDefault();
+                  const taskId = summaryChip.dataset.summaryLinkId;
+                  if (taskId) props.onOpenSummaryLink?.(taskId);
+                  return;
+                }
                 const linkChip = (event.target as Element).closest('[data-mention-display-mode="reference-link"]');
                 if (linkChip instanceof HTMLElement) {
                   event.preventDefault();
@@ -2865,14 +2937,9 @@ function insertComposerPasteAtCaret(
   value: string,
   labels: {
     getMessageLabel: (messageId: string) => string;
-    getSummaryLabel: (taskId: string) => string;
+    getSummaryTask?: (taskId: string) => BackgroundTask | null;
   },
-  context: {
-    participants: Participant[];
-    runtimeProfiles: RuntimeProfile[];
-    localAgentProviders: LocalAgentProviderStatus[];
-    identities: Identity[];
-  },
+  context: ComposerPasteContext,
 ) {
   const selection = window.getSelection();
   if (!selection?.rangeCount) return;
@@ -2896,7 +2963,8 @@ function insertComposerPasteAtCaret(
       continue;
     }
     if (segment.kind === "summary") {
-      const linkChip = createSummaryLinkChip(segment.id, labels.getSummaryLabel(segment.id));
+      const task = labels.getSummaryTask?.(segment.id) ?? null;
+      const linkChip = createSummaryLinkChipElement(segment.id, task);
       fragment.append(linkChip);
       inserted.push(linkChip);
       continue;
@@ -2933,12 +3001,12 @@ function insertComposerPasteAtCaret(
   selection.addRange(range);
 }
 
-function insertSummaryLinkAtCaret(taskId: string, label: string) {
+function insertSummaryLinkAtCaret(taskId: string, task: BackgroundTask | null) {
   const selection = window.getSelection();
   if (!selection?.rangeCount) return;
   const range = selection.getRangeAt(0);
   range.deleteContents();
-  const chip = createSummaryLinkChip(taskId, label);
+  const chip = createSummaryLinkChipElement(taskId, task);
   range.insertNode(chip);
   const trailingText = document.createTextNode("");
   chip.after(trailingText);
@@ -2946,31 +3014,6 @@ function insertSummaryLinkAtCaret(taskId: string, label: string) {
   range.collapse(true);
   selection.removeAllRanges();
   selection.addRange(range);
-}
-
-function createSummaryLinkChip(taskId: string, label: string) {
-  const chip = document.createElement("span");
-  chip.contentEditable = "false";
-  chip.dataset.summaryLinkId = taskId;
-  chip.className = [
-    "[display:inline-flex]",
-    "[max-width:min(360px,_100%)]",
-    "[align-items:center]",
-    "[gap:6px]",
-    "[border:1px_solid_var(--border)]",
-    "[border-radius:10px]",
-    "[padding:6px_10px]",
-    "[color:#2563eb]",
-    "[background:#ffffff]",
-    "[font-size:13px]",
-    "[font-weight:650]",
-    "[line-height:18px]",
-    "[vertical-align:middle]",
-    "[white-space:nowrap]",
-    "[box-shadow:0_1px_2px_rgb(0_0_0_/_4%)]",
-  ].join(" ");
-  chip.textContent = label;
-  return chip;
 }
 
 function createMessageLinkChip(messageId: string, label: string) {

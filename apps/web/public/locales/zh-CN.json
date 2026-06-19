@@ -302,6 +302,7 @@
 
   "summary.fromParticipant": "来自 {name} 的消息总结",
   "summary.title": "消息总结",
+  "summary.cardMetaMulti": "{name} · {count}条",
   "summary.plainHeader": "【消息总结】{name}",
   "summary.plainSource": "【原消息】",
   "summary.plainImages": "【图片】",

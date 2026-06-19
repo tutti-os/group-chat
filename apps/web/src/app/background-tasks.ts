@@ -192,17 +192,25 @@ const LOCAL_TASK_BAR_TASK_IDS_KEY = "group-chat:local-task-bar-task-ids";
 
 export function loadLocalTaskBarTaskIds() {
   try {
-    const raw = sessionStorage.getItem(LOCAL_TASK_BAR_TASK_IDS_KEY);
+    const persistentRaw = localStorage.getItem(LOCAL_TASK_BAR_TASK_IDS_KEY);
+    const legacySessionRaw = sessionStorage.getItem(LOCAL_TASK_BAR_TASK_IDS_KEY);
+    const raw = persistentRaw ?? legacySessionRaw;
     if (!raw) return new Set<string>();
     const parsed = JSON.parse(raw) as unknown;
-    return new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []);
+    const ids = new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []);
+    if (!persistentRaw && ids.size) {
+      localStorage.setItem(LOCAL_TASK_BAR_TASK_IDS_KEY, JSON.stringify([...ids]));
+      sessionStorage.removeItem(LOCAL_TASK_BAR_TASK_IDS_KEY);
+    }
+    return ids;
   } catch {
     return new Set<string>();
   }
 }
 
 export function saveLocalTaskBarTaskIds(ids: Set<string>) {
-  sessionStorage.setItem(LOCAL_TASK_BAR_TASK_IDS_KEY, JSON.stringify([...ids]));
+  localStorage.setItem(LOCAL_TASK_BAR_TASK_IDS_KEY, JSON.stringify([...ids]));
+  sessionStorage.removeItem(LOCAL_TASK_BAR_TASK_IDS_KEY);
 }
 
 export function addLocalTaskBarTaskId(taskId: string) {

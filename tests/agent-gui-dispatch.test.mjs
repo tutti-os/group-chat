@@ -64,6 +64,21 @@ test("resolveAgentGuiDispatchFromMentions upgrades bare message links for agent 
   assert.match(dispatch.prompt, /mention:\/\/workspace-app\/group-chat\?[^)]*messageId=msg-1/);
 });
 
+test("resolveAgentGuiDispatchFromMentions upgrades summary links for agent gui", async () => {
+  const { resolveAgentGuiDispatchFromMentions } = await loadDispatchModule();
+  const content = "[Codex](mention://workspace-app/agent-codex?workspaceId=ws-1) group-chat://summary/task-1";
+  const mentions = [{
+    mentionType: "reference",
+    referenceProviderId: "workspace-app",
+    referenceEntityId: "agent-codex",
+    displayNameSnapshot: "Codex",
+  }];
+
+  const dispatch = resolveAgentGuiDispatchFromMentions(content, mentions, { workspaceId: "ws-1" });
+  assert.ok(dispatch);
+  assert.match(dispatch.prompt, /mention:\/\/workspace-app\/group-chat\?[^)]*summaryTaskId=task-1/);
+});
+
 test("resolveAgentGuiDispatchFromMentions ignores room custom agent participant mentions", async () => {
   const { resolveAgentGuiDispatchFromMentions } = await loadDispatchModule();
   const content = "[@徐勇](group-chat://participant/participant-1) 帮我整理一下";

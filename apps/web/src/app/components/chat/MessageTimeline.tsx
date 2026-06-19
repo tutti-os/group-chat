@@ -38,6 +38,7 @@ import { enrichContentWithParticipantMentions, enrichContentWithReferenceMention
 import { MessageReferenceContent } from "./MessageReferenceContent.js";
 import { isMessageGroupBreak, MESSAGE_GROUP_IDLE_MS } from "../../message-group-breaks.js";
 import { attachmentLabel, t, translateAgentError, translateSystemNotice, useTranslation } from "../../i18n/index.js";
+import { resolveSummaryCardPresentation, SUMMARY_LINK_CARD_CLASS } from "../../summary-link-card.js";
 
 const COLLAPSED_MESSAGE_CHAR_LIMIT = 800;
 const COPY_TIP_OFFSET_PX = 8;
@@ -182,10 +183,12 @@ export function MessageTimeline(props: {
   onMentionParticipant: (participant: Participant) => void;
   onOpenMessageLink: (messageId: string) => void;
   onOpenSummaryLink: (taskId: string) => void;
+  onInsertSummaryLink?: (taskId: string) => void;
   onEnsureSummaryTask: (taskId: string) => Promise<BackgroundTask | null>;
   summaryTasks: BackgroundTask[];
   onQuoteMessages: (messages: Message[], mode?: "quote" | "summary" | "send-to-app" | "send-to-agent") => void;
   onForwardMessagesToAgent: (messages: Message[], provider: TuttiAgentGuiProvider) => void | Promise<void>;
+  onForwardSummaryToAgent: (task: BackgroundTask, provider: TuttiAgentGuiProvider) => void | Promise<void>;
   onStartSummary: (messages: Message[], participant: Participant) => void | Promise<void>;
   openBackgroundTask: BackgroundTask | null;
   onCloseBackgroundTaskPanel: () => void;
@@ -319,6 +322,12 @@ export function MessageTimeline(props: {
         : [];
     return imageArtifactsForMessages(messageIds, blocksByMessageId, artifactsById);
   }, [artifactsById, blocksByMessageId, props.openBackgroundTask]);
+  const summarySourceMessages = useMemo(
+    () => props.openBackgroundTask
+      ? resolveSourceMessages(props.openBackgroundTask, props.allMessages)
+      : [],
+    [props.allMessages, props.openBackgroundTask],
+  );
   const updateJumpToBottomVisibility = () => {
     const element = scrollRef.current;
     if (!element) return;
@@ -770,9 +779,24 @@ export function MessageTimeline(props: {
       {props.openBackgroundTask ? (
         <SummaryPanel
           task={props.openBackgroundTask}
-          images={summaryImages}
+          sourceMessages={summarySourceMessages}
+          blocks={props.blocks}
+          artifacts={props.artifacts}
+          allMessages={props.allMessages}
           allParticipants={props.allParticipants}
           identities={props.identities}
+          conversations={props.conversations}
+          rooms={props.rooms}
+          summaryTasks={props.summaryTasks}
+          runtimeProfiles={props.runtimeProfiles}
+          userProfile={props.userProfile}
+          onOpenArtifact={handleOpenArtifact}
+          onOpenMessageLink={props.onOpenMessageLink}
+          onOpenSummaryLink={props.onOpenSummaryLink}
+          onEnsureSummaryTask={props.onEnsureSummaryTask}
+          onOpenAgentProfile={props.onOpenAgentProfile}
+          agentForwardTargets={props.agentForwardTargets}
+          onForwardToAgent={(provider) => props.onForwardSummaryToAgent(props.openBackgroundTask!, provider)}
           onCopy={(position) => {
             const task = props.openBackgroundTask!;
             const sourceMessages = resolveSourceMessages(task, props.allMessages);
@@ -782,7 +806,10 @@ export function MessageTimeline(props: {
               participants: props.allParticipants,
               images: summaryImages,
             })
-              .then(() => showCopyTip(position))
+              .then(() => {
+                showCopyTip(position);
+                props.onInsertSummaryLink?.(task.id);
+              })
               .catch(() => window.alert(t("app.copyFailed")));
           }}
           onBackToSource={() => {
@@ -1039,6 +1066,12 @@ function SystemNoticeRow(props: { message: Message }) {
     </div>
   );
 }
+
+const messageRoleContentClassName =
+  "[&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[background:#f2f3f5] "
+  + "[&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[border-radius:8px] "
+  + "[&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[border-color:transparent] "
+  + "[&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[background:#d6e9ff]";
 
 function MessageRow(props: {
   message: Message;
@@ -1329,7 +1362,7 @@ function MessageRow(props: {
       data-failed={props.message.status === "error" || undefined}
       data-selected={props.selected || undefined}
       data-group-continuation={!props.showHeader || undefined}
-      className={`group/message [position:relative] [display:grid] ${props.selectionMode ? "[grid-template-columns:22px_34px_minmax(0,_1fr)]" : "[grid-template-columns:34px_minmax(0,_1fr)]"} [gap:8px] [align-items:start] [border-radius:18px] [transition:background-color_0.2s_ease,_box-shadow_0.2s_ease] ${props.isLastInGroup ? "[margin-bottom:18px]" : "[margin-bottom:4px]"} [&_[data-slot=message-avatar]]:[user-select:none] [&[data-selected=true]]:[background:#eaf2ff66] [&[data-flash=true]]:[background:#fef3c7] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-whisper=true]:not([data-failed=true])_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#d0d3d6] [&[data-whisper=true][data-failed=true]_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#f59e0b] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[border-radius:8px] [&[data-whisper=true][data-role=assistant]_[data-slot=message-block]:not([data-link-only])]:[background:#f8f9fb] [&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[background:#f2f3f5] [&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[border-radius:8px] [&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[border-color:transparent] [&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[background:#d6e9ff] [&[data-role=user][data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[background:#eef6ff]`}
+      className={`group/message [position:relative] [display:grid] ${props.selectionMode ? "[grid-template-columns:22px_34px_minmax(0,_1fr)]" : "[grid-template-columns:34px_minmax(0,_1fr)]"} [gap:8px] [align-items:start] [border-radius:18px] [transition:background-color_0.2s_ease,_box-shadow_0.2s_ease] ${props.isLastInGroup ? "[margin-bottom:18px]" : "[margin-bottom:4px]"} [&_[data-slot=message-avatar]]:[user-select:none] [&[data-selected=true]]:[background:#eaf2ff66] [&[data-flash=true]]:[background:#fef3c7] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-whisper=true]:not([data-failed=true])_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#d0d3d6] [&[data-whisper=true][data-failed=true]_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#f59e0b] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[border-radius:8px] [&[data-whisper=true][data-role=assistant]_[data-slot=message-block]:not([data-link-only])]:[background:#f8f9fb] [&[data-role=user][data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[background:#eef6ff] ${messageRoleContentClassName}`}
     >
       {props.selectionMode ? (
       <div
@@ -1995,20 +2028,38 @@ function SummaryAgentPicker(props: {
 
 function SummaryPanel(props: {
   task: BackgroundTask;
-  images: Artifact[];
+  sourceMessages: Message[];
+  blocks: MessageBlock[];
+  artifacts: Artifact[];
+  allMessages: Message[];
   allParticipants: Participant[];
   identities: Identity[];
+  conversations: Conversation[];
+  rooms: Room[];
+  summaryTasks: BackgroundTask[];
+  runtimeProfiles: RuntimeProfile[];
+  userProfile: Pick<LocalUserProfile, "displayName">;
+  onOpenArtifact: (artifact: Artifact) => void;
+  onOpenMessageLink: (messageId: string) => void;
+  onOpenSummaryLink: (taskId: string) => void;
+  onEnsureSummaryTask: (taskId: string) => Promise<BackgroundTask | null>;
+  onOpenAgentProfile: (participant: Participant) => void;
+  agentForwardTargets: AgentForwardTarget[];
+  onForwardToAgent: (provider: TuttiAgentGuiProvider) => void | Promise<void>;
   onCopy: (position: CopyTipPosition) => void;
   onBackToSource: () => void;
   onClose: () => void;
 }) {
   const summaryContent = props.task.content.trim();
   const loading = props.task.status === "running";
-  const sourceMessage = props.task.sourceMessage;
   const isMultiSource = props.task.sourceMessageIds.length > 1;
-  const sourcePreview = isMultiSource
-    ? props.task.sourcePreview
-    : sourceMessage?.content || props.task.sourcePreview || attachmentLabel();
+  const sourceMentions = props.sourceMessages.flatMap((message) => message.mentions ?? []);
+  const richSummaryContent = restoreSummaryReferenceLabels(summaryContent, sourceMentions);
+  const referencedArtifacts = collectImageFileArtifactsForMessages(
+    props.sourceMessages,
+    props.blocks,
+    props.artifacts,
+  ).filter((artifact) => summaryContent.includes(artifact.filename));
   return (
     <aside className={"[position:fixed] [top:56px] [right:0] [bottom:0] [z-index:70] [display:grid] [width:min(420px,_calc(100vw_-_28px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border)] [background:var(--panel)] [box-shadow:-18px_0_50px_rgb(0_0_0_/_14%)]"} aria-label={t("messageActions.summarySidebar")}>
       <header className={"[display:grid] [grid-template-columns:minmax(0,_1fr)_auto] [align-items:center] [gap:8px] [border-bottom:1px_solid_var(--border)] [padding:14px] [background:#ffffff]"}>
@@ -2038,33 +2089,112 @@ function SummaryPanel(props: {
               </button>
             ) : null}
           </div>
-          <p className={"[margin:0] [color:var(--text)] [font-size:13px] [line-height:1.55]"}>{compactInline(sourcePreview)}</p>
-          {props.images.length ? (
-            <div className={"[display:flex] [gap:8px] [overflow-x:auto] [padding-top:2px]"}>
-              {props.images.map((artifact) => (
-                <img key={artifact.id} className={"[width:96px] [height:72px] [border:1px_solid_var(--border)] [border-radius:10px] [object-fit:cover] [background:#00000008]"} src={artifact.publicUrl} alt={artifact.filename} />
+          {props.sourceMessages.length ? (
+            <div className={"[display:grid] [gap:10px]"}>
+              {props.sourceMessages.map((message) => (
+                <SummarySourceMessage
+                  key={message.id}
+                  message={message}
+                  blocks={props.blocks.filter((block) => block.messageId === message.id && !isRuntimeEventBlock(block)).sort(compareMessageBlocks)}
+                  artifacts={props.artifacts}
+                  allMessages={props.allMessages}
+                  allParticipants={props.allParticipants}
+                  identities={props.identities}
+                  conversations={props.conversations}
+                  rooms={props.rooms}
+                  summaryTasks={props.summaryTasks}
+                  runtimeProfiles={props.runtimeProfiles}
+                  userProfile={props.userProfile}
+                  onOpenArtifact={props.onOpenArtifact}
+                  onOpenMessageLink={props.onOpenMessageLink}
+                  onOpenSummaryLink={props.onOpenSummaryLink}
+                  onEnsureSummaryTask={props.onEnsureSummaryTask}
+                  onOpenAgentProfile={props.onOpenAgentProfile}
+                />
               ))}
             </div>
-          ) : null}
+          ) : (
+            <p className={"[margin:0] [color:var(--text)] [font-size:13px] [line-height:1.55]"}>
+              {compactInline(props.task.sourcePreview || attachmentLabel())}
+            </p>
+          )}
         </section>
         <section className={"[display:grid] [gap:8px]"}>
           <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:8px]"}>
             <strong className={"[font-size:12px] [font-weight:750] [color:var(--muted)]"}>{loading ? t("messageActions.summarizing") : t("messageActions.summaryResult")}</strong>
             {!loading && summaryContent ? (
-              <button
-                type="button"
-                className={"[height:28px] [border:0] [border-radius:8px] [padding:0_10px] [color:var(--text)] [background:#00000008] [font-size:12px] [font-weight:650]"}
-                onClick={(event) => props.onCopy({ x: event.clientX, y: event.clientY })}
-              >
-                {t("common.copy")}
-              </button>
+              <span className={"[display:flex] [align-items:center] [gap:6px]"}>
+                <ForwardToAgentToolbarItem
+                  targets={props.agentForwardTargets}
+                  onForward={(provider) => void props.onForwardToAgent(provider)}
+                />
+                <button
+                  type="button"
+                  className={"[height:28px] [border:0] [border-radius:8px] [padding:0_10px] [color:var(--text)] [background:#00000008] [font-size:12px] [font-weight:650]"}
+                  onClick={(event) => props.onCopy({ x: event.clientX, y: event.clientY })}
+                >
+                  {t("common.copy")}
+                </button>
+              </span>
             ) : null}
           </div>
-          <div className={"message-prose [min-height:160px] [border:1px_solid_var(--border)] [border-radius:12px] [padding:12px] [background:#ffffff] [color:var(--text)] [font-size:13px] [line-height:1.65]"}>
+          <div
+            data-role="assistant"
+            className={`[display:grid] [min-height:160px] [align-content:start] [justify-items:start] [gap:2px] [border:1px_solid_var(--border)] [border-radius:12px] [padding:12px] [background:#ffffff] [color:var(--text)] [font-size:13px] [line-height:1.65] ${messageRoleContentClassName}`}
+          >
             {props.task.status === "failed" ? (
               <p className={"[margin:0] [color:var(--danger)]"}>{props.task.error ? translateAgentError(props.task.error) : t("messageActions.summaryFailed")}</p>
             ) : summaryContent ? (
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{summaryContent}</ReactMarkdown>
+              <>
+                <MessageBlockRenderer
+                  block={{
+                    id: `${props.task.id}-summary-result`,
+                    messageId: props.task.sourceMessageId || props.task.id,
+                    type: "main_text",
+                    content: richSummaryContent,
+                    status: "success",
+                    metadata: null,
+                    sortOrder: 0,
+                    createdAt: props.task.createdAt,
+                    updatedAt: props.task.updatedAt,
+                  }}
+                  artifacts={props.artifacts}
+                  allBlocks={props.blocks}
+                  allMessages={props.allMessages}
+                  allParticipants={props.allParticipants}
+                  identities={props.identities}
+                  userProfile={props.userProfile}
+                  conversations={props.conversations}
+                  rooms={props.rooms}
+                  summaryTasks={props.summaryTasks}
+                  referenceMentions={sourceMentions}
+                  messageRole="assistant"
+                  runtimeProfiles={props.runtimeProfiles}
+                  onOpenArtifact={props.onOpenArtifact}
+                  onOpenMessageLink={props.onOpenMessageLink}
+                  onOpenSummaryLink={props.onOpenSummaryLink}
+                  onEnsureSummaryTask={props.onEnsureSummaryTask}
+                  onOpenAgentProfile={props.onOpenAgentProfile}
+                />
+                {referencedArtifacts.map((artifact, index) => (
+                  <MessageBlockRenderer
+                    key={artifact.id}
+                    block={{
+                      id: `${props.task.id}-summary-artifact-${artifact.id}`,
+                      messageId: props.task.sourceMessageId || props.task.id,
+                      type: artifact.mimeType.startsWith("image/") ? "image" : "file",
+                      content: "",
+                      status: "success",
+                      metadata: { artifactId: artifact.id },
+                      sortOrder: index + 1,
+                      createdAt: props.task.createdAt,
+                      updatedAt: props.task.updatedAt,
+                    }}
+                    artifacts={props.artifacts}
+                    onOpenArtifact={props.onOpenArtifact}
+                  />
+                ))}
+              </>
             ) : (
               <p className={"[margin:0] [color:var(--muted)]"}>{t("messageActions.waitingSummary")}</p>
             )}
@@ -2072,6 +2202,96 @@ function SummaryPanel(props: {
         </section>
       </div>
     </aside>
+  );
+}
+
+function restoreSummaryReferenceLabels(content: string, mentions: Message["mentions"]) {
+  let result = content;
+  for (const mention of mentions ?? []) {
+    if (mention.mentionType !== "reference" || !mention.referenceEntityId) continue;
+    const label = mention.displayNameSnapshot.trim();
+    if (!label) continue;
+    const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    result = result.replace(
+      new RegExp(`\\[${escapedLabel}\\]\\((?!(?:group-chat:\\/\\/reference|mention:\\/\\/))[^\\n)]*\\)`, "g"),
+      label,
+    );
+  }
+  return result;
+}
+
+function SummarySourceMessage(props: {
+  message: Message;
+  blocks: MessageBlock[];
+  artifacts: Artifact[];
+  allMessages: Message[];
+  allParticipants: Participant[];
+  identities: Identity[];
+  conversations: Conversation[];
+  rooms: Room[];
+  summaryTasks: BackgroundTask[];
+  runtimeProfiles: RuntimeProfile[];
+  userProfile: Pick<LocalUserProfile, "displayName">;
+  onOpenArtifact: (artifact: Artifact) => void;
+  onOpenMessageLink: (messageId: string) => void;
+  onOpenSummaryLink: (taskId: string) => void;
+  onEnsureSummaryTask: (taskId: string) => Promise<BackgroundTask | null>;
+  onOpenAgentProfile: (participant: Participant) => void;
+}) {
+  const participant = resolveMessageAgentParticipant(props.message, props.allParticipants, props.allParticipants);
+  const identity = participant?.identityId
+    ? props.identities.find((item) => item.id === participant.identityId) ?? null
+    : null;
+  const senderLabel = resolveMessageSenderLabel(
+    props.message,
+    participant,
+    identity,
+    props.userProfile.displayName,
+  );
+  const blocks = props.blocks.length ? props.blocks : [{
+    id: `${props.message.id}-summary-source`,
+    messageId: props.message.id,
+    type: "main_text" as const,
+    content: props.message.content || attachmentLabel(),
+    status: "success" as const,
+    metadata: null,
+    sortOrder: 0,
+    createdAt: props.message.createdAt,
+    updatedAt: props.message.updatedAt,
+  }];
+
+  return (
+    <article data-role={props.message.role} className={`[min-width:0] ${messageRoleContentClassName}`}>
+      <div className={"[margin-bottom:3px] [color:var(--muted)] [font-size:12px] [line-height:18px]"}>
+        <strong>{senderLabel}</strong>
+        <span className={"[margin-left:6px]"}>{formatMessageTime(props.message.createdAt)}</span>
+      </div>
+      <div className={"[display:grid] [justify-items:start] [min-width:0]"}>
+        {blocks.map((block) => (
+          <MessageBlockRenderer
+            key={block.id}
+            block={block}
+            artifacts={props.artifacts}
+            allBlocks={props.blocks}
+            allMessages={props.allMessages}
+            allParticipants={props.allParticipants}
+            identities={props.identities}
+            userProfile={props.userProfile}
+            conversations={props.conversations}
+            rooms={props.rooms}
+            summaryTasks={props.summaryTasks}
+            referenceMentions={props.message.mentions}
+            messageRole={props.message.role}
+            runtimeProfiles={props.runtimeProfiles}
+            onOpenArtifact={props.onOpenArtifact}
+            onOpenMessageLink={props.onOpenMessageLink}
+            onOpenSummaryLink={props.onOpenSummaryLink}
+            onEnsureSummaryTask={props.onEnsureSummaryTask}
+            onOpenAgentProfile={props.onOpenAgentProfile}
+          />
+        ))}
+      </div>
+    </article>
   );
 }
 
@@ -2855,13 +3075,13 @@ function SummaryLinkCard(props: {
   const task = props.summaryTasks.find((item) => item.id === props.taskId) ?? null;
   const conversation = task ? props.conversations.find((item) => item.id === task.conversationId) ?? null : null;
   const room = conversation ? props.rooms.find((item) => item.id === conversation.roomId) ?? null : null;
-  const preview = task
-    ? compactInline(task.content || task.sourcePreview || attachmentLabel())
-    : fetchState === "loading"
-      ? t("messageActions.loadingSummary")
+  const presentation = resolveSummaryCardPresentation(
+    task ?? (fetchState === "loading"
+      ? { participantName: "", content: "", sourcePreview: "", sourceMessageIds: [], status: "running" }
       : fetchState === "failed"
-        ? t("messageActions.summaryMissing")
-        : t("messageActions.loadingSummary");
+        ? { participantName: "", content: t("messageActions.summaryMissing"), sourcePreview: "", sourceMessageIds: [], status: "failed" }
+        : null),
+  );
 
   useEffect(() => {
     if (task || fetchState !== "idle" || !props.onEnsureSummaryTask) return;
@@ -2874,21 +3094,27 @@ function SummaryLinkCard(props: {
   return (
     <button
       type="button"
-      className={embeddedLinkCardClassName}
+      className={SUMMARY_LINK_CARD_CLASS}
       onClick={props.onOpen}
     >
       <span className={"[display:flex] [align-items:center] [gap:5px] [color:#2563eb] [font-size:12px] [font-weight:700] [line-height:1.3]"}>
         <BrainCircuit size={13} />
-        <span>{summaryLinkLabel(task)}</span>
+        <span>{presentation.title}</span>
       </span>
-      <span className={"[display:block] [overflow:hidden] [color:var(--text)] [font-size:13px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>
-        {preview}
+      {presentation.meta ? (
+        <span className={"[display:block] [overflow:hidden] [color:var(--muted)] [font-size:11px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>
+          {presentation.meta}
+        </span>
+      ) : null}
+      <span className={"[display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] [overflow:hidden] [color:var(--text)] [font-size:13px] [font-weight:500] [line-height:1.45]"}>
+        {presentation.body}
       </span>
-      <span className={"[display:flex] [align-items:center] [gap:6px] [color:var(--muted)] [font-size:11px] [line-height:1.3]"}>
-        <span>{room?.title || conversation?.title || t("common.unknownConversation")}</span>
-        {task ? <span>{task.participantName}</span> : null}
-        {task ? <span>{formatMessageTime(task.updatedAt)}</span> : null}
-      </span>
+      {task ? (
+        <span className={"[display:flex] [align-items:center] [gap:6px] [color:var(--muted)] [font-size:11px] [line-height:1.3]"}>
+          <span>{room?.title || conversation?.title || t("common.unknownConversation")}</span>
+          <span>{formatMessageTime(task.updatedAt)}</span>
+        </span>
+      ) : null}
     </button>
   );
 }
