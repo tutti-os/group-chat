@@ -436,8 +436,8 @@ server.setNotFoundHandler((request, reply) => {
 });
 
 try {
-  chat.bootstrap();
   await server.listen({ port, host });
+  chat.warmup();
   server.log.info(`group-chat server listening on http://${host}:${port}`);
 } catch (error) {
   server.log.error(error);

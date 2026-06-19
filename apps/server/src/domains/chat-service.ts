@@ -45,6 +45,7 @@ export class ChatService {
   private readonly cancelledPrivateTaskIds = new Set<string>();
   private readonly activePrivateTasks = new Map<string, { cancel: () => Promise<void> | void }>();
   private recoveredReplyQueue = false;
+  private bootstrapMaintenanceStarted = false;
 
   constructor(
     private readonly repo: ChatRepository,
@@ -52,10 +53,14 @@ export class ChatService {
     private readonly toolTokens: AgentToolTokenStore,
   ) {}
 
+  warmup() {
+    this.repo.ensureSeedData();
+    this.scheduleBootstrapMaintenance();
+  }
+
   bootstrap() {
     this.repo.ensureSeedData();
-    this.materializeExistingWorkspaces();
-    this.recoverReplyQueueOnce();
+    this.scheduleBootstrapMaintenance();
     return this.repo.filterHiddenFromSnapshot(this.repo.snapshot());
   }
 
@@ -397,6 +402,7 @@ export class ChatService {
 
     const mentions = input.mentions ?? [];
     const targets = this.resolveTargets(conversation, mentions, content);
+    this.materializeParticipants(conversation, targets);
     void this.generateReplies(conversation.roomId, conversationId, message, targets, {
       currentRound: 1,
       maxRounds: input.maxReplyRounds
@@ -630,6 +636,20 @@ export class ChatService {
       const conversation = snapshot.conversations.find((item) => item.id === participant.conversationId);
       if (conversation) this.materializeParticipant(conversation, participant);
     }
+  }
+
+  private scheduleBootstrapMaintenance() {
+    if (this.bootstrapMaintenanceStarted) return;
+    this.bootstrapMaintenanceStarted = true;
+    setTimeout(() => {
+      try {
+        this.materializeExistingWorkspaces();
+        this.recoverReplyQueueOnce();
+      } catch (error) {
+        this.bootstrapMaintenanceStarted = false;
+        console.warn("[chat-service] bootstrap maintenance failed", error);
+      }
+    }, 0);
   }
 
   private materializeParticipants(conversation: Conversation, participants: Participant[]) {

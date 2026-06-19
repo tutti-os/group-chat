@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Braces, BrainCircuit, CheckSquare, ChevronsDown, Copy, Edit3, Ear, FileText, MoreHorizontal, Reply, RotateCcw, Terminal, Trash2, Wrench, X } from "lucide-react";
+import { Braces, BrainCircuit, CheckSquare, ChevronDown, ChevronRight, ChevronsDown, Copy, Edit3, Ear, FileText, MoreHorizontal, Reply, RotateCcw, SendHorizontal, Terminal, Trash2, Wrench, X } from "lucide-react";
 import type { Artifact, AgentRun, AgentRunEvent, Conversation, Identity, Message, MessageBlock, Participant, Room, RuntimeProfile } from "@group-chat/shared";
 import { isLocalUserMessage, resolveMessageVisibility, enrichAssistantContentWithWorkspaceResourceLinks, resolveTriggerUserMentions } from "@group-chat/shared";
 import { revealArtifactInTuttiFileManager } from "../../artifact-actions.js";
@@ -11,10 +11,11 @@ import { formatBytes, formatMessageStatus } from "../../formatting.js";
 import { TuttiMessageLinkIcon } from "../../tutti-reference-icons.js";
 import type { LocalUserProfile } from "../../user-profile.js";
 import { UserAvatar, type UserAvatarSize } from "../ui/UserAvatar.js";
-import { resolveAgentAvatarFromContext } from "../../identity-avatar.js";
+import { getRuntimeProviderAvatarStyle, resolveAgentAvatarFromContext } from "../../identity-avatar.js";
 import { AgentAvatar } from "../ui/AgentAvatar.js";
 import { WHISPER_FEATURE_ENABLED } from "../../feature-flags.js";
 import type { BackgroundTask } from "../../background-tasks.js";
+import type { TuttiAgentGuiProvider } from "../../agent-gui-dispatch.js";
 import {
   collectSummaryTaskIds,
   copyMessagesToClipboard,
@@ -44,7 +45,19 @@ const MESSAGE_GROUP_GAP_MS = MESSAGE_GROUP_IDLE_MS;
 const EMPTY_MESSAGE_BLOCKS: MessageBlock[] = [];
 
 type CopyTipPosition = { x: number; y: number };
-type CopyMessageInput = { position: CopyTipPosition; anchorEl?: HTMLElement | null };
+type CopyMessageInput = { position: CopyTipPosition; anchorEl?: HTMLElement | null; menuCopy?: boolean };
+
+export type AgentForwardTarget = {
+  provider: TuttiAgentGuiProvider;
+  runtimeProvider: string;
+  label: string;
+  subtitle: string;
+  available: boolean;
+};
+
+const MessageBodyCopyContext = createContext<((input: CopyMessageInput) => void) | null>(null);
+
+const MESSAGE_MORE_MENU_SELECTOR = '[data-slot="message-more-menu"]';
 
 type CopyMessageScope =
   | { kind: "message" }
@@ -63,6 +76,63 @@ function resolveCopyScopeFromAnchor(anchor: HTMLElement | null): CopyMessageScop
     if (blockId) return { kind: "text-block", blockId };
   }
   return { kind: "message" };
+}
+
+function hasMeaningfulMessageCopyText(text: string) {
+  const trimmed = text.trim();
+  return Boolean(trimmed) && trimmed !== attachmentLabel();
+}
+
+function buildMessagesClipboardPayload(
+  messages: Message[],
+  blocks: MessageBlock[],
+  artifacts: Artifact[],
+) {
+  const visibleMessages = messages.filter((message) => message.status !== "deleted" && message.status !== "recalled");
+  const text = visibleMessages
+    .map((message) => enrichMessageContentForCopy(message.content.trim() || attachmentLabel(), message.mentions ?? []).trim() || attachmentLabel())
+    .join("\n");
+  const collected = collectImageFileArtifactsForMessages(visibleMessages, blocks, artifacts);
+  if (!hasMeaningfulMessageCopyText(text) && collected.length === 1) {
+    return { text: "", artifactIds: [collected[0]!.id], includeText: false as const };
+  }
+  return {
+    text,
+    artifactIds: collected.map((artifact) => artifact.id),
+    includeText: true as const,
+  };
+}
+
+function selectionIntersectsNode(range: Range, node: Node) {
+  try {
+    return range.intersectsNode(node);
+  } catch {
+    return false;
+  }
+}
+
+function selectionIntersectsTimelineCopyContent(range: Range, container: HTMLElement) {
+  for (const element of container.querySelectorAll('[data-slot="message-copy-content"]')) {
+    if (selectionIntersectsNode(range, element)) return true;
+  }
+  return false;
+}
+
+function collectMessagesFromNativeSelection(
+  range: Range,
+  container: HTMLElement,
+  messages: Message[],
+) {
+  const selected: Message[] = [];
+  for (const message of messages) {
+    if (message.status === "deleted" || message.status === "recalled" || message.role === "system") continue;
+    const row = container.querySelector(`[data-message-id="${CSS.escape(message.id)}"]`);
+    const content = row?.querySelector('[data-slot="message-copy-content"]');
+    if (content instanceof HTMLElement && selectionIntersectsNode(range, content)) {
+      selected.push(message);
+    }
+  }
+  return selected;
 }
 
 const MESSAGE_MENU_ACTIVE_ATTR = "data-menu-active";
@@ -99,6 +169,7 @@ export function MessageTimeline(props: {
   allParticipants: Participant[];
   identities: Identity[];
   runtimeProfiles: RuntimeProfile[];
+  agentForwardTargets: AgentForwardTarget[];
   conversations: Conversation[];
   rooms: Room[];
   participantsCount: number;
@@ -114,6 +185,7 @@ export function MessageTimeline(props: {
   onEnsureSummaryTask: (taskId: string) => Promise<BackgroundTask | null>;
   summaryTasks: BackgroundTask[];
   onQuoteMessages: (messages: Message[], mode?: "quote" | "summary" | "send-to-app" | "send-to-agent") => void;
+  onForwardMessagesToAgent: (messages: Message[], provider: TuttiAgentGuiProvider) => void | Promise<void>;
   onStartSummary: (messages: Message[], participant: Participant) => void | Promise<void>;
   openBackgroundTask: BackgroundTask | null;
   onCloseBackgroundTaskPanel: () => void;
@@ -368,8 +440,19 @@ export function MessageTimeline(props: {
       const block = props.blocks.find(
         (item) => item.id === scope.blockId && visibleMessageIds.has(item.messageId),
       );
+      const blockText = block?.content.trim() ?? "";
+      const messageArtifacts = collectImageFileArtifactsForMessages(visibleMessages, props.blocks, props.artifacts);
+      if (!hasMeaningfulMessageCopyText(blockText) && messageArtifacts.length === 1) {
+        await copyMessagesToClipboard({
+          text: "",
+          artifactIds: [messageArtifacts[0]!.id],
+          includeText: false,
+        });
+        showCopyTip(position);
+        return;
+      }
       await copyMessagesToClipboard({
-        text: block?.content.trim() ?? "",
+        text: blockText,
         artifactIds: [],
         includeText: true,
       });
@@ -381,12 +464,37 @@ export function MessageTimeline(props: {
       .map((message) => enrichMessageContentForCopy(message.content.trim() || attachmentLabel(), message.mentions ?? []).trim() || attachmentLabel())
       .join("\n");
     const artifacts = collectImageFileArtifactsForMessages(visibleMessages, props.blocks, props.artifacts);
+    if (!hasMeaningfulMessageCopyText(text) && artifacts.length === 1) {
+      await copyMessagesToClipboard({
+        text: "",
+        artifactIds: [artifacts[0]!.id],
+        includeText: false,
+      });
+      showCopyTip(position);
+      return;
+    }
     await copyMessagesToClipboard({
       text,
       artifactIds: artifacts.map((artifact) => artifact.id),
       includeText: true,
     });
     showCopyTip(position);
+  };
+
+  const copyMessagesFromNativeSelection = async (event: ClipboardEvent<HTMLElement>) => {
+    const selection = window.getSelection();
+    if (!selection?.rangeCount || selection.isCollapsed) return;
+    const container = scrollRef.current;
+    if (!container) return;
+    const range = selection.getRangeAt(0);
+    if (!container.contains(range.commonAncestorContainer)) return;
+    if (!selectionIntersectsTimelineCopyContent(range, container)) return;
+
+    const messages = collectMessagesFromNativeSelection(range, container, visibleMessages);
+    if (!messages.length) return;
+
+    event.preventDefault();
+    await copyMessagesToClipboard(buildMessagesClipboardPayload(messages, props.blocks, props.artifacts));
   };
 
   const copyMessageLink = async (messageIds: string | string[], position: CopyTipPosition) => {
@@ -497,11 +605,21 @@ export function MessageTimeline(props: {
     };
   }, []);
 
+  useEffect(() => {
+    if (!openMessageMenu) return;
+    const container = scrollRef.current;
+    if (!container) return;
+    const handleSelectStart = () => closeOpenMessageMenu();
+    container.addEventListener("selectstart", handleSelectStart);
+    return () => container.removeEventListener("selectstart", handleSelectStart);
+  }, [openMessageMenu, closeOpenMessageMenu]);
+
   return (
     <section
       ref={scrollRef}
       className={`[position:relative] [min-height:0] [overflow-y:auto] [background:var(--panel)] [padding:26px_18px_18px_14px] max-[1080px]:[padding-inline:14px_18px] max-[760px]:[padding:18px_18px_18px_14px]`}
       onScroll={updateJumpToBottomVisibility}
+      onCopy={(event) => void copyMessagesFromNativeSelection(event)}
     >
       {visibleMessages.length === 0 ? (
         <EmptyTimelineState
@@ -532,6 +650,7 @@ export function MessageTimeline(props: {
           participant={resolveMessageAgentParticipant(message, props.participants, props.allParticipants)}
           identities={props.identities}
           runtimeProfiles={props.runtimeProfiles}
+          agentForwardTargets={props.agentForwardTargets}
           userProfile={props.userProfile}
           onOpenUserProfile={props.onOpenUserProfile}
           onViewThinking={props.onViewThinking}
@@ -564,6 +683,7 @@ export function MessageTimeline(props: {
           }}
           onCloseMenu={closeOpenMessageMenu}
           onQuoteMessage={() => props.onQuoteMessages([message], "quote")}
+          onForwardToAgent={(provider) => props.onForwardMessagesToAgent([message], provider)}
           onSummarizeMessage={() => requestSummary([message])}
           onCopyMessage={(input) => void copyMessages([message], input.position, input.anchorEl)}
           onCopyMessageLink={(position) => void copyMessageLink(message.id, position)}
@@ -592,6 +712,11 @@ export function MessageTimeline(props: {
                 props.onQuoteMessages(selectedMessages, "quote");
                 exitSelectionMode();
               }}
+              onForwardToAgent={(provider) => {
+                void props.onForwardMessagesToAgent(selectedMessages, provider);
+                exitSelectionMode();
+              }}
+              agentForwardTargets={props.agentForwardTargets}
               onSummarize={() => {
                 requestSummary(selectedMessages);
                 exitSelectionMode();
@@ -929,6 +1054,7 @@ function MessageRow(props: {
   conversations: Conversation[];
   rooms: Room[];
   participant: Participant | null;
+  agentForwardTargets: AgentForwardTarget[];
   onOpenAgentProfile: (participant: Participant) => void;
   onMentionParticipant: (participant: Participant) => void;
   onOpenArtifact: (artifact: Artifact) => void;
@@ -947,6 +1073,7 @@ function MessageRow(props: {
   onOpenMenu: (anchor: HTMLElement) => void;
   onCloseMenu: () => void;
   onQuoteMessage: () => void;
+  onForwardToAgent: (provider: TuttiAgentGuiProvider) => void | Promise<void>;
   onSummarizeMessage: () => void;
   onCopyMessage: (input: CopyMessageInput) => void;
   onCopyMessageLink: (position: CopyTipPosition) => void;
@@ -1065,7 +1192,10 @@ function MessageRow(props: {
       createdAt={props.message.createdAt}
       onReply={props.onQuoteMessage}
       onCopy={props.onCopyMessage}
+      agentForwardTargets={props.agentForwardTargets}
+      onForwardToAgent={props.onForwardToAgent}
       onOpenMenu={props.onOpenMenu}
+      onCloseMenu={props.onCloseMenu}
       onShowActions={props.onShowActions}
       onHideActions={props.onHideActions}
     >
@@ -1080,7 +1210,8 @@ function MessageRow(props: {
             }}
             onSummarize={props.onSummarizeMessage}
             onViewThinking={() => props.onViewThinking(props.message)}
-            onCopy={props.onCopyMessage}
+            agentForwardTargets={props.agentForwardTargets}
+            onForwardToAgent={props.onForwardToAgent}
             onCopyLink={props.onCopyMessageLink}
             onEdit={props.onEditMessage}
             onDelete={props.onDeleteMessage}
@@ -1089,7 +1220,7 @@ function MessageRow(props: {
           />
         ) : null}
         {props.showHeader ? (
-        <div data-slot="message-meta" className={"[&_span:not([data-message-status=error])]:[color:var(--muted)] [&_span[data-message-status=error]]:[color:#dc2626] [&_span]:[font-size:12px] [display:flex] [align-items:center] [gap:7px] [min-height:20px] [margin-bottom:4px] [&_strong]:[color:var(--muted)] [&_strong]:[font-size:12px] [&_strong]:[font-weight:550]"}>
+        <div data-slot="message-meta" className={"[user-select:none] [&_span:not([data-message-status=error])]:[color:var(--muted)] [&_span[data-message-status=error]]:[color:#dc2626] [&_span]:[font-size:12px] [display:flex] [align-items:center] [gap:7px] [min-height:20px] [margin-bottom:4px] [&_strong]:[color:var(--muted)] [&_strong]:[font-size:12px] [&_strong]:[font-weight:550]"}>
             {isUserMessage ? (
               <strong>{senderLabel}</strong>
             ) : props.participant && props.participant.status !== "removed" ? (
@@ -1118,12 +1249,13 @@ function MessageRow(props: {
         {isRemoved ? (
           <DeletedMessageBubble status={props.message.status} />
         ) : (
-          <>
+          <div data-slot="message-copy-content" className={"[user-select:text] [min-width:0]"}>
             {visibleConversationBlocks.map((block, index) => (
               <MessageBlockRenderer
                 key={block.id}
                 block={block}
                 artifacts={props.artifacts}
+                allBlocks={props.blocks}
                 allMessages={props.allMessages}
                 allParticipants={props.allParticipants}
                 identities={props.identities}
@@ -1165,6 +1297,7 @@ function MessageRow(props: {
                   updatedAt: props.message.updatedAt,
                 }}
                 artifacts={props.artifacts}
+                allBlocks={props.blocks}
                 allMessages={props.allMessages}
                 allParticipants={props.allParticipants}
                 identities={props.identities}
@@ -1183,7 +1316,7 @@ function MessageRow(props: {
               />
             ) : null}
             {runtimeEventBlocks.length ? <RuntimeEventGroup blocks={runtimeEventBlocks} artifacts={props.artifacts} onOpenArtifact={props.onOpenArtifact} /> : null}
-          </>
+          </div>
         )}
     </MessageBodyShell>
   );
@@ -1196,12 +1329,12 @@ function MessageRow(props: {
       data-failed={props.message.status === "error" || undefined}
       data-selected={props.selected || undefined}
       data-group-continuation={!props.showHeader || undefined}
-      className={`group/message [position:relative] [display:grid] ${props.selectionMode ? "[grid-template-columns:22px_34px_minmax(0,_1fr)]" : "[grid-template-columns:34px_minmax(0,_1fr)]"} [gap:8px] [align-items:start] [border-radius:18px] [transition:background-color_0.2s_ease,_box-shadow_0.2s_ease] ${props.isLastInGroup ? "[margin-bottom:18px]" : "[margin-bottom:4px]"} [&[data-selected=true]]:[background:#eaf2ff66] [&[data-flash=true]]:[background:#fef3c7] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-whisper=true]:not([data-failed=true])_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#d0d3d6] [&[data-whisper=true][data-failed=true]_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#f59e0b] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[border-radius:8px] [&[data-whisper=true][data-role=assistant]_[data-slot=message-block]:not([data-link-only])]:[background:#f8f9fb] [&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[background:#f2f3f5] [&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[border-radius:8px] [&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[border-color:transparent] [&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[background:#d6e9ff] [&[data-role=user][data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[background:#eef6ff]`}
+      className={`group/message [position:relative] [display:grid] ${props.selectionMode ? "[grid-template-columns:22px_34px_minmax(0,_1fr)]" : "[grid-template-columns:34px_minmax(0,_1fr)]"} [gap:8px] [align-items:start] [border-radius:18px] [transition:background-color_0.2s_ease,_box-shadow_0.2s_ease] ${props.isLastInGroup ? "[margin-bottom:18px]" : "[margin-bottom:4px]"} [&_[data-slot=message-avatar]]:[user-select:none] [&[data-selected=true]]:[background:#eaf2ff66] [&[data-flash=true]]:[background:#fef3c7] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-whisper=true]:not([data-failed=true])_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#d0d3d6] [&[data-whisper=true][data-failed=true]_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#f59e0b] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[border-radius:8px] [&[data-whisper=true][data-role=assistant]_[data-slot=message-block]:not([data-link-only])]:[background:#f8f9fb] [&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[background:#f2f3f5] [&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[border-radius:8px] [&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[border-color:transparent] [&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[background:#d6e9ff] [&[data-role=user][data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[background:#eef6ff]`}
     >
       {props.selectionMode ? (
       <div
         data-slot="message-select"
-        className={"[display:flex] [height:34px] [align-items:center] [justify-content:center]"}
+        className={"[user-select:none] [display:flex] [height:34px] [align-items:center] [justify-content:center]"}
       >
         {!isRemoved ? (
           <label className={"[display:grid] [width:16px] [height:16px] [place-items:center] [cursor:pointer]"}>
@@ -1248,18 +1381,27 @@ function computeMessageMoreMenuPosition(anchorRect: DOMRect, menuHeight: number)
   return { top, left, transform, maxMenuHeight };
 }
 
+const MESSAGE_ACTION_BAR_BUTTON_CLASS =
+  "group/icon [position:relative] [display:inline-grid] [width:24px] [height:24px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000008]";
+
+const MESSAGE_ACTION_BAR_TOOLTIP_CLASS =
+  "[position:absolute] [left:50%] [bottom:calc(100%+5px)] [z-index:30] [transform:translateX(-50%)] [border-radius:5px] [padding:3px_6px] [color:#ffffff] [background:#1f2329] [font-size:11px] [font-weight:500] [line-height:16px] [white-space:nowrap] [pointer-events:none] [opacity:0] [transition:opacity_0.12s_ease] group-hover/icon:[opacity:1] group-focus-visible/icon:[opacity:1]";
+
 function MessageActionBar(props: {
   visible: boolean;
   menuOpen: boolean;
   position: { top: number; left: number } | null;
   onReply: () => void;
   onCopy: (position: CopyTipPosition) => void;
+  agentForwardTargets: AgentForwardTarget[];
+  onForwardToAgent: (provider: TuttiAgentGuiProvider) => void | Promise<void>;
   onOpenMenu: (anchor: HTMLElement) => void;
+  onCloseMenu: () => void;
 }) {
   return (
     <div
       data-slot="message-actions"
-      className={`[position:absolute] [z-index:30] [display:flex] [align-items:center] [gap:2px] [overflow:visible] [border:1px_solid_var(--border)] [border-radius:4px] [padding:3px] [background:#fffffff2] [box-shadow:0_8px_24px_rgb(0_0_0_/_10%)] [transition:opacity_0.12s_ease] before:[content:''] before:[position:absolute] before:[top:0] before:[right:100%] before:[width:4px] before:[height:100%] before:[pointer-events:auto] ${props.visible && props.position ? "[opacity:1] [pointer-events:auto]" : "[opacity:0] [pointer-events:none]"} ${props.menuOpen ? "![opacity:1] ![pointer-events:auto]" : ""}`}
+      className={`[user-select:none] [position:absolute] [z-index:30] [display:flex] [align-items:center] [gap:1px] [overflow:visible] [border:1px_solid_var(--border)] [border-radius:4px] [padding:2px] [background:#fffffff2] [box-shadow:0_8px_24px_rgb(0_0_0_/_10%)] [transition:opacity_0.12s_ease] before:[content:''] before:[position:absolute] before:[top:0] before:[right:100%] before:[width:4px] before:[height:100%] before:[pointer-events:auto] ${props.visible && props.position ? "[opacity:1] [pointer-events:auto]" : "[opacity:0] [pointer-events:none]"} ${props.menuOpen ? "![opacity:1] ![pointer-events:auto]" : ""}`}
       style={{
         ...(props.position
           ? { top: props.position.top, left: props.position.left, right: "auto", transform: "none" }
@@ -1271,17 +1413,98 @@ function MessageActionBar(props: {
       onMouseLeave={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <IconAction title={t("common.reply")} onClick={props.onReply}><Reply size={14} /></IconAction>
-      <IconAction title={t("common.copy")} onClick={(event) => props.onCopy({ x: event.clientX, y: event.clientY })}><Copy size={14} /></IconAction>
+      <IconAction title={t("common.reply")} onClick={() => {
+        props.onCloseMenu();
+        props.onReply();
+      }}><Reply size={13} /></IconAction>
+      <IconAction title={t("common.copy")} onClick={(event) => {
+        props.onCloseMenu();
+        props.onCopy({ x: event.clientX, y: event.clientY });
+      }}><Copy size={13} /></IconAction>
+      <ForwardToAgentAction
+        targets={props.agentForwardTargets}
+        onForward={(provider) => void props.onForwardToAgent(provider)}
+        active={Boolean((props.visible || props.menuOpen) && props.position)}
+        moreMenuOpen={props.menuOpen}
+        onCloseMenu={props.onCloseMenu}
+      />
       <IconAction
         title={t("common.more")}
         onClick={(event) => {
           const anchor = event.currentTarget.closest('[data-slot="message-actions"]');
-          if (anchor instanceof HTMLElement) props.onOpenMenu(anchor);
+          if (!(anchor instanceof HTMLElement)) return;
+          if (props.menuOpen) {
+            props.onCloseMenu();
+            return;
+          }
+          props.onOpenMenu(anchor);
         }}
       >
-        <MoreHorizontal size={14} />
+        <MoreHorizontal size={13} />
       </IconAction>
+    </div>
+  );
+}
+
+function ForwardToAgentAction(props: {
+  targets: AgentForwardTarget[];
+  onForward: (provider: TuttiAgentGuiProvider) => void;
+  active: boolean;
+  moreMenuOpen: boolean;
+  onCloseMenu: () => void;
+}) {
+  const { closeMenu, open, toggleMenu } = useForwardSubmenuHover();
+
+  useEffect(() => {
+    if (!props.active) closeMenu();
+  }, [closeMenu, props.active]);
+
+  useEffect(() => {
+    if (props.moreMenuOpen) closeMenu();
+  }, [closeMenu, props.moreMenuOpen]);
+
+  return (
+    <div
+      className={"[position:relative] [display:inline-grid]"}
+    >
+      <button
+        type="button"
+        className={MESSAGE_ACTION_BAR_BUTTON_CLASS}
+        aria-label={t("messageActions.forwardTo")}
+        aria-expanded={open}
+        onClick={() => {
+          props.onCloseMenu();
+          toggleMenu();
+        }}
+      >
+        <SendHorizontal
+          size={13}
+          className={"[transition:transform_0.14s_ease]"}
+          style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
+        />
+        <span
+          role="tooltip"
+          className={`${MESSAGE_ACTION_BAR_TOOLTIP_CLASS} ${open ? "" : "group-hover/icon:[opacity:1]"}`}
+        >
+          {t("messageActions.forwardTo")}
+          <span
+            aria-hidden
+            className={"[position:absolute] [left:50%] [top:100%] [transform:translateX(-50%)] [width:0] [height:0] [border-left:5px_solid_transparent] [border-right:5px_solid_transparent] [border-top:5px_solid_#1f2329]"}
+          />
+        </span>
+      </button>
+      {open ? (
+        <div
+          className={"[position:absolute] [left:50%] [top:100%] [z-index:40] [transform:translateX(-50%)] before:[content:''] before:[position:absolute] before:[bottom:100%] before:[left:0] before:[right:0] before:[height:8px]"}
+        >
+          <AgentForwardSubmenu
+            variant="inline"
+            attach="below"
+            targets={props.targets}
+            onForward={props.onForward}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1293,17 +1516,20 @@ function MessageMoreMenu(props: {
   onContinue: () => void;
   onSummarize: () => void;
   onViewThinking: () => void;
-  onCopy: (input: CopyMessageInput) => void;
+  agentForwardTargets: AgentForwardTarget[];
+  onForwardToAgent: (provider: TuttiAgentGuiProvider) => void | Promise<void>;
   onCopyLink: (position: CopyTipPosition) => void;
   onEdit: () => void;
   onDelete: () => Promise<unknown>;
   onRecall: () => Promise<unknown>;
   onSelect: () => void;
 }) {
+  const invokeCopy = useContext(MessageBodyCopyContext);
   const canRecallMessage = isLocalUserMessage(props.message);
   const isAssistant = props.message.role === "assistant";
   const isRemoved = isRemovedMessage(props.message);
   const menuRef = useRef<HTMLDivElement>(null);
+  const baseMenuWidthRef = useRef<number | null>(null);
 
   const run = async (action: () => void | Promise<unknown>) => {
     await action();
@@ -1327,6 +1553,12 @@ function MessageMoreMenu(props: {
     menu.style.top = "0px";
     menu.style.transform = "none";
     menu.style.maxHeight = `${maxMenuHeight}px`;
+    if (baseMenuWidthRef.current === null) {
+      baseMenuWidthRef.current = Math.max(menu.offsetWidth, MESSAGE_MORE_MENU_MIN_WIDTH);
+    }
+    menu.style.width = `${baseMenuWidthRef.current}px`;
+    menu.style.maxWidth = `${baseMenuWidthRef.current}px`;
+    menu.style.overflowX = "hidden";
     const menuHeight = menu.offsetHeight || menu.scrollHeight || 280;
     const position = computeMessageMoreMenuPosition(anchorRect, menuHeight);
 
@@ -1341,6 +1573,7 @@ function MessageMoreMenu(props: {
   }, []);
 
   useLayoutEffect(() => {
+    baseMenuWidthRef.current = null;
     applyMenuPosition();
   }, [applyMenuPosition, props.message.id, isAssistant]);
 
@@ -1358,7 +1591,7 @@ function MessageMoreMenu(props: {
     <div
       ref={menuRef}
       data-slot="message-more-menu"
-      className={"[display:grid] [min-width:178px] [border:1px_solid_var(--border)] [border-radius:4px] [padding:6px] [background:#ffffff] [box-shadow:0_18px_46px_rgb(0_0_0_/_14%)]"}
+      className={"[user-select:none] [display:grid] [min-width:178px] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:4px] [padding:6px] [background:#ffffff] [box-shadow:0_18px_46px_rgb(0_0_0_/_14%)]"}
       style={{
         position: "fixed",
         top: -9999,
@@ -1369,11 +1602,21 @@ function MessageMoreMenu(props: {
       role="menu"
       onPointerDown={(event) => event.stopPropagation()}
     >
+      {!isRemoved ? (
+        <ForwardToAgentMenuItem
+          targets={props.agentForwardTargets}
+          onForward={(provider) => void run(() => props.onForwardToAgent(provider))}
+          onLayoutChange={applyMenuPosition}
+        />
+      ) : null}
       {!isRemoved ? <MenuButton icon={<CheckSquare size={14} />} label={t("messageActions.select")} onClick={() => void run(props.onSelect)} /> : null}
       {isAssistant ? <MenuButton icon={<RotateCcw size={14} />} label={t("messageActions.continue")} onClick={() => void run(props.onContinue)} /> : null}
       <MenuButton icon={<BrainCircuit size={14} />} label={t("messageActions.summarize")} onClick={() => void run(props.onSummarize)} />
       {isAssistant ? <MenuButton icon={<BrainCircuit size={14} />} label={t("messageActions.viewThinking")} onClick={() => void run(props.onViewThinking)} /> : null}
-      {!isRemoved ? <MenuButton icon={<Copy size={14} />} label={t("common.copy")} onClick={(event) => void run(() => props.onCopy({ position: { x: event.clientX, y: event.clientY } }))} /> : null}
+      {!isRemoved ? <MenuButton icon={<Copy size={14} />} label={t("common.copy")} onClick={(event) => void run(() => {
+        if (!invokeCopy) return;
+        invokeCopy({ position: { x: event.clientX, y: event.clientY }, menuCopy: true });
+      })} /> : null}
       <MenuButton icon={<Copy size={14} />} label={t("messageActions.copyLink")} onClick={(event) => void run(() => props.onCopyLink({ x: event.clientX, y: event.clientY }))} />
       {canRecallMessage ? <MenuButton icon={<Edit3 size={14} />} label={t("messageActions.editResend")} onClick={() => void run(props.onEdit)} /> : null}
       {canRecallMessage && !props.selectionMode ? <MenuButton icon={<RotateCcw size={14} />} label={t("messageActions.recall")} danger onClick={() => void run(props.onRecall)} /> : null}
@@ -1383,29 +1626,309 @@ function MessageMoreMenu(props: {
   );
 }
 
+const AGENT_FORWARD_SUBMENU_WIDTH_PX = 230;
+const AGENT_FORWARD_SUBMENU_Z_INDEX = MESSAGE_MORE_MENU_Z_INDEX + 1;
+
+function useForwardSubmenuHover() {
+  const anchorRef = useRef<HTMLDivElement | null>(null);
+  const closeTimerRef = useRef<number | null>(null);
+  const [open, setOpen] = useState(false);
+
+  const clearCloseTimer = useCallback(() => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }, []);
+  const openMenu = useCallback(() => {
+    clearCloseTimer();
+    setOpen(true);
+  }, [clearCloseTimer]);
+  const toggleMenu = useCallback(() => {
+    clearCloseTimer();
+    setOpen((current) => !current);
+  }, [clearCloseTimer]);
+  const closeMenu = useCallback(() => {
+    clearCloseTimer();
+    setOpen(false);
+  }, [clearCloseTimer]);
+  const scheduleClose = useCallback(() => {
+    clearCloseTimer();
+    closeTimerRef.current = window.setTimeout(() => setOpen(false), 120);
+  }, [clearCloseTimer]);
+
+  useEffect(() => () => clearCloseTimer(), [clearCloseTimer]);
+
+  return { anchorRef, closeMenu, open, openMenu, scheduleClose, toggleMenu };
+}
+
+function measureAgentForwardSubmenuStyle(
+  anchor: HTMLElement,
+  placement: "above" | "right",
+): CSSProperties {
+  const rect = anchor.getBoundingClientRect();
+  const viewportPadding = 12;
+  const menuWidth = AGENT_FORWARD_SUBMENU_WIDTH_PX;
+  const estimatedHeight = 120;
+
+  if (placement === "above") {
+    return {
+      top: Math.max(viewportPadding, rect.top - 8),
+      left: Math.min(Math.max(viewportPadding, rect.left), window.innerWidth - menuWidth - viewportPadding),
+      transform: "translateY(-100%)",
+    };
+  }
+
+  let left = rect.right + 6;
+  if (left + menuWidth > window.innerWidth - viewportPadding) {
+    left = Math.max(viewportPadding, rect.left - menuWidth - 6);
+  }
+  let top = rect.top;
+  if (top + estimatedHeight > window.innerHeight - viewportPadding) {
+    top = Math.max(viewportPadding, window.innerHeight - viewportPadding - estimatedHeight);
+  }
+  return { top, left };
+}
+
+function ForwardToAgentMenuItem(props: {
+  targets: AgentForwardTarget[];
+  onForward: (provider: TuttiAgentGuiProvider) => void;
+  onLayoutChange?: () => void;
+}) {
+  const { open, toggleMenu } = useForwardSubmenuHover();
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    props.onLayoutChange?.();
+  }, [open, props.onLayoutChange]);
+
+  return (
+    <div
+      className={"[min-width:0] [overflow:hidden]"}
+    >
+      <button
+        type="button"
+        className={`[display:grid] [width:100%] [min-width:0] [height:34px] [grid-template-columns:14px_minmax(0,_1fr)_14px] [align-items:center] [gap:8px] [border:0] [padding:0_9px] [color:var(--text)] [font-size:12px] [font-weight:650] [text-align:left] [&:hover]:[background:#00000008] ${open ? "[border-radius:8px_8px_0_0] [background:#00000006]" : "[border-radius:8px] [background:transparent]"}`}
+        role="menuitem"
+        aria-expanded={open}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          toggleMenu();
+        }}
+      >
+        <SendHorizontal size={14} />
+        <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{t("messageActions.forwardTo")}</span>
+        {open ? <ChevronDown size={14} className={"[color:var(--muted)]"} /> : <ChevronRight size={14} className={"[color:var(--muted)]"} />}
+      </button>
+      {open ? (
+        <AgentForwardSubmenu
+          variant="inline"
+          targets={props.targets}
+          onForward={props.onForward}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ForwardToAgentToolbarItem(props: {
+  targets: AgentForwardTarget[];
+  onForward: (provider: TuttiAgentGuiProvider) => void;
+}) {
+  const { anchorRef, open, toggleMenu } = useForwardSubmenuHover();
+  const [menuStyle, setMenuStyle] = useState<CSSProperties>({ visibility: "hidden" });
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const anchor = anchorRef.current;
+    if (!anchor) return;
+    setMenuStyle(measureAgentForwardSubmenuStyle(anchor, "above"));
+  }, [anchorRef, open]);
+
+  return (
+    <div
+      ref={anchorRef}
+      className={"[position:relative] [flex-shrink:0]"}
+    >
+      <ToolbarButton
+        icon={(
+          <SendHorizontal
+            size={14}
+            className={"[transition:transform_0.14s_ease]"}
+            style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
+          />
+        )}
+        label={t("messageActions.forwardTo")}
+        onClick={toggleMenu}
+      />
+      {open ? createPortal(
+        <AgentForwardSubmenu
+          targets={props.targets}
+          onForward={props.onForward}
+          className={"[position:fixed] [display:grid]"}
+          style={{ ...menuStyle, zIndex: AGENT_FORWARD_SUBMENU_Z_INDEX }}
+        />,
+        document.body,
+      ) : null}
+    </div>
+  );
+}
+
+function AgentForwardSubmenu(props: {
+  targets: AgentForwardTarget[];
+  onForward: (provider: TuttiAgentGuiProvider) => void;
+  variant?: "floating" | "inline";
+  attach?: "below" | "inline";
+  className?: string;
+  style?: CSSProperties;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
+}) {
+  const isInline = props.variant === "inline";
+  const attachBelow = props.attach === "below";
+  const shellClass = isInline
+    ? attachBelow
+      ? "[display:grid] [gap:0] [min-width:180px] [width:max-content] [overflow:hidden] [padding:2px] [border:1px_solid_var(--border)] [border-radius:8px] [background:#ffffff] [box-shadow:0_12px_32px_rgb(0_0_0_/_12%)]"
+      : "[display:grid] [gap:0] [min-width:0] [overflow:hidden] [padding:0_2px_2px] [border:0] [border-radius:0_0_8px_8px] [background:#00000006]"
+    : "[min-width:230px] [gap:0] [padding:3px] [border:1px_solid_var(--border)] [border-radius:10px] [background:#ffffff] [box-shadow:0_18px_46px_rgb(0_0_0_/_14%)] [display:grid]";
+  const inlineItemClass = (index: number) => [
+    "[display:flex] [width:100%] [min-width:0] [height:34px] [align-items:center] [gap:8px]",
+    "[border:0] [border-radius:6px] [padding:0_8px] [color:var(--text)] [background:transparent]",
+    "[font-size:12px] [font-weight:650] [text-align:left]",
+    "hover:[background:#00000008] disabled:[opacity:0.45] disabled:[cursor:not-allowed]",
+    index > 0 ? "[border-top:1px_solid_rgb(0_0_0_/_6%)]" : "",
+  ].join(" ");
+  const floatingItemClass = (index: number) => [
+    "[display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:9px]",
+    "[min-height:40px] [border:0] [border-radius:9px] [padding:5px_8px] [color:var(--text)] [background:transparent]",
+    "[text-align:left] hover:[background:#f3f6fa] disabled:[opacity:0.45] disabled:[cursor:not-allowed]",
+    index > 0 ? "[border-top:1px_solid_#cfd7e3]" : "",
+  ].join(" ");
+  return (
+    <div
+      className={`${shellClass} ${props.className ?? ""}`}
+      style={props.style}
+      role="menu"
+      onPointerDown={(event) => event.stopPropagation()}
+      onMouseEnter={props.onMouseEnter}
+      onMouseLeave={props.onMouseLeave}
+    >
+      {!isInline ? (
+        <div className={"[padding:6px_8px_5px] [color:var(--muted)] [font-size:11px] [font-weight:650] [line-height:16px]"}>
+          {t("messageActions.tuttiAgent")}
+        </div>
+      ) : null}
+      {props.targets.length ? props.targets.map((target, index) => (
+        <button
+          key={target.provider}
+          type="button"
+          className={isInline ? inlineItemClass(index) : floatingItemClass(index)}
+          role="menuitem"
+          disabled={!target.available}
+          onClick={() => props.onForward(target.provider)}
+        >
+          <AgentForwardAvatar target={target} compact={isInline} />
+          {isInline ? (
+            <span className={"[min-width:0] [flex:1_1_auto] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>
+              {target.label}
+            </span>
+          ) : (
+            <span className={"[display:grid] [min-width:0] [gap:1px]"}>
+              <strong className={"[overflow:hidden] [font-size:12px] [font-weight:650] [line-height:16px] [text-overflow:ellipsis] [white-space:nowrap]"}>
+                {target.label}
+              </strong>
+              <span className={"[overflow:hidden] [color:var(--muted)] [font-size:11px] [line-height:14px] [text-overflow:ellipsis] [white-space:nowrap]"}>
+                {target.subtitle}
+              </span>
+            </span>
+          )}
+        </button>
+      )) : (
+        <p className={`[margin:0] [color:var(--muted)] [font-size:12px] [line-height:18px] ${isInline ? "[padding:0_9px] [height:34px] [display:flex] [align-items:center]" : "[padding:8px]"}`}>
+          {t("messageActions.noTuttiAgentsAvailable")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function AgentForwardAvatar(props: { target: AgentForwardTarget; compact?: boolean }) {
+  const size = props.compact ? 18 : 32;
+  const radius = props.compact ? 6 : 10;
+  const style = getRuntimeProviderAvatarStyle(props.target.runtimeProvider);
+  if (style?.iconUrl) {
+    return (
+      <span
+        className={"[display:grid] [overflow:hidden] [place-items:center] [flex-shrink:0] [background:#f3f4f6]"}
+        style={{ width: size, height: size, borderRadius: radius }}
+      >
+        <img src={style.iconUrl} alt="" className={"[object-fit:cover]"} style={{ width: size, height: size }} />
+      </span>
+    );
+  }
+  return (
+    <span
+      className={"[display:grid] [place-items:center] [flex-shrink:0] [font-weight:750]"}
+      style={{
+        width: size,
+        height: size,
+        borderRadius: radius,
+        fontSize: props.compact ? 9 : 11,
+        background: style?.background ?? "#374151",
+        color: style?.color ?? "#ffffff",
+      }}
+    >
+      {style?.label ?? "AI"}
+    </span>
+  );
+}
+
 function BulkMessageToolbar(props: {
   count: number;
   onCopy: (input: CopyMessageInput) => void;
   onCopyMessageLink: (position: CopyTipPosition) => void;
   onQuote: () => void;
+  onForwardToAgent: (provider: TuttiAgentGuiProvider) => void;
+  agentForwardTargets: AgentForwardTarget[];
   onSummarize: () => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
   return (
     <div
-      className={"[position:absolute] [inset:0] [z-index:20] [display:flex] [align-items:center] [gap:8px] [overflow-x:auto] [border-top:1px_solid_var(--border)] [padding:8px_16px] [background:var(--panel)] [box-shadow:0_-8px_24px_rgb(0_0_0_/_6%)] max-[760px]:[padding-inline:12px]"}
+      className={"[position:absolute] [inset:0] [z-index:20] [display:flex] [align-items:center] [padding:10px_16px] [background:linear-gradient(180deg,_rgb(248_250_252_/_86%),_rgb(255_255_255_/_96%))] [backdrop-filter:blur(18px)] [border-top:1px_solid_rgb(226_232_240_/_82%)] [box-shadow:0_-18px_50px_rgb(15_23_42_/_10%)] max-[760px]:[padding:8px_10px]"}
       role="toolbar"
       aria-label={t("messageActions.bulkToolbar")}
     >
-      <span className={"[flex-shrink:0] [padding:0_4px] [color:var(--muted)] [font-size:13px] [font-weight:700]"}>{t("messageActions.selectedCount", { count: props.count })}</span>
-      <ToolbarButton label={t("common.copy")} onClick={(event) => props.onCopy({ position: { x: event.clientX, y: event.clientY } })} />
-      <ToolbarButton label={t("messageActions.copyLink")} onClick={(event) => props.onCopyMessageLink({ x: event.clientX, y: event.clientY })} />
-      <ToolbarButton label={t("messageActions.quote")} onClick={props.onQuote} />
-      <ToolbarButton label={t("messageActions.summarize")} onClick={props.onSummarize} />
-      <ToolbarButton label={t("common.delete")} danger onClick={props.onDelete} />
-      <div className={"[flex:1_1_auto]"} />
-      <IconAction title={t("messageActions.exitSelection")} onClick={() => props.onClose()}><X size={14} /></IconAction>
+      <div className={"[display:flex] [width:100%] [min-width:0] [align-items:center] [gap:10px] [overflow-x:auto] [border:1px_solid_rgb(226_232_240_/_92%)] [border-radius:22px] [padding:8px_10px_8px_12px] [background:rgb(255_255_255_/_86%)] [box-shadow:0_18px_54px_rgb(15_23_42_/_13%),_inset_0_1px_0_rgb(255_255_255_/_92%)] max-[760px]:[gap:7px] max-[760px]:[border-radius:18px] max-[760px]:[padding:7px]"}>
+        <span className={"[display:inline-flex] [flex-shrink:0] [align-items:center] [gap:7px] [border:1px_solid_rgb(37_99_235_/_14%)] [border-radius:999px] [padding:7px_11px] [color:#1d4ed8] [background:#eff6ff] [font-size:13px] [font-weight:800] [letter-spacing:-0.01em] [white-space:nowrap]"}>
+          <CheckSquare size={15} strokeWidth={2.2} />
+          {t("messageActions.selectedCount", { count: props.count })}
+        </span>
+        <span className={"[display:flex] [flex-shrink:0] [align-items:center] [gap:6px] [border-left:1px_solid_rgb(226_232_240)] [padding-left:10px] max-[760px]:[padding-left:7px]"}>
+          <ToolbarButton icon={<Copy size={14} />} label={t("common.copy")} onClick={(event) => props.onCopy({ position: { x: event.clientX, y: event.clientY } })} />
+          <ToolbarButton icon={<FileText size={14} />} label={t("messageActions.copyLink")} onClick={(event) => props.onCopyMessageLink({ x: event.clientX, y: event.clientY })} />
+          <ToolbarButton icon={<Reply size={14} />} label={t("messageActions.quote")} onClick={props.onQuote} />
+        </span>
+        <span className={"[display:flex] [flex-shrink:0] [align-items:center] [gap:6px] [border-left:1px_solid_rgb(226_232_240)] [padding-left:10px] max-[760px]:[padding-left:7px]"}>
+          <ForwardToAgentToolbarItem targets={props.agentForwardTargets} onForward={props.onForwardToAgent} />
+          <ToolbarButton icon={<BrainCircuit size={14} />} label={t("messageActions.summarize")} onClick={props.onSummarize} />
+        </span>
+        <span className={"[display:flex] [flex-shrink:0] [align-items:center] [gap:6px] [border-left:1px_solid_rgb(226_232_240)] [padding-left:10px] max-[760px]:[padding-left:7px]"}>
+          <ToolbarButton icon={<Trash2 size={14} />} label={t("common.delete")} danger onClick={props.onDelete} />
+        </span>
+        <div className={"[flex:1_0_10px]"} />
+        <button
+          type="button"
+          className={"[display:grid] [flex:0_0_auto] [width:34px] [height:34px] [place-items:center] [border:1px_solid_rgb(226_232_240)] [border-radius:999px] [color:#64748b] [background:#ffffff] [box-shadow:0_8px_20px_rgb(15_23_42_/_8%)] [transition:transform_0.12s_ease,_background_0.12s_ease,_color_0.12s_ease] hover:[transform:translateY(-1px)] hover:[color:#0f172a] hover:[background:#f8fafc] focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:2px]"}
+          aria-label={t("messageActions.exitSelection")}
+          title={t("messageActions.exitSelection")}
+          onClick={props.onClose}
+        >
+          <X size={15} />
+        </button>
+      </div>
     </div>
   );
 }
@@ -1701,14 +2224,14 @@ function IconAction(props: {
   return (
     <button
       type="button"
-      className={"group/icon [position:relative] [display:inline-grid] [width:28px] [height:28px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000008]"}
+      className={MESSAGE_ACTION_BAR_BUTTON_CLASS}
       aria-label={props.title}
       onClick={props.onClick}
     >
       {props.children}
       <span
         role="tooltip"
-        className={"[position:absolute] [left:50%] [bottom:calc(100%+6px)] [z-index:30] [transform:translateX(-50%)] [border-radius:6px] [padding:4px_8px] [color:#ffffff] [background:#1f2329] [font-size:12px] [font-weight:500] [line-height:18px] [white-space:nowrap] [pointer-events:none] [opacity:0] [transition:opacity_0.12s_ease] group-hover/icon:[opacity:1] group-focus-visible/icon:[opacity:1]"}
+        className={MESSAGE_ACTION_BAR_TOOLTIP_CLASS}
       >
         {props.title}
         <span
@@ -1722,16 +2245,26 @@ function IconAction(props: {
 
 function MenuButton(props: { icon: ReactNode; label: string; danger?: boolean; onClick: (event: MouseEvent<HTMLButtonElement>) => void }) {
   return (
-    <button type="button" className={`[display:flex] [height:34px] [align-items:center] [gap:8px] [border:0] [border-radius:10px] [padding:0_9px] [background:transparent] [font-size:12px] [font-weight:650] [text-align:left] [&:hover]:[background:#00000008] ${props.danger ? "[color:var(--danger)]" : "[color:var(--text)]"}`} role="menuitem" onClick={props.onClick}>
+    <button type="button" className={`[display:flex] [width:100%] [min-width:0] [height:34px] [align-items:center] [gap:8px] [border:0] [border-radius:10px] [padding:0_9px] [background:transparent] [font-size:12px] [font-weight:650] [text-align:left] [&:hover]:[background:#00000008] ${props.danger ? "[color:var(--danger)]" : "[color:var(--text)]"}`} role="menuitem" onClick={props.onClick}>
       {props.icon}
-      <span>{props.label}</span>
+      <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{props.label}</span>
     </button>
   );
 }
 
-function ToolbarButton(props: { label: string; danger?: boolean; onClick: (event: MouseEvent<HTMLButtonElement>) => void }) {
+function ToolbarButton(props: {
+  label: string;
+  icon?: ReactNode;
+  danger?: boolean;
+  onClick: (event: MouseEvent<HTMLButtonElement>) => void;
+}) {
   return (
-    <button type="button" className={`[height:30px] [border:0] [border-radius:999px] [padding:0_10px] [font-size:12px] [font-weight:750] [&:hover]:[background:#00000010] ${props.danger ? "[color:var(--danger)] [background:#dc262612]" : "[color:var(--text)] [background:#00000008]"}`} onClick={props.onClick}>
+    <button
+      type="button"
+      className={`[display:inline-flex] [height:34px] [align-items:center] [gap:6px] [border:1px_solid_transparent] [border-radius:999px] [padding:0_12px] [font-size:12px] [font-weight:780] [letter-spacing:-0.01em] [white-space:nowrap] [transition:transform_0.12s_ease,_box-shadow_0.12s_ease,_background_0.12s_ease,_border-color_0.12s_ease] hover:[transform:translateY(-1px)] focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:2px] ${props.danger ? "[border-color:#fecdd3] [color:#be123c] [background:#fff1f2] hover:[background:#ffe4e6] hover:[box-shadow:0_8px_20px_rgb(190_18_60_/_14%)]" : "[color:#111827] [background:#f8fafc] hover:[border-color:#dbe3ef] hover:[background:#ffffff] hover:[box-shadow:0_8px_20px_rgb(15_23_42_/_10%)]"}`}
+      onClick={props.onClick}
+    >
+      {props.icon ? <span className={"[display:grid] [place-items:center] [color:currentColor]"}>{props.icon}</span> : null}
       {props.label}
     </button>
   );
@@ -1897,7 +2430,7 @@ function MessageHoverTime(props: { createdAt: string; position: { top: number; l
     <time
       dateTime={props.createdAt}
       data-slot="message-hover-time"
-      className={"[position:absolute] [z-index:2] [white-space:nowrap] [color:var(--muted)] [font-size:12px] [line-height:20px] [opacity:0] [pointer-events:none] [transition:opacity_0.12s_ease] group-hover/message:opacity-100 group-focus-within/message:opacity-100"}
+      className={"[user-select:none] [position:absolute] [z-index:2] [white-space:nowrap] [color:var(--muted)] [font-size:12px] [line-height:20px] [opacity:0] [pointer-events:none] [transition:opacity_0.12s_ease] group-hover/message:opacity-100 group-focus-within/message:opacity-100"}
       style={
         props.position
           ? { top: props.position.top, left: props.position.left, transform: "translate(-100%, -50%)" }
@@ -1918,25 +2451,77 @@ function MessageBodyShell(props: {
   createdAt?: string;
   onReply: () => void;
   onCopy: (input: CopyMessageInput) => void;
+  agentForwardTargets: AgentForwardTarget[];
+  onForwardToAgent: (provider: TuttiAgentGuiProvider) => void | Promise<void>;
   onOpenMenu: (anchor: HTMLElement) => void;
+  onCloseMenu: () => void;
   onShowActions: () => void;
   onHideActions: () => void;
   children: ReactNode;
 }) {
   const [actionAnchorEl, setActionAnchorEl] = useState<HTMLElement | null>(null);
   const actionAnchorElRef = useRef<HTMLElement | null>(null);
+  const lastActionAnchorRef = useRef<HTMLElement | null>(null);
+  const copyAnchorFromLayoutRef = useRef<HTMLElement | null>(null);
   const [bubbleAnchor, setBubbleAnchor] = useState<MessageBubbleAnchor | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
 
   const rememberActionAnchor = useCallback((block: HTMLElement | null) => {
     actionAnchorElRef.current = block;
+    if (block) lastActionAnchorRef.current = block;
     setActionAnchorEl(block);
   }, []);
+
+  const syncContextCopyArtifactId = useCallback((block: HTMLElement | null) => {
+    const body = bodyRef.current;
+    if (!body) return;
+    if (block?.dataset.slot === "artifact-block") {
+      const artifactId = block.getAttribute("data-artifact-id")?.trim();
+      if (artifactId) {
+        body.dataset.contextCopyArtifactId = artifactId;
+        return;
+      }
+    }
+    delete body.dataset.contextCopyArtifactId;
+  }, []);
+
+  const resolveCopyAnchor = useCallback((input?: Pick<CopyMessageInput, "menuCopy">): HTMLElement | null => {
+    const body = bodyRef.current;
+    const layoutAnchor = copyAnchorFromLayoutRef.current;
+    if (layoutAnchor instanceof HTMLElement) {
+      if (layoutAnchor.dataset.slot === "artifact-block") return layoutAnchor;
+      if (!input?.menuCopy) return layoutAnchor;
+    }
+
+    const hoverAnchor = actionAnchorElRef.current ?? lastActionAnchorRef.current;
+    if (hoverAnchor) return hoverAnchor;
+
+    if (input?.menuCopy && body) {
+      const contextArtifactId = body.dataset.contextCopyArtifactId?.trim();
+      if (contextArtifactId) {
+        const contextBlock = body.querySelector(`[data-slot="artifact-block"][data-artifact-id="${contextArtifactId}"]`);
+        if (contextBlock instanceof HTMLElement) return contextBlock;
+      }
+    }
+
+    return body ? resolveDefaultMessageActionAnchor(body) : null;
+  }, []);
+
+  const invokeCopy = useCallback((input: CopyMessageInput) => {
+    props.onCopy({
+      ...input,
+      anchorEl: input.anchorEl ?? resolveCopyAnchor(input),
+    });
+  }, [props.onCopy, resolveCopyAnchor]);
 
   const updateBubbleAnchor = useCallback(() => {
     const body = bodyRef.current;
     if (!body) return;
-    setBubbleAnchor(measureMessageBubbleAnchor(body, actionAnchorElRef.current ?? actionAnchorEl));
+    const anchor = actionAnchorElRef.current
+      ?? actionAnchorEl
+      ?? resolveDefaultMessageActionAnchor(body);
+    copyAnchorFromLayoutRef.current = anchor instanceof HTMLElement ? anchor : null;
+    setBubbleAnchor(measureMessageBubbleAnchor(body, anchor));
   }, [actionAnchorEl]);
 
   const syncActionAnchorFromTarget = useCallback((target: EventTarget | null) => {
@@ -1944,13 +2529,18 @@ function MessageBodyShell(props: {
     if (!(block instanceof HTMLElement) || !bodyRef.current?.contains(block)) return;
     if (actionAnchorElRef.current === block) return;
     rememberActionAnchor(block);
-  }, [rememberActionAnchor]);
+    syncContextCopyArtifactId(block);
+  }, [rememberActionAnchor, syncContextCopyArtifactId]);
 
   const leaveMessageBody = useCallback((relatedTarget: EventTarget | null) => {
     if (relatedTarget instanceof Node) {
       if (bodyRef.current?.contains(relatedTarget)) return;
       const actionBar = bodyRef.current?.querySelector('[data-slot="message-actions"]');
       if (actionBar instanceof HTMLElement && actionBar.contains(relatedTarget)) return;
+      const moreMenu = document.querySelector(MESSAGE_MORE_MENU_SELECTOR);
+      if (moreMenu instanceof HTMLElement && moreMenu.contains(relatedTarget)) return;
+    } else if (relatedTarget === null) {
+      return;
     }
     rememberActionAnchor(null);
     props.onHideActions();
@@ -1984,10 +2574,11 @@ function MessageBodyShell(props: {
   }, [updateBubbleAnchor, props.children, props.disabled, actionAnchorEl]);
 
   return (
+    <MessageBodyCopyContext.Provider value={invokeCopy}>
     <div
       ref={bodyRef}
       data-slot="message-body"
-      className={"group/body [position:relative] [min-width:0] [max-width:min(760px,_70%)] [overflow:visible] max-[1080px]:[max-width:min(720px,_86%)] max-[760px]:[max-width:88%]"}
+      className={"group/body [user-select:none] [position:relative] [min-width:0] [max-width:min(760px,_70%)] [overflow:visible] max-[1080px]:[max-width:min(720px,_86%)] max-[760px]:[max-width:88%]"}
       onMouseEnter={props.onShowActions}
       onMouseLeave={(event) => leaveMessageBody(event.relatedTarget)}
       onMouseMove={(event) => syncActionAnchorFromTarget(event.target)}
@@ -2001,6 +2592,7 @@ function MessageBodyShell(props: {
         event.preventDefault();
         event.stopPropagation();
         syncActionAnchorFromTarget(event.target);
+        syncContextCopyArtifactId(actionAnchorElRef.current ?? lastActionAnchorRef.current);
         props.onShowActions();
         requestAnimationFrame(openMenuFromBody);
       }}
@@ -2011,8 +2603,11 @@ function MessageBodyShell(props: {
           menuOpen={props.menuOpen}
           position={actionBarPosition}
           onReply={props.onReply}
-          onCopy={(position) => props.onCopy({ position, anchorEl: actionAnchorElRef.current ?? actionAnchorEl })}
+          onCopy={(position) => invokeCopy({ position })}
+          agentForwardTargets={props.agentForwardTargets}
+          onForwardToAgent={props.onForwardToAgent}
           onOpenMenu={props.onOpenMenu}
+          onCloseMenu={props.onCloseMenu}
         />
       ) : null}
       {props.showHoverTime && props.createdAt && !props.selectionMode && !props.disabled ? (
@@ -2020,12 +2615,14 @@ function MessageBodyShell(props: {
       ) : null}
       {props.children}
     </div>
+    </MessageBodyCopyContext.Provider>
   );
 }
 
 function MessageBlockRenderer(props: {
   block: MessageBlock;
   artifacts: Artifact[];
+  allBlocks?: MessageBlock[];
   allMessages?: Message[];
   allParticipants?: Participant[];
   identities?: Identity[];
@@ -2037,6 +2634,7 @@ function MessageBlockRenderer(props: {
   onOpenMessageLink?: (messageId: string) => void;
   onOpenSummaryLink?: (taskId: string) => void;
   onEnsureSummaryTask?: (taskId: string) => Promise<BackgroundTask | null>;
+  embeddedLinkDepth?: number;
   quotedMessage?: Message | null;
   onOpenReferencedMessage?: (message: Message) => void;
   whisperFooter?: { label: string; variant: "user" | "agent" } | null;
@@ -2114,14 +2712,20 @@ function MessageBlockRenderer(props: {
     : workspaceLinkedContent;
   const messageLinks = extractMessageLinks(enrichedBodyContent);
   const summaryLinks = extractSummaryLinks(enrichedBodyContent);
+  const canRenderEmbeddedCards = (props.embeddedLinkDepth ?? 0) < 1;
   const bodyWithoutLinks = removeEmbeddedLinks(enrichedBodyContent).trim();
   const displayContent = bodyWithoutLinks || enrichedBodyContent;
   const collapsed = displayContent.length > COLLAPSED_MESSAGE_CHAR_LIMIT;
   const isLinkOnly =
-    (messageLinks.length > 0 || summaryLinks.length > 0)
+    canRenderEmbeddedCards
+    && (messageLinks.length > 0 || summaryLinks.length > 0)
     && !bodyWithoutLinks
     && !props.quotedMessage
     && !quotedContent;
+  const hiddenNestedLinkOnly =
+    !canRenderEmbeddedCards
+    && (messageLinks.length > 0 || summaryLinks.length > 0)
+    && !bodyWithoutLinks;
   const hasWhisperFooter = Boolean(props.whisperFooter) && !isLinkOnly;
   const whisperPlainText = hasWhisperFooter && Boolean(bodyWithoutLinks) && shouldRenderWhisperPlainText(bodyWithoutLinks);
   return blockShell(
@@ -2141,30 +2745,44 @@ function MessageBlockRenderer(props: {
       ) : quotedContent ? (
         <ReplyQuotePreview quotes={quotedContent.quotes} />
       ) : null}
-      {messageLinks.map((messageIdSegment) => (
-        <MessageLinkCard
-          key={`message-${messageIdSegment}`}
-          messageIdSegment={messageIdSegment}
-          messages={props.allMessages ?? []}
-          participants={props.allParticipants ?? []}
-          identities={props.identities ?? []}
-          userDisplayName={props.userProfile?.displayName}
-          conversations={props.conversations ?? []}
-          rooms={props.rooms ?? []}
-          onOpen={() => props.onOpenMessageLink?.(primaryMessageLinkId(messageIdSegment))}
-        />
-      ))}
-      {summaryLinks.map((taskId) => (
-        <SummaryLinkCard
-          key={`summary-${taskId}`}
-          taskId={taskId}
-          summaryTasks={props.summaryTasks ?? []}
-          conversations={props.conversations ?? []}
-          rooms={props.rooms ?? []}
-          onEnsureSummaryTask={props.onEnsureSummaryTask}
-          onOpen={() => props.onOpenSummaryLink?.(taskId)}
-        />
-      ))}
+      {canRenderEmbeddedCards ? (
+        <>
+          {messageLinks.map((messageIdSegment) => (
+            <MessageLinkCard
+              key={`message-${messageIdSegment}`}
+              messageIdSegment={messageIdSegment}
+              messages={props.allMessages ?? []}
+              blocks={props.allBlocks ?? []}
+              artifacts={props.artifacts}
+              participants={props.allParticipants ?? []}
+              identities={props.identities ?? []}
+              userProfile={props.userProfile}
+              conversations={props.conversations ?? []}
+              rooms={props.rooms ?? []}
+              summaryTasks={props.summaryTasks ?? []}
+              runtimeProfiles={props.runtimeProfiles}
+              depth={props.embeddedLinkDepth ?? 0}
+              onOpenArtifact={props.onOpenArtifact}
+              onOpenMessageLink={props.onOpenMessageLink}
+              onOpenSummaryLink={props.onOpenSummaryLink}
+              onEnsureSummaryTask={props.onEnsureSummaryTask}
+              onOpenAgentProfile={props.onOpenAgentProfile}
+              onOpen={() => props.onOpenMessageLink?.(primaryMessageLinkId(messageIdSegment))}
+            />
+          ))}
+          {summaryLinks.map((taskId) => (
+            <SummaryLinkCard
+              key={`summary-${taskId}`}
+              taskId={taskId}
+              summaryTasks={props.summaryTasks ?? []}
+              conversations={props.conversations ?? []}
+              rooms={props.rooms ?? []}
+              onEnsureSummaryTask={props.onEnsureSummaryTask}
+              onOpen={() => props.onOpenSummaryLink?.(taskId)}
+            />
+          ))}
+        </>
+      ) : null}
       {collapsed ? (
         <CollapsibleMessageContent
           content={displayContent}
@@ -2187,7 +2805,12 @@ function MessageBlockRenderer(props: {
           runtimeProfiles={props.runtimeProfiles}
           tightSpacing={hasWhisperFooter}
         />
-      ) : messageLinks.length || summaryLinks.length ? null : (
+      ) : canRenderEmbeddedCards && (messageLinks.length || summaryLinks.length) ? null : hiddenNestedLinkOnly ? (
+        <span className={"[display:inline-flex] [max-width:100%] [align-items:center] [gap:5px] [overflow:hidden] [color:#2563eb] [font-size:13px] [font-weight:650] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>
+          {messageLinks.length ? <TuttiMessageLinkIcon /> : <BrainCircuit size={13} />}
+          <span>{messageLinks.length ? t("composer.messageLink") : t("summary.title")}</span>
+        </span>
+      ) : (
         <MessageReferenceContent
           content={enrichedBodyContent || " "}
           mentions={mergedReferenceMentions}
@@ -2273,15 +2896,32 @@ function SummaryLinkCard(props: {
 function MessageLinkCard(props: {
   messageIdSegment: string;
   messages: Message[];
+  blocks: MessageBlock[];
+  artifacts: Artifact[];
   participants: Participant[];
   identities: Identity[];
-  userDisplayName?: string | null;
+  userProfile?: Pick<LocalUserProfile, "displayName">;
   conversations: Conversation[];
   rooms: Room[];
+  summaryTasks: BackgroundTask[];
+  runtimeProfiles?: RuntimeProfile[];
+  depth: number;
+  onOpenArtifact: (artifact: Artifact) => void;
+  onOpenMessageLink?: (messageId: string) => void;
+  onOpenSummaryLink?: (taskId: string) => void;
+  onEnsureSummaryTask?: (taskId: string) => Promise<BackgroundTask | null>;
+  onOpenAgentProfile?: (participant: Participant) => void;
   onOpen: () => void;
 }) {
   const messageId = primaryMessageLinkId(props.messageIdSegment);
   const message = props.messages.find((item) => item.id === messageId) ?? null;
+  const messageBlocks = message
+    ? props.blocks
+        .filter((block) => block.messageId === message.id && !isRuntimeEventBlock(block))
+        .sort(compareMessageBlocks)
+    : [];
+  const artifactBlocks = messageBlocks.filter((block) => block.type === "image" || block.type === "file");
+  const textBlocks = messageBlocks.filter((block) => block.type !== "image" && block.type !== "file");
   const participant = message?.senderParticipantId
     ? props.participants.find((item) => item.id === message.senderParticipantId) ?? null
     : null;
@@ -2292,27 +2932,139 @@ function MessageLinkCard(props: {
     props.messages,
     props.participants,
     props.identities,
-    props.userDisplayName,
+    props.userProfile?.displayName,
   );
   return (
-    <button
-      type="button"
+    <div
       className={embeddedLinkCardClassName}
-      onClick={props.onOpen}
+      role="group"
+      aria-label={linkLabel}
     >
-      <span className={"[display:flex] [align-items:center] [gap:5px] [color:#2563eb] [font-size:12px] [font-weight:700] [line-height:1.3]"}>
+      <button
+        type="button"
+        className={"[display:flex] [min-width:0] [align-items:center] [gap:5px] [border:0] [padding:0] [color:#2563eb] [background:transparent] [font-size:12px] [font-weight:700] [line-height:1.3] [text-align:left] [cursor:pointer] hover:[text-decoration:underline] focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:2px]"}
+        onClick={props.onOpen}
+      >
         <TuttiMessageLinkIcon />
-        <span>{linkLabel}</span>
-      </span>
-      <span className={"[display:block] [overflow:hidden] [color:var(--text)] [font-size:13px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>
-        {message ? compactInline(message.content || attachmentLabel()) : t("messageActions.messageNotInSnapshot")}
-      </span>
+        <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{linkLabel}</span>
+      </button>
+      <LinkedMessageCardBody
+        message={message}
+        textBlocks={textBlocks}
+        artifactBlocks={artifactBlocks}
+        messages={props.messages}
+        blocks={props.blocks}
+        artifacts={props.artifacts}
+        participants={props.participants}
+        identities={props.identities}
+        userProfile={props.userProfile}
+        conversations={props.conversations}
+        rooms={props.rooms}
+        summaryTasks={props.summaryTasks}
+        runtimeProfiles={props.runtimeProfiles}
+        depth={props.depth}
+        onOpenArtifact={props.onOpenArtifact}
+        onOpenMessageLink={props.onOpenMessageLink}
+        onOpenSummaryLink={props.onOpenSummaryLink}
+        onEnsureSummaryTask={props.onEnsureSummaryTask}
+        onOpenAgentProfile={props.onOpenAgentProfile}
+      />
       <span className={"[display:flex] [align-items:center] [gap:6px] [color:var(--muted)] [font-size:11px] [line-height:1.3]"}>
         <span>{room?.title || conversation?.title || t("common.unknownConversation")}</span>
         {participant ? <span>{participant.displayName}</span> : null}
         {message ? <span>{formatMessageTime(message.createdAt)}</span> : null}
       </span>
-    </button>
+    </div>
+  );
+}
+
+function LinkedMessageCardBody(props: {
+  message: Message | null;
+  textBlocks: MessageBlock[];
+  artifactBlocks: MessageBlock[];
+  messages: Message[];
+  blocks: MessageBlock[];
+  artifacts: Artifact[];
+  participants: Participant[];
+  identities: Identity[];
+  userProfile?: Pick<LocalUserProfile, "displayName">;
+  conversations: Conversation[];
+  rooms: Room[];
+  summaryTasks: BackgroundTask[];
+  runtimeProfiles?: RuntimeProfile[];
+  depth: number;
+  onOpenArtifact: (artifact: Artifact) => void;
+  onOpenMessageLink?: (messageId: string) => void;
+  onOpenSummaryLink?: (taskId: string) => void;
+  onEnsureSummaryTask?: (taskId: string) => Promise<BackgroundTask | null>;
+  onOpenAgentProfile?: (participant: Participant) => void;
+}) {
+  if (!props.message) {
+    return (
+      <span className={"[display:block] [overflow:hidden] [color:var(--text)] [font-size:13px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>
+        {t("messageActions.messageNotInSnapshot")}
+      </span>
+    );
+  }
+
+  const message = props.message;
+  if (props.artifactBlocks.length) {
+    return (
+      <span className={"[display:grid] [gap:3px]"}>
+        {props.artifactBlocks.map((block) => (
+          <MessageBlockRenderer
+            key={block.id}
+            block={block}
+            artifacts={props.artifacts}
+            onOpenArtifact={props.onOpenArtifact}
+          />
+        ))}
+      </span>
+    );
+  }
+
+  const previewBlocks: MessageBlock[] = props.textBlocks.length
+    ? props.textBlocks
+    : [{
+        id: `${message.id}-link-preview`,
+        messageId: message.id,
+        type: "main_text" as const,
+        content: message.content || attachmentLabel(),
+        status: "success",
+        metadata: null,
+        sortOrder: 0,
+        createdAt: message.createdAt,
+        updatedAt: message.updatedAt,
+      }];
+
+  return (
+    <span className={"[display:grid] [gap:4px] [&_[data-slot=message-block]]:[padding:0] [&_[data-slot=message-block]]:[font-size:13px] [&_[data-slot=message-block]]:[font-weight:600]"}>
+      {previewBlocks.map((block) => (
+        <MessageBlockRenderer
+          key={block.id}
+          block={block}
+          artifacts={props.artifacts}
+          allBlocks={props.blocks}
+          allMessages={props.messages}
+          allParticipants={props.participants}
+          identities={props.identities}
+          userProfile={props.userProfile}
+          conversations={props.conversations}
+          rooms={props.rooms}
+          summaryTasks={props.summaryTasks}
+          onOpenArtifact={props.onOpenArtifact}
+          onOpenMessageLink={props.onOpenMessageLink}
+          onOpenSummaryLink={props.onOpenSummaryLink}
+          onEnsureSummaryTask={props.onEnsureSummaryTask}
+          referenceMentions={message.mentions}
+          messageRole={message.role}
+          triggerUserMentions={message.role === "assistant" ? resolveTriggerUserMentions(message, props.messages) : []}
+          onOpenAgentProfile={props.onOpenAgentProfile}
+          runtimeProfiles={props.runtimeProfiles}
+          embeddedLinkDepth={props.depth + 1}
+        />
+      ))}
+    </span>
   );
 }
 

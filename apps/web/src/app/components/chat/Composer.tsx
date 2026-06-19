@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AppWindow, AtSign, Bot, Ear, FileOutput, FileText, ImageIcon, LayoutList, LoaderCircle, Paperclip, Send, Square, Video, X } from "lucide-react";
 import type { AgentRun, Artifact, Conversation, Identity, LocalAgentProviderStatus, MentionTarget, Message, Participant, Room, RuntimeProfile, TuttiAtProviderId } from "@group-chat/shared";
@@ -11,8 +11,10 @@ import {
   formatMessageLink,
   formatMessageLinkLabel,
   formatSummaryLink,
+  isArtifactOnlyClipboardPlainText,
   parseMessageLinkIds,
   readArtifactClipboardFromDataTransfer,
+  readRecentArtifactClipboardStashForPaste,
   readStashedSummaryLink,
   SUMMARY_LINK_MIME,
   summaryLinkLabel,
@@ -31,7 +33,12 @@ import {
   resolveAgentGuiProviderFromAppId,
   resolveAgentLauncherRuntimeProvider,
 } from "../../agent-launcher-mentions.js";
-import { tryOpenArtifactInTutti, tryOpenFileInTuttiSync, buildTuttiMentionHref, isOpenableTuttiReferenceProvider } from "../../tutti-bridge.js";
+import {
+  fetchAvailableAgentLauncherAppIds,
+  readCachedAvailableAgentLauncherAppIds,
+  sameStringSet,
+} from "../../agent-launcher-availability.js";
+import { tryOpenFileInTuttiSync, buildTuttiMentionHref, isOpenableTuttiReferenceProvider } from "../../tutti-bridge.js";
 import { openReferenceMentionTarget } from "../../reference-mention-open.js";
 import { buildLocalAgentLauncherReference, buildLocalAgentMentionOptions, type LocalAgentMentionOption } from "../../local-agent-mention-options.js";
 import {
@@ -59,37 +66,6 @@ import {
 
 const MENTION_MENU_Z_INDEX = 90;
 
-let cachedAvailableAgentLauncherAppIds: Set<string> | null = null;
-let availableAgentLauncherAppIdsRequest: Promise<Set<string>> | null = null;
-
-function fetchAvailableAgentLauncherAppIds(options?: { force?: boolean }) {
-  if (!options?.force && cachedAvailableAgentLauncherAppIds) {
-    return Promise.resolve(cachedAvailableAgentLauncherAppIds);
-  }
-  if (!options?.force && availableAgentLauncherAppIdsRequest) {
-    return availableAgentLauncherAppIdsRequest;
-  }
-  availableAgentLauncherAppIdsRequest = queryTuttiAtMentions({
-    keyword: "",
-    maxResults: 50,
-    providers: ["workspace-app"],
-    forceRefresh: options?.force ?? false,
-  })
-    .then((items) => {
-      const ids = new Set(
-        items
-          .map((item) => item.itemId)
-          .filter((itemId) => isAgentLauncherAppId(itemId)),
-      );
-      cachedAvailableAgentLauncherAppIds = ids;
-      return ids;
-    })
-    .finally(() => {
-      availableAgentLauncherAppIdsRequest = null;
-    });
-  return availableAgentLauncherAppIdsRequest;
-}
-
 function mentionPanelCacheKey(tab: MentionPanelTab, roomId: string, roomFileFingerprint: string) {
   return tab === "files"
     ? `${tab}:${roomId}:${roomFileFingerprint}`
@@ -111,14 +87,6 @@ function tuttiAtQueryResultSignature(item: TuttiAtQueryResult) {
 function sameTuttiAtQueryResults(left: TuttiAtQueryResult[], right: TuttiAtQueryResult[]) {
   if (left.length !== right.length) return false;
   return left.every((item, index) => tuttiAtQueryResultSignature(item) === tuttiAtQueryResultSignature(right[index]!));
-}
-
-function sameStringSet(left: ReadonlySet<string>, right: ReadonlySet<string>) {
-  if (left.size !== right.size) return false;
-  for (const item of left) {
-    if (!right.has(item)) return false;
-  }
-  return true;
 }
 
 export function Composer(props: {
@@ -164,11 +132,12 @@ export function Composer(props: {
   const [externalMentionOptions, setExternalMentionOptions] = useState<TuttiAtQueryResult[]>([]);
   const [externalMentionsLoading, setExternalMentionsLoading] = useState(false);
   const [availableAgentLauncherAppIds, setAvailableAgentLauncherAppIds] = useState<Set<string>>(
-    () => cachedAvailableAgentLauncherAppIds ?? new Set(),
+    () => readCachedAvailableAgentLauncherAppIds(),
   );
   const [activeMentionTab, setActiveMentionTab] = useState<MentionPanelTab>("members");
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const [uploadItems, setUploadItems] = useState<UploadItem[]>([]);
+  const [selectedUploadItemIds, setSelectedUploadItemIds] = useState<Set<string>>(new Set());
   const [preview, setPreview] = useState<AttachmentPreview | null>(null);
   const [sending, setSending] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -180,6 +149,7 @@ export function Composer(props: {
   const handledFocusRequestSeqRef = useRef(0);
   const handledComposerRequestSeqRef = useRef(0);
   const removedUploadIdsRef = useRef<Set<string>>(new Set());
+  const uploadItemPromisesRef = useRef<Map<string, Promise<Artifact | null>>>(new Map());
   const previewUrlsRef = useRef<Set<string>>(new Set());
   const mentionSelectionRef = useRef<Range | null>(null);
   const mentionQueryRangeRef = useRef<Range | null>(null);
@@ -274,7 +244,6 @@ export function Composer(props: {
     return {
       members: [
         ...(allOption ? [allOption] : []),
-        ...localAgentMentionOptions,
         ...groupAgentMentionOptions,
         ...realMemberOptions,
       ],
@@ -624,6 +593,15 @@ export function Composer(props: {
     resizeComposerEditor(editorRef.current);
   }, [text, quotes.length, uploadItems.length, props.conversationId]);
 
+  useEffect(() => {
+    setSelectedUploadItemIds((current) => {
+      if (!current.size) return current;
+      const uploadIds = new Set(uploadItems.map((item) => item.id));
+      const next = new Set([...current].filter((id) => uploadIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [uploadItems]);
+
   const insertMentionChipAtActiveQuery = (label: string, mentionId: string, reference?: TuttiAtQueryResult): boolean => {
     const editor = editorRef.current;
     if (!editor) return false;
@@ -889,26 +867,41 @@ export function Composer(props: {
     setUploadItems((current) => [...current, ...queued]);
   };
 
-  const resolvePastedArtifacts = (clipboardData: DataTransfer) => {
+  const resolvePastedArtifacts = (clipboardData: DataTransfer, pastedText: string) => {
     const payload = readArtifactClipboardFromDataTransfer(clipboardData);
-    if (!payload?.artifactIds.length) {
-      return { artifacts: [] as Artifact[], includeText: true, preferOverClipboardFiles: false };
-    }
-    const artifacts = resolveArtifactsByIds(payload.artifactIds, props.artifacts);
-    let preferOverClipboardFiles = payload.preferOverClipboardFiles;
-    if (!preferOverClipboardFiles && artifacts.length > 0) {
-      const files = clipboardFiles(clipboardData);
-      const onlyClipboardImages = files.length > 0 && files.every((file) => file.type.startsWith("image/"));
-      const hasNonImageArtifact = artifacts.some((artifact) => !artifact.mimeType.startsWith("image/"));
-      if (onlyClipboardImages && hasNonImageArtifact) {
-        preferOverClipboardFiles = true;
+    if (payload?.artifactIds.length) {
+      const artifacts = resolveArtifactsByIds(payload.artifactIds, props.artifacts);
+      if (artifacts.length > 0) {
+        let preferOverClipboardFiles = payload.preferOverClipboardFiles;
+        const files = clipboardFiles(clipboardData);
+        const onlyClipboardImages = files.length > 0 && files.every((file) => file.type.startsWith("image/"));
+        const hasNonImageArtifact = artifacts.some((artifact) => !artifact.mimeType.startsWith("image/"));
+        if (!preferOverClipboardFiles && onlyClipboardImages && hasNonImageArtifact) {
+          preferOverClipboardFiles = true;
+        }
+        return {
+          artifacts,
+          includeText: payload.includeText,
+          preferOverClipboardFiles,
+        };
       }
     }
-    return {
-      artifacts,
-      includeText: payload.includeText,
-      preferOverClipboardFiles,
-    };
+
+    if (!pastedText.trim()) {
+      const stash = readRecentArtifactClipboardStashForPaste();
+      if (stash?.artifactIds.length) {
+        const artifacts = resolveArtifactsByIds(stash.artifactIds, props.artifacts);
+        if (artifacts.length > 0) {
+          return {
+            artifacts,
+            includeText: stash.includeText,
+            preferOverClipboardFiles: true,
+          };
+        }
+      }
+    }
+
+    return { artifacts: [] as Artifact[], includeText: true, preferOverClipboardFiles: false };
   };
 
   const applyPastedArtifacts = (
@@ -923,6 +916,7 @@ export function Composer(props: {
       pastedArtifactClipboard.includeText
       && pastedText.trim()
       && !isPlaceholderAttachmentText(pastedText)
+      && !isArtifactOnlyClipboardPlainText(pastedText)
     ) {
       insertComposerPasteAtCaret(
         pastedText,
@@ -947,13 +941,12 @@ export function Composer(props: {
     focusComposerAfterAttachmentInsert();
   };
 
-  const uploadQueuedItems = async (items: UploadItem[]) => {
-    const artifacts: Artifact[] = [];
-    for (const item of items) {
-      if (item.artifact) {
-        artifacts.push(item.artifact);
-        continue;
-      }
+  const ensureUploadItemArtifact = (item: UploadItem): Promise<Artifact | null> => {
+    if (item.artifact) return Promise.resolve(item.artifact);
+    const existingPromise = uploadItemPromisesRef.current.get(item.id);
+    if (existingPromise) return existingPromise;
+
+    const promise = (async () => {
       try {
         setUploadItems((current) =>
           current.map((currentItem) =>
@@ -969,19 +962,19 @@ export function Composer(props: {
         if (removedUploadIdsRef.current.has(item.id)) {
           revokePreviewUrl(item.previewUrl);
           if (item.previewUrl) previewUrlsRef.current.delete(item.previewUrl);
-          continue;
+          return null;
         }
-        artifacts.push(result.artifact);
         setUploadItems((current) =>
           current.map((currentItem) =>
             currentItem.id === item.id ? { ...currentItem, status: "uploaded" as const, artifact: result.artifact } : currentItem,
           ),
         );
+        return result.artifact;
       } catch (error) {
         if (removedUploadIdsRef.current.has(item.id)) {
           revokePreviewUrl(item.previewUrl);
           if (item.previewUrl) previewUrlsRef.current.delete(item.previewUrl);
-          continue;
+          return null;
         }
         setUploadItems((current) =>
           current.map((currentItem) =>
@@ -995,15 +988,44 @@ export function Composer(props: {
           ),
         );
         throw error;
+      } finally {
+        uploadItemPromisesRef.current.delete(item.id);
       }
+    })();
+
+    uploadItemPromisesRef.current.set(item.id, promise);
+    return promise;
+  };
+
+  const uploadQueuedItems = async (items: UploadItem[]) => {
+    const artifacts: Artifact[] = [];
+    for (const item of items) {
+      const artifact = await ensureUploadItemArtifact(item);
+      if (artifact) artifacts.push(artifact);
     }
     return artifacts;
   };
 
   const pasteFiles = (event: ClipboardEvent<HTMLDivElement>) => {
-    const pastedArtifactClipboard = resolvePastedArtifacts(event.clipboardData);
+    if (selectedUploadItemIds.size > 0) removeUploadItems(selectedUploadItemIds);
     const pastedHtml = event.clipboardData.getData("text/html");
     const pastedText = normalizeComposerPasteText(pastedHtml, event.clipboardData.getData("text/plain"));
+
+    const recentArtifactStash = readRecentArtifactClipboardStashForPaste();
+    if (recentArtifactStash && !recentArtifactStash.includeText) {
+      const stashArtifacts = resolveArtifactsByIds(recentArtifactStash.artifactIds, props.artifacts);
+      if (stashArtifacts.length > 0) {
+        event.preventDefault();
+        applyPastedArtifacts({
+          artifacts: stashArtifacts,
+          includeText: false,
+          preferOverClipboardFiles: true,
+        }, "");
+        return;
+      }
+    }
+
+    const pastedArtifactClipboard = resolvePastedArtifacts(event.clipboardData, pastedText);
     const summaryLinkFromMime = event.clipboardData.getData(SUMMARY_LINK_MIME).trim();
     const stashedSummaryLink = readStashedSummaryLink();
     const summaryLink = summaryLinkFromMime.startsWith("group-chat://summary/")
@@ -1023,7 +1045,10 @@ export function Composer(props: {
 
     if (pastedArtifactClipboard.preferOverClipboardFiles) {
       event.preventDefault();
-      applyPastedArtifacts(pastedArtifactClipboard, pastedText);
+      applyPastedArtifacts(
+        pastedArtifactClipboard,
+        pastedArtifactClipboard.includeText ? pastedText : "",
+      );
       return;
     }
 
@@ -1037,11 +1062,14 @@ export function Composer(props: {
 
     if (pastedArtifactClipboard.artifacts.length > 0) {
       event.preventDefault();
-      applyPastedArtifacts(pastedArtifactClipboard, pastedText);
+      applyPastedArtifacts(
+        pastedArtifactClipboard,
+        pastedArtifactClipboard.includeText ? pastedText : "",
+      );
       return;
     }
 
-    if (!pastedText) return;
+    if (!pastedText.trim() || isArtifactOnlyClipboardPlainText(pastedText)) return;
     event.preventDefault();
     insertComposerPasteAtCaret(
       pastedText,
@@ -1070,10 +1098,75 @@ export function Composer(props: {
     revokePreviewUrl(item?.previewUrl ?? null);
     if (item?.previewUrl) previewUrlsRef.current.delete(item.previewUrl);
     setUploadItems((current) => current.filter((candidate) => candidate.id !== itemId));
+    setSelectedUploadItemIds((current) => {
+      if (!current.has(itemId)) return current;
+      const next = new Set(current);
+      next.delete(itemId);
+      return next;
+    });
+  };
+
+  const removeUploadItems = (itemIds: Iterable<string>) => {
+    const ids = new Set(itemIds);
+    if (!ids.size) return false;
+    for (const itemId of ids) removedUploadIdsRef.current.add(itemId);
+    for (const item of uploadItems) {
+      if (!ids.has(item.id)) continue;
+      revokePreviewUrl(item.previewUrl);
+      if (item.previewUrl) previewUrlsRef.current.delete(item.previewUrl);
+    }
+    setUploadItems((current) => current.filter((candidate) => !ids.has(candidate.id)));
+    setSelectedUploadItemIds(new Set());
+    return true;
+  };
+
+  const selectAllComposerContent = () => {
+    const editor = editorRef.current;
+    if (!editor) return false;
+    editor.focus({ preventScroll: true });
+    const selection = window.getSelection();
+    if (selection) {
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    setSelectedUploadItemIds(new Set(uploadItems.map((item) => item.id)));
+    setMentionQuery(null);
+    return true;
+  };
+
+  const deleteSelectedComposerContent = () => {
+    if (selectedUploadItemIds.size === 0) return false;
+    const editor = editorRef.current;
+    removeUploadItems(selectedUploadItemIds);
+    const selection = window.getSelection();
+    if (editor && selection?.rangeCount && !selection.isCollapsed) {
+      const range = selection.getRangeAt(0);
+      if (editor.contains(range.commonAncestorContainer)) {
+        range.deleteContents();
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        syncEditorText();
+      }
+    }
+    requestAnimationFrame(() => editor?.focus({ preventScroll: true }));
+    return true;
+  };
+
+  const deleteLastUploadFromEmptyEditor = () => {
+    const editor = editorRef.current;
+    if (!editor || uploadItems.length === 0 || editorText(editor).length > 0) return false;
+    const lastItem = uploadItems.at(-1);
+    if (!lastItem) return false;
+    removeUploadItem(lastItem.id);
+    requestAnimationFrame(() => editor.focus({ preventScroll: true }));
+    return true;
   };
 
   const openUploadItem = async (item: UploadItem) => {
-    if (item.artifact && await tryOpenArtifactInTutti(item.artifact)) {
+    if (item.artifact && revealArtifactInTuttiFileManager(item.artifact)) {
       return;
     }
     if (item.mimeType.startsWith("image/") && item.previewUrl) {
@@ -1350,8 +1443,10 @@ export function Composer(props: {
           <div className={"[display:flex] [min-height:28px] [min-width:0] [flex-wrap:wrap] [align-items:flex-start] [gap:4px_6px]"}>
             <PendingAttachmentTray
               uploadItems={uploadItems}
+              selectedUploadItemIds={selectedUploadItemIds}
               onRemoveUpload={removeUploadItem}
               onOpenUpload={openUploadItem}
+              onSelectAll={selectAllComposerContent}
             />
             <div className={"[position:relative] [min-width:0] [flex:1_1_180px] [min-height:28px] [display:grid] [align-items:start] [overflow:hidden]"}>
             {!text && t("composer.placeholder").trim() ? (
@@ -1367,7 +1462,10 @@ export function Composer(props: {
               contentEditable
               suppressContentEditableWarning
               className={"[width:100%] [min-width:0] [min-height:28px] [max-height:168px] [overflow-y:hidden] [outline:none] [white-space:pre-wrap] [overflow-wrap:anywhere] [word-break:break-word] [color:var(--text)] [font-size:13px] [line-height:20px] [padding:4px_0] empty:before:[content:'']"}
-              onInput={() => syncEditorText(true)}
+              onInput={() => {
+                setSelectedUploadItemIds((current) => current.size ? new Set() : current);
+                syncEditorText(true);
+              }}
               onMouseDown={(event) => {
                 const linkChip = (event.target as Element).closest('[data-mention-display-mode="reference-link"]');
                 if (linkChip) event.preventDefault();
@@ -1379,6 +1477,7 @@ export function Composer(props: {
                   openFileReferenceFromChip(linkChip);
                   return;
                 }
+                setSelectedUploadItemIds((current) => current.size ? new Set() : current);
                 syncEditorText(true);
               }}
               onPaste={pasteFiles}
@@ -1390,6 +1489,41 @@ export function Composer(props: {
               }}
               onBlur={handleEditorBlur}
               onKeyDown={(event) => {
+                if (
+                  event.key.toLowerCase() === "a"
+                  && (event.metaKey || event.ctrlKey)
+                  && !event.altKey
+                  && uploadItems.length > 0
+                ) {
+                  event.preventDefault();
+                  selectAllComposerContent();
+                  return;
+                }
+                if (
+                  (event.key === "Backspace" || event.key === "Delete")
+                  && !event.metaKey
+                  && !event.ctrlKey
+                  && !event.altKey
+                  && !event.shiftKey
+                  && deleteSelectedComposerContent()
+                ) {
+                  event.preventDefault();
+                  return;
+                }
+                if (shouldReplaceSelectedUploadItems(event, selectedUploadItemIds)) {
+                  removeUploadItems(selectedUploadItemIds);
+                }
+                if (
+                  (event.key === "Backspace" || event.key === "Delete")
+                  && !event.metaKey
+                  && !event.ctrlKey
+                  && !event.altKey
+                  && !event.shiftKey
+                  && deleteLastUploadFromEmptyEditor()
+                ) {
+                  event.preventDefault();
+                  return;
+                }
                 if ((event.key === "Backspace" || event.key === "Delete") && deleteAdjacentMentionChip(editorRef.current, event.key)) {
                   event.preventDefault();
                   syncEditorText();
@@ -2906,6 +3040,20 @@ function isEmptyComposerDraft(draft: ComposerDraft) {
     && !draft.mentionedAll;
 }
 
+function shouldReplaceSelectedUploadItems(
+  event: ReactKeyboardEvent<HTMLDivElement>,
+  selectedUploadItemIds: Set<string>,
+) {
+  return (
+    selectedUploadItemIds.size > 0
+    && event.key.length === 1
+    && !event.metaKey
+    && !event.ctrlKey
+    && !event.altKey
+    && !event.nativeEvent.isComposing
+  );
+}
+
 function QuoteComposerBar(props: { quotes: ComposerQuote[]; onRemove: () => void }) {
   const { t } = useTranslation();
   const [firstQuote, ...restQuotes] = props.quotes;
@@ -2950,8 +3098,10 @@ function compactQuoteContent(content: string) {
 
 function PendingAttachmentTray(props: {
   uploadItems: UploadItem[];
+  selectedUploadItemIds: Set<string>;
   onRemoveUpload: (itemId: string) => void;
   onOpenUpload: (item: UploadItem) => void;
+  onSelectAll: () => void;
 }) {
   if (props.uploadItems.length === 0) return null;
 
@@ -2966,8 +3116,10 @@ function PendingAttachmentTray(props: {
           previewUrl={item.previewUrl ?? item.artifact?.publicUrl ?? null}
           status={attachmentStatusLabel(item.status)}
           failed={item.status === "error"}
+          selected={props.selectedUploadItemIds.has(item.id)}
           onRemove={() => props.onRemoveUpload(item.id)}
           onOpen={() => props.onOpenUpload(item)}
+          onSelectAll={props.onSelectAll}
         />
       ))}
     </div>
@@ -2981,28 +3133,43 @@ function AttachmentPill(props: {
   previewUrl: string | null;
   status: string;
   failed?: boolean;
+  selected?: boolean;
   onRemove: () => void;
   onOpen: () => void;
+  onSelectAll: () => void;
 }) {
   const isImage = props.mimeType.startsWith("image/");
   const addedLabel = t("composer.uploadAdded");
   const hasStatus = props.status !== addedLabel;
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key.toLowerCase() === "a" && (event.metaKey || event.ctrlKey) && !event.altKey) {
+      event.preventDefault();
+      props.onSelectAll();
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      props.onOpen();
+      return;
+    }
+    if (event.key === "Backspace" || event.key === "Delete") {
+      event.preventDefault();
+      props.onRemove();
+    }
+  };
   if (isImage && props.previewUrl) {
     return (
       <div
-        className={`group [position:relative] [width:58px] [height:44px] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:10px] [background:#00000008] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] ${props.failed ? "[border-color:#ef444455]" : ""}`}
+        data-selected={props.selected || undefined}
+        className={`group [position:relative] [width:58px] [height:44px] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:10px] [background:#00000008] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] [outline:none] focus-visible:[border-color:var(--primary)] focus-visible:[box-shadow:0_0_0_3px_#2563eb22] [&[data-selected=true]]:[border-color:var(--primary)] [&[data-selected=true]]:[box-shadow:0_0_0_3px_#2563eb33] ${props.failed ? "[border-color:#ef444455]" : ""}`}
         role="button"
         tabIndex={0}
         aria-label={t("composer.previewFile", { filename: props.filename })}
         onClick={props.onOpen}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            props.onOpen();
-          }
-        }}
+        onKeyDown={handleKeyDown}
       >
         <img className={"[width:100%] [height:100%] [object-fit:cover]"} src={props.previewUrl} alt="" />
+        {props.selected ? <span aria-hidden="true" className={"[position:absolute] [inset:0] [background:#2563eb33] [box-shadow:inset_0_0_0_2px_var(--primary)]"} /> : null}
         <button
           className={"[position:absolute] [right:3px] [top:3px] [display:inline-grid] [width:18px] [height:18px] [place-items:center] [border:0] [border-radius:999px] [color:var(--text)] [background:#fffffff0] [opacity:0] [box-shadow:0_1px_4px_rgb(0_0_0_/_12%)] [transition:opacity_0.12s_ease,_background-color_0.12s_ease,_color_0.12s_ease] group-hover:[opacity:1] focus-visible:[opacity:1] [&:hover]:[background:#ffffff]"}
           type="button"
@@ -3021,17 +3188,13 @@ function AttachmentPill(props: {
 
   return (
     <div
-      className={`group [position:relative] [display:grid] [grid-template-columns:24px_minmax(0,_1fr)] [align-items:center] [gap:7px] [width:min(220px,_100%)] [height:32px] [border:1px_solid_var(--border)] [border-radius:10px] [padding:4px_24px_4px_5px] [background:var(--panel)] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] ${props.failed ? "[border-color:#ef444455] [background:#ef44440a]" : ""}`}
+      data-selected={props.selected || undefined}
+      className={`group [position:relative] [display:grid] [grid-template-columns:24px_minmax(0,_1fr)] [align-items:center] [gap:7px] [width:min(220px,_100%)] [height:32px] [border:1px_solid_var(--border)] [border-radius:10px] [padding:4px_24px_4px_5px] [background:var(--panel)] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] [outline:none] focus-visible:[border-color:var(--primary)] focus-visible:[box-shadow:0_0_0_3px_#2563eb22] [&[data-selected=true]]:[border-color:var(--primary)] [&[data-selected=true]]:[box-shadow:0_0_0_3px_#2563eb33] ${props.failed ? "[border-color:#ef444455] [background:#ef44440a]" : ""}`}
       role="button"
       tabIndex={0}
       aria-label={t("composer.previewFile", { filename: props.filename })}
       onClick={props.onOpen}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          props.onOpen();
-        }
-      }}
+      onKeyDown={handleKeyDown}
     >
       <span className={"[display:inline-grid] [width:24px] [height:24px] [overflow:hidden] [place-items:center] [border-radius:7px] [color:var(--muted)] [background:#00000008]"}>
         {isImage && props.previewUrl ? (

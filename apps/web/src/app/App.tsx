@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { Bot, Loader2 } from "lucide-react";
 import { enrichAgentRuns, isLocalUserMessage, resolveAgentRunVisibility, type AgentRun,
+  type ChatSnapshot,
   type Conversation,
   type CreateIdentityRequest,
   type Identity,
@@ -46,7 +47,7 @@ import { AgentRunPanel } from "./components/chat/AgentRunPanel.js";
 import { AgentThinkingPanel } from "./components/chat/AgentThinkingPanel.js";
 import { RoomAgentsDialog } from "./components/chat/RoomAgentsDialog.js";
 import { AgentProfileDialog } from "./components/chat/AgentProfileDialog.js";
-import { MessageTimeline } from "./components/chat/MessageTimeline.js";
+import { MessageTimeline, type AgentForwardTarget } from "./components/chat/MessageTimeline.js";
 import { DeleteMessageConfirmDialog } from "./components/chat/DeleteMessageConfirmDialog.js";
 import { InvitePeopleDialog } from "./components/chat/InvitePeopleDialog.js";
 import { Composer } from "./components/chat/Composer.js";
@@ -69,7 +70,20 @@ import { resolveAgentProfileParticipant, resolveMessageAgentParticipant, resolve
 import { attachmentLabel, subscribeI18n, t } from "./i18n/index.js";
 import { collectMessageProcess } from "./agent-thinking.js";
 import { UNREAD_FEATURE_ENABLED } from "./feature-flags.js";
-import { initTuttiWorkspaceContextCache } from "./tutti-bridge.js";
+import { initTuttiWorkspaceContextCache, resolveArtifactAgentDraftHref } from "./tutti-bridge.js";
+import { loadCachedSnapshot, saveCachedSnapshot } from "./bootstrap-cache.js";
+import { buildAgentGuiDraftPrompt } from "./agent-gui-draft-prompt.js";
+import { dispatchAgentGuiTask, type TuttiAgentGuiProvider } from "./agent-gui-dispatch.js";
+import { localAgentLauncherAppId, resolveAgentGuiProviderFromRuntimeProvider } from "./agent-launcher-mentions.js";
+import {
+  fetchAvailableAgentLauncherAppIds,
+  readCachedAvailableAgentLauncherAppIds,
+  sameStringSet,
+} from "./agent-launcher-availability.js";
+import { formatMessageBodyForAgentForward } from "./reference-mentions.js";
+import { collectImageFileArtifactsForMessages } from "./message-artifacts.js";
+import { defaultIdentityNameForRuntime, listCanonicalRuntimeProfiles, localAgentStatus } from "./runtime.js";
+import { localAgentMentionSubtitle } from "./local-agent-mention-options.js";
 
 const DEFAULT_CONVERSATION_SIDEBAR_WIDTH = 300;
 const MIN_CONVERSATION_SIDEBAR_WIDTH = 240;
@@ -95,9 +109,20 @@ export interface ComposerQuote {
   content: string;
 }
 
+function toChatSnapshot(state: AppState): ChatSnapshot {
+  const { ready: _ready, ...snapshot } = state;
+  return snapshot;
+}
+
 export function App() {
-  const [state, setState] = useState<AppState>(emptyState);
+  const [state, setState] = useState<AppState>(() => {
+    const cachedSnapshot = loadCachedSnapshot();
+    return cachedSnapshot ? normalizeSnapshot(cachedSnapshot) : emptyState;
+  });
   const [localAgentProviders, setLocalAgentProviders] = useState<LocalAgentProviderStatus[]>([]);
+  const [availableAgentLauncherAppIds, setAvailableAgentLauncherAppIds] = useState<Set<string>>(
+    () => readCachedAvailableAgentLauncherAppIds(),
+  );
   const [refreshingLocalAgentProviders, setRefreshingLocalAgentProviders] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [profileMenuPlacement, setProfileMenuPlacement] = useState<"rail" | "mobile" | "chat">("rail");
@@ -120,12 +145,12 @@ export function App() {
   const [composerRequest, setComposerRequest] = useState<ComposerRequest | null>(null);
   const [conversationSidebarWidth, setConversationSidebarWidth] = useState(DEFAULT_CONVERSATION_SIDEBAR_WIDTH);
   const [resizingConversationSidebar, setResizingConversationSidebar] = useState(false);
-  const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
+  const [currentConversationId, setCurrentConversationId] = useState<string | null>(() => state.conversations[0]?.id ?? null);
   const [focusMessageRequest, setFocusMessageRequest] = useState<{ messageId: string; artifactId?: string; seq: number } | null>(null);
   const [focusComposerRequest, setFocusComposerRequest] = useState<{ seq: number } | null>(null);
   const [scrollToBottomRequest, setScrollToBottomRequest] = useState<{ seq: number } | null>(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
-  const lastSeqRef = useRef(0);
+  const lastSeqRef = useRef(state.ready ? state.lastSeq : 0);
   const appShellRef = useRef<HTMLDivElement | null>(null);
   const profileButtonRef = useRef<HTMLButtonElement | null>(null);
   const mobileProfileButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -174,6 +199,12 @@ export function App() {
     }
   }, []);
 
+  const refreshAvailableAgentLauncherApps = useCallback((options?: { force?: boolean }) => {
+    void fetchAvailableAgentLauncherAppIds(options).then((ids) => {
+      setAvailableAgentLauncherAppIds((current) => sameStringSet(current, ids) ? current : new Set(ids));
+    });
+  }, []);
+
   useEffect(() => initTuttiWorkspaceContextCache(), []);
 
   useEffect(() => {
@@ -197,17 +228,38 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
-    fetchSnapshot().then((snapshot) => {
-      if (cancelled) return;
-      lastSeqRef.current = snapshot.lastSeq;
-      setState(normalizeSnapshot(snapshot));
-      setCurrentConversationId((current) => current ?? snapshot.conversations[0]?.id ?? null);
-    });
+    fetchSnapshot()
+      .then((snapshot) => {
+        if (cancelled) return;
+        lastSeqRef.current = Math.max(lastSeqRef.current, snapshot.lastSeq);
+        const nextState = normalizeSnapshot(snapshot);
+        setState((current) => current.lastSeq > snapshot.lastSeq ? current : nextState);
+        setCurrentConversationId((current) =>
+          current && snapshot.conversations.some((conversation) => conversation.id === current)
+            ? current
+            : snapshot.conversations[0]?.id ?? null,
+        );
+        saveCachedSnapshot(snapshot);
+      })
+      .catch(() => {
+        // If a cached snapshot is already rendered, keep it visible until reconnect succeeds.
+      });
     void refreshLocalAgentProviders();
+    refreshAvailableAgentLauncherApps();
     return () => {
       cancelled = true;
     };
-  }, [refreshLocalAgentProviders]);
+  }, [refreshAvailableAgentLauncherApps, refreshLocalAgentProviders]);
+
+  useEffect(() => {
+    if (!state.ready) return;
+    const saveTimer = window.setTimeout(() => {
+      saveCachedSnapshot(toChatSnapshot(state));
+    }, 750);
+    return () => {
+      window.clearTimeout(saveTimer);
+    };
+  }, [state]);
 
   const applyEvents = useCallback((events: StreamEvent[]) => {
     if (events.length === 0) return;
@@ -384,6 +436,30 @@ export function App() {
       : [],
     [currentConversation, state.artifacts],
   );
+  const agentForwardTargets = useMemo<AgentForwardTarget[]>(() => {
+    const targets = listCanonicalRuntimeProfiles(state.runtimeProfiles)
+      .filter((profile) => profile.kind === "local-agent")
+      .map((profile): AgentForwardTarget | null => {
+        const provider = resolveAgentGuiProviderFromRuntimeProvider(profile.provider);
+        if (!provider) return null;
+        const status = localAgentStatus(profile, localAgentProviders);
+        const launcherAppId = localAgentLauncherAppId(profile.provider);
+        if (launcherAppId && !availableAgentLauncherAppIds.has(launcherAppId)) return null;
+        if (!launcherAppId && !status?.available) return null;
+        const target: AgentForwardTarget = {
+          provider,
+          runtimeProvider: profile.provider,
+          label: status?.displayName?.trim() || defaultIdentityNameForRuntime(profile, localAgentProviders),
+          subtitle: status
+            ? localAgentMentionSubtitle(profile, status, localAgentProviders)
+            : defaultIdentityNameForRuntime(profile, localAgentProviders),
+          available: true,
+        };
+        return target;
+      })
+      .filter((target): target is AgentForwardTarget => Boolean(target));
+    return targets.sort((left, right) => left.label.localeCompare(right.label));
+  }, [availableAgentLauncherAppIds, localAgentProviders, state.runtimeProfiles]);
   const currentActiveRuns = useMemo(
     () => currentConversation
       ? visibleActiveRuns(
@@ -1067,6 +1143,25 @@ export function App() {
     }));
   };
 
+  const forwardMessagesToAgent = async (messages: Message[], provider: TuttiAgentGuiProvider) => {
+    const visibleMessages = messages.filter((message) => message.status !== "deleted" && message.status !== "recalled");
+    if (!visibleMessages.length) return;
+    const content = formatMessagesForAgentForward(visibleMessages, state.messageBlocks, state.artifacts);
+    const mentions = visibleMessages.flatMap((message) => message.mentions ?? []);
+    const prompt = buildAgentGuiDraftPrompt(content, mentions, {
+      artifacts: state.artifacts,
+      messages: state.messages,
+      participants: state.participants,
+      identities: state.identities,
+      userDisplayName: userProfile.displayName,
+      summaryTasks: backgroundTasks,
+    });
+    const opened = await dispatchAgentGuiTask({ provider, prompt });
+    if (!opened) {
+      window.alert(t("messageActions.forwardToAgentFailed"));
+    }
+  };
+
   const requestComposerEdit = (message: Message) => {
     setComposerRequest((current) => ({
       seq: (current?.seq ?? 0) + 1,
@@ -1334,6 +1429,7 @@ export function App() {
                   conversations={state.conversations}
                   rooms={state.rooms}
                   participantsCount={currentAgents.length}
+                  agentForwardTargets={agentForwardTargets}
                   focusMessageRequest={focusMessageRequest}
                   scrollToBottomRequest={scrollToBottomRequest}
                   bulkToolbarHost={bulkToolbarHost}
@@ -1366,6 +1462,7 @@ export function App() {
                   onEnsureSummaryTask={ensureBackgroundTask}
                   summaryTasks={backgroundTasks}
                   onQuoteMessages={requestComposerInsert}
+                  onForwardMessagesToAgent={(messages, provider) => void forwardMessagesToAgent(messages, provider)}
                   onStartSummary={startBackgroundSummary}
                   openBackgroundTask={enrichedOpenBackgroundTask}
                   onCloseBackgroundTaskPanel={closeBackgroundTaskPanel}
@@ -1571,6 +1668,35 @@ function formatMessagesForComposer(messages: Message[], mode: "quote" | "summary
   if (mode === "send-to-app") return t("app.sendToAppPrompt", { content });
   if (mode === "send-to-agent") return t("app.sendToAgentPrompt", { content });
   return `${lines.join("\n")}\n\n`;
+}
+
+function formatMessagesForAgentForward(
+  messages: Message[],
+  blocks: AppState["messageBlocks"],
+  artifacts: AppState["artifacts"],
+) {
+  const sections = messages
+    .filter((message) => message.status !== "deleted" && message.status !== "recalled")
+    .map((message) => {
+      const rawContent = message.content.trim();
+      const body = rawContent ? formatMessageBodyForAgentForward(rawContent, message.mentions ?? []) : "";
+      const messageArtifacts = collectImageFileArtifactsForMessages([message], blocks, artifacts);
+      const attachmentLines = messageArtifacts.map(formatArtifactForAgentForward).filter(Boolean);
+      const parts = [body, ...attachmentLines].filter(Boolean);
+      return parts.length ? parts.join("\n") : attachmentLabel();
+    });
+  return sections.join("\n\n").trim();
+}
+
+function formatArtifactForAgentForward(artifact: AppState["artifacts"][number]) {
+  const href = resolveArtifactAgentDraftHref(artifact);
+  if (!href) return "";
+  const label = escapeMarkdownLabel(artifact.filename);
+  return `[${label}](${href})`;
+}
+
+function escapeMarkdownLabel(value: string) {
+  return value.replaceAll("\\", "\\\\").replaceAll("[", "\\[").replaceAll("]", "\\]");
 }
 
 function formatSummarySourcePreview(messages: Message[]) {

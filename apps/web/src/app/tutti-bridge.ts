@@ -259,6 +259,54 @@ export async function tryOpenTuttiReferenceMention(
   return false;
 }
 
+export function normalizeFilePathForBridge(path: string): string {
+  return path.replace(/\\/g, "/").trim();
+}
+
+export function isWorkspaceAppDataAbsolutePath(localPath: string): boolean {
+  const normalized = normalizeFilePathForBridge(localPath);
+  if (!normalized) return false;
+  if (!normalized.startsWith("/") && !/^[A-Za-z]:\//.test(normalized)) return false;
+  return (
+    /\/\.tutti(?:-dev)?\/apps\/workspaces\/[^/]+\/[^/]+\/data\//.test(normalized)
+    || /\/group-chat\/data\//.test(normalized)
+  );
+}
+
+export function resolveArtifactAgentDraftHref(
+  artifact: Pick<Artifact, "id" | "localPath"> | null | undefined,
+  fileHref?: string,
+): string {
+  const localPath = artifact?.localPath ? normalizeFilePathForBridge(artifact.localPath) : "";
+  if (localPath && isWorkspaceAppDataAbsolutePath(localPath)) {
+    return localPath;
+  }
+
+  const normalizedHref = normalizeFilePathForBridge(fileHref ?? "");
+  if (normalizedHref && isWorkspaceAppDataAbsolutePath(normalizedHref)) {
+    return normalizedHref;
+  }
+
+  if (localPath && (localPath.startsWith("/") || /^[A-Za-z]:\//.test(localPath))) {
+    return localPath;
+  }
+
+  if (
+    normalizedHref
+    && !normalizedHref.startsWith("group-chat://")
+    && !/^https?:\/\//i.test(normalizedHref)
+    && !normalizedHref.includes("://")
+  ) {
+    return normalizedHref;
+  }
+
+  if (artifact?.id) {
+    return `group-chat://reference/file/${encodeURIComponent(artifact.id)}`;
+  }
+
+  return normalizedHref;
+}
+
 export function tryOpenArtifactInTuttiSync(
   artifact: Artifact,
   mode: TuttiWorkspaceAppOpenFileRequest["mode"] = "reveal",

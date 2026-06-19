@@ -187,6 +187,92 @@ export function contentHasReferenceMentions(content: string) {
     || content.includes(PARTICIPANT_MENTION_LINK_PREFIX);
 }
 
+export function flattenReferenceMentionsToPlainText(content: string) {
+  if (!contentHasReferenceMentions(content)) return content;
+  return splitContentByReferenceMentions(content)
+    .map((segment) => (segment.kind === "text" ? segment.text : segment.label))
+    .join("");
+}
+
+type AgentForwardMentionMeta = Pick<
+  MentionTarget,
+  "mentionType" | "referenceProviderId" | "referenceEntityId" | "referenceInsert" | "referenceScope"
+>;
+
+function escapeReferenceMentionLabel(label: string) {
+  return label.replace(/\\/g, "\\\\").replace(/\[/g, "\\[");
+}
+
+function findReferenceMentionMeta(
+  mentions: AgentForwardMentionMeta[],
+  providerId: TuttiAtProviderId,
+  entityId: string,
+) {
+  return mentions.find((mention) =>
+    mention.mentionType === "reference"
+    && mention.referenceProviderId === providerId
+    && mention.referenceEntityId === entityId,
+  ) ?? null;
+}
+
+function resolveReferenceSegmentForAgentForward(
+  segment: Extract<ReferenceMentionContentSegment, { kind: "reference" }>,
+  mentions: AgentForwardMentionMeta[],
+) {
+  const label = escapeReferenceMentionLabel(segment.label);
+
+  if (segment.href.startsWith(MENTION_LINK_PREFIX)) {
+    try {
+      const url = new URL(segment.href);
+      const providerId = url.hostname as TuttiAtProviderId;
+      const entityId = decodeURIComponent(url.pathname.replace(/^\/+/, "")).trim();
+      if (isOpenableTuttiReferenceProvider(providerId) && entityId) {
+        if (isAgentLauncherAppId(entityId)) return "";
+        return `[${label}](${segment.href})`;
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  const parsed = parseReferenceMentionHref(segment.href);
+  if (!parsed) return segment.label;
+
+  if (parsed.providerId === "file" || parsed.providerId === "agent-generated-file") {
+    return segment.label;
+  }
+
+  if (isParticipantMentionHref(segment.href)) {
+    return segment.label;
+  }
+
+  if (isOpenableTuttiReferenceProvider(parsed.providerId)) {
+    if (isAgentLauncherAppId(parsed.entityId)) return "";
+    const mention = findReferenceMentionMeta(mentions, parsed.providerId, parsed.entityId);
+    const href = buildTuttiMentionHref(parsed.providerId, parsed.entityId, {
+      referenceInsert: mention?.referenceInsert,
+      referenceScope: mention?.referenceScope,
+    });
+    if (href) return `[${label}](${href})`;
+  }
+
+  return segment.label;
+}
+
+export function formatMessageBodyForAgentForward(
+  content: string,
+  mentions: AgentForwardMentionMeta[] = [],
+) {
+  if (!contentHasReferenceMentions(content)) return content;
+  return splitContentByReferenceMentions(content)
+    .map((segment) => (
+      segment.kind === "text"
+        ? segment.text
+        : resolveReferenceSegmentForAgentForward(segment, mentions)
+    ))
+    .join("");
+}
+
 export function splitContentByReferenceMentions(content: string): ReferenceMentionContentSegment[] {
   const segments: ReferenceMentionContentSegment[] = [];
   let lastIndex = 0;

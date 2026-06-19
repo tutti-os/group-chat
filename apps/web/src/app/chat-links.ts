@@ -258,6 +258,17 @@ export function readStashedSummaryLink() {
 export interface ArtifactClipboardPayload {
   artifactIds: string[];
   includeText: boolean;
+  copyToken?: string;
+  stashedAt?: number;
+}
+
+const ARTIFACT_CLIPBOARD_STASH_FALLBACK_MS = 30_000;
+
+/** Plain-text marker written for image-only copies so paste can ignore OCR noise in text/plain. */
+export const ARTIFACT_ONLY_CLIPBOARD_PLAIN = "\u200b";
+
+export function isArtifactOnlyClipboardPlainText(text: string) {
+  return text.replace(/\u200b/g, "").trim().length === 0;
 }
 
 function normalizeArtifactClipboardPayload(value: unknown): ArtifactClipboardPayload | null {
@@ -273,10 +284,16 @@ function normalizeArtifactClipboardPayload(value: unknown): ArtifactClipboardPay
   return {
     artifactIds,
     includeText: record.includeText !== false,
+    copyToken: typeof (record as { copyToken?: unknown }).copyToken === "string"
+      ? (record as { copyToken: string }).copyToken
+      : undefined,
+    stashedAt: typeof (record as { stashedAt?: unknown }).stashedAt === "number"
+      ? (record as { stashedAt: number }).stashedAt
+      : undefined,
   };
 }
 
-export function stashArtifactsForPaste(input: { artifactIds: string[]; includeText: boolean }) {
+export function stashArtifactsForPaste(input: ArtifactClipboardPayload) {
   const artifactIds = [...new Set(input.artifactIds.map((item) => item.trim()).filter(Boolean))];
   if (!artifactIds.length) {
     sessionStorage.removeItem(ARTIFACT_CLIPBOARD_KEY);
@@ -284,7 +301,12 @@ export function stashArtifactsForPaste(input: { artifactIds: string[]; includeTe
   }
   sessionStorage.setItem(
     ARTIFACT_CLIPBOARD_KEY,
-    JSON.stringify({ artifactIds, includeText: input.includeText } satisfies ArtifactClipboardPayload),
+    JSON.stringify({
+      artifactIds,
+      includeText: input.includeText,
+      copyToken: input.copyToken,
+      stashedAt: Date.now(),
+    } satisfies ArtifactClipboardPayload),
   );
 }
 
@@ -314,25 +336,49 @@ export interface ArtifactClipboardReadResult extends ArtifactClipboardPayload {
 export function readArtifactClipboardFromDataTransfer(dataTransfer: DataTransfer): ArtifactClipboardReadResult | null {
   const fromMime = parseArtifactClipboardPayload(dataTransfer.getData(ARTIFACT_CLIPBOARD_MIME));
   if (fromMime) {
-    return { ...fromMime, preferOverClipboardFiles: true };
+    return { ...resolveFreshArtifactClipboardPayload(fromMime), preferOverClipboardFiles: true };
   }
 
-  const fromHtml = parseArtifactIdsFromClipboardHtml(dataTransfer.getData("text/html"));
-  if (fromHtml?.length) {
-    const fromStash = readStashedArtifactClipboard();
-    return {
-      artifactIds: fromHtml,
-      includeText: fromStash?.includeText ?? true,
-      preferOverClipboardFiles: true,
-    };
+  const fromHtml = parseArtifactClipboardFromHtml(dataTransfer.getData("text/html"));
+  if (fromHtml?.artifactIds.length) {
+    const freshPayload = resolveFreshArtifactClipboardPayload(fromHtml);
+    return { ...freshPayload, preferOverClipboardFiles: true };
   }
 
-  const fromStash = readStashedArtifactClipboard();
-  if (fromStash?.artifactIds.length) {
-    return { ...fromStash, preferOverClipboardFiles: false };
+  const fromStash = readRecentStashedArtifactClipboard();
+  if (fromStash && shouldPreferRecentStashOverClipboard(dataTransfer)) {
+    return { ...fromStash, preferOverClipboardFiles: true };
   }
 
   return null;
+}
+
+function readRecentStashedArtifactClipboard(): ArtifactClipboardPayload | null {
+  const stash = readStashedArtifactClipboard();
+  if (!stash?.artifactIds.length || typeof stash.stashedAt !== "number") return null;
+  if (Date.now() - stash.stashedAt > ARTIFACT_CLIPBOARD_STASH_FALLBACK_MS) return null;
+  return stash;
+}
+
+export function readRecentArtifactClipboardStashForPaste(): ArtifactClipboardReadResult | null {
+  const stash = readRecentStashedArtifactClipboard();
+  return stash ? { ...stash, preferOverClipboardFiles: true } : null;
+}
+
+function shouldPreferRecentStashOverClipboard(dataTransfer: DataTransfer) {
+  if (dataTransfer.getData("text/plain").trim()) return false;
+  const hasClipboardFiles = dataTransfer.files.length > 0
+    || [...dataTransfer.items].some((item) => item.kind === "file");
+  return hasClipboardFiles || !dataTransfer.getData("text/html").trim();
+}
+
+function resolveFreshArtifactClipboardPayload(payload: ArtifactClipboardPayload): ArtifactClipboardPayload {
+  const fromStash = readStashedArtifactClipboard();
+  if (!fromStash?.artifactIds.length) return payload;
+  if (!payload.copyToken || !fromStash.copyToken || payload.copyToken !== fromStash.copyToken) {
+    return fromStash;
+  }
+  return payload;
 }
 
 export function parseArtifactClipboardPayload(payload: string): ArtifactClipboardPayload | null {
@@ -346,15 +392,34 @@ export function parseArtifactClipboardPayload(payload: string): ArtifactClipboar
 }
 
 export function parseArtifactIdsFromClipboardHtml(html: string) {
+  return parseArtifactClipboardFromHtml(html)?.artifactIds ?? null;
+}
+
+function escapeHtmlAttribute(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function parseArtifactClipboardFromHtml(html: string): ArtifactClipboardPayload | null {
   if (!html.trim()) return null;
   try {
     const doc = new DOMParser().parseFromString(html, "text/html");
     const ids = new Set<string>();
-    for (const element of doc.querySelectorAll("[data-artifact-id]")) {
+    let copyToken: string | undefined;
+    const markedElements = doc.querySelectorAll("[data-artifact-id][data-group-chat-copy-token]");
+    const elements = markedElements.length
+      ? markedElements
+      : doc.querySelectorAll("span[data-artifact-id]");
+    for (const element of elements) {
       const artifactId = element.getAttribute("data-artifact-id")?.trim();
       if (artifactId) ids.add(artifactId);
+      const elementCopyToken = element.getAttribute("data-group-chat-copy-token")?.trim();
+      if (elementCopyToken) copyToken = elementCopyToken;
     }
-    return ids.size ? [...ids] : null;
+    return ids.size ? { artifactIds: [...ids], includeText: true, copyToken } : null;
   } catch {
     return null;
   }
@@ -363,19 +428,20 @@ export function parseArtifactIdsFromClipboardHtml(html: string) {
 export async function copyMessagesToClipboard(input: { text: string; artifactIds: string[]; includeText?: boolean }) {
   const artifactIds = [...new Set(input.artifactIds.map((item) => item.trim()).filter(Boolean))];
   const includeText = input.includeText ?? true;
+  clearArtifactClipboardStash();
   const clipboardPayload: ArtifactClipboardPayload | null = artifactIds.length
-    ? { artifactIds, includeText }
+    ? { artifactIds, includeText, copyToken: crypto.randomUUID() }
     : null;
   if (clipboardPayload) {
     stashArtifactsForPaste(clipboardPayload);
-  } else {
-    sessionStorage.removeItem(ARTIFACT_CLIPBOARD_KEY);
   }
 
-  const plainText = includeText ? input.text : "";
+  const plainText = includeText ? input.text : ARTIFACT_ONLY_CLIPBOARD_PLAIN;
   const payload = clipboardPayload ? JSON.stringify(clipboardPayload) : "";
   const htmlText = clipboardPayload
-    ? artifactIds.map((artifactId) => `<span data-artifact-id="${artifactId}"></span>`).join("")
+    ? artifactIds.map((artifactId) =>
+        `<span data-artifact-id="${escapeHtmlAttribute(artifactId)}" data-group-chat-copy-token="${escapeHtmlAttribute(clipboardPayload.copyToken ?? "")}"></span>`,
+      ).join("")
     : "";
   try {
     if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {

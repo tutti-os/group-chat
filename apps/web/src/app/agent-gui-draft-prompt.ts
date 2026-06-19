@@ -4,11 +4,12 @@ import {
   primaryMessageLinkId,
   summaryLinkLabel,
 } from "./chat-links.js";
+import { isAgentLauncherAppId } from "./agent-launcher-mentions.js";
 import {
   contentHasReferenceMentions,
   splitContentByReferenceMentions,
 } from "./reference-mentions.js";
-import { readCachedTuttiWorkspaceId } from "./tutti-bridge.js";
+import { buildTuttiMentionHref, readCachedTuttiWorkspaceId, resolveArtifactAgentDraftHref } from "./tutti-bridge.js";
 
 const AGENT_LAUNCHER_ENTITY_IDS = new Set(["agent-claude-code", "agent-codex"]);
 
@@ -24,7 +25,7 @@ const MARKDOWN_MESSAGE_LINK_PATTERN = new RegExp(
 const BARE_SUMMARY_LINK_PATTERN = /(?<!\]\()group-chat:\/\/summary\/([A-Za-z0-9_-]+)/g;
 const MARKDOWN_SUMMARY_LINK_PATTERN = /\[([^\]]+)\]\(group-chat:\/\/summary\/([A-Za-z0-9_-]+)\)/g;
 const GROUP_CHAT_REFERENCE_FILE_PATTERN =
-  /\[([^\]]+)\]\(group-chat:\/\/reference\/(file|agent-generated-file)\/([^)]+)\)/g;
+  /(!?)\[([^\]]+)\]\(group-chat:\/\/reference\/(file|agent-generated-file)\/([^)]+)\)/g;
 
 export interface AgentGuiDraftPromptContext {
   artifacts?: Array<Pick<Artifact, "id" | "localPath">>;
@@ -36,6 +37,9 @@ export interface AgentGuiDraftPromptContext {
   workspaceId?: string | null;
 }
 
+const GROUP_CHAT_REFERENCE_OPENABLE_PATTERN =
+  /\[([^\]]+)\]\(group-chat:\/\/reference\/(workspace-app|workspace-issue|agent-session)\/([^)]+)\)/g;
+
 export function buildAgentGuiDraftPrompt(
   content: string,
   mentions: MentionTarget[],
@@ -43,6 +47,7 @@ export function buildAgentGuiDraftPrompt(
 ): string {
   let result = content.trim();
   result = upgradeGroupChatReferenceFileLinks(result, mentions, context);
+  result = upgradeGroupChatOpenableReferenceLinks(result, mentions, context);
   result = upgradeMessageLinks(result, context);
   result = upgradeSummaryLinks(result, context);
   result = stripAgentLauncherMentions(result, mentions);
@@ -140,7 +145,7 @@ function upgradeGroupChatReferenceFileLinks(
 ) {
   return content.replace(
     GROUP_CHAT_REFERENCE_FILE_PATTERN,
-    (full, label, provider, encodedEntityId) => {
+    (full, imagePrefix, label, provider, encodedEntityId) => {
       let entityId = encodedEntityId;
       try {
         entityId = decodeURIComponent(encodedEntityId);
@@ -157,7 +162,40 @@ function upgradeGroupChatReferenceFileLinks(
           ? mention.referenceInsert.href.trim()
           : entityId;
       const artifact = findDraftPromptArtifact(entityId, fileHref, context.artifacts ?? []);
-      const href = artifact?.localPath?.trim() || fileHref;
+      const href = resolveArtifactAgentDraftHref(artifact, fileHref);
+      if (!href) return full;
+      return `[${label}](${href})`;
+    },
+  );
+}
+
+function upgradeGroupChatOpenableReferenceLinks(
+  content: string,
+  mentions: MentionTarget[],
+  context: AgentGuiDraftPromptContext,
+) {
+  return content.replace(
+    GROUP_CHAT_REFERENCE_OPENABLE_PATTERN,
+    (full, label, provider, encodedEntityId) => {
+      let entityId = encodedEntityId;
+      try {
+        entityId = decodeURIComponent(encodedEntityId);
+      } catch {
+        // keep raw entity id
+      }
+      if (provider === "workspace-app" && isAgentLauncherAppId(entityId)) {
+        return label;
+      }
+      const mention = mentions.find((item) =>
+        item.mentionType === "reference"
+        && item.referenceProviderId === provider
+        && item.referenceEntityId === entityId,
+      );
+      const href = buildTuttiMentionHref(provider, entityId, {
+        referenceInsert: mention?.referenceInsert,
+        referenceScope: mention?.referenceScope,
+        workspaceId: context.workspaceId,
+      });
       if (!href) return full;
       return `[${label}](${href})`;
     },
