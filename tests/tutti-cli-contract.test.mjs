@@ -85,6 +85,34 @@ test("Tutti CLI handlers expose public conversation data only", async (t) => {
     title: "Empty recent room",
   });
   assert.equal(emptyRecentRoom.status, 200);
+  const attachmentCopyRoom = await postJson(server.baseUrl, "/api/rooms", {
+    title: "Attachment copy room",
+  });
+  assert.equal(attachmentCopyRoom.status, 200);
+
+  const copiedAttachmentMessage = await postJson(
+    server.baseUrl,
+    `/api/conversations/${attachmentCopyRoom.body.conversation.id}/messages`,
+    {
+      artifactIds: [publicArtifact.body.artifact.id],
+      content: "cross-conversation attachment copy",
+      mentions: [],
+      visibility: "public",
+    },
+  );
+  assert.equal(copiedAttachmentMessage.status, 200);
+  const copiedArtifact = copiedAttachmentMessage.body.artifacts[0];
+  assert.notEqual(copiedArtifact.id, publicArtifact.body.artifact.id);
+  assert.equal(copiedArtifact.messageId, copiedAttachmentMessage.body.message.id);
+  assert.equal(copiedArtifact.conversationId, attachmentCopyRoom.body.conversation.id);
+  assert.equal(copiedArtifact.roomId, attachmentCopyRoom.body.room.id);
+
+  const snapshotAfterCopy = await getJson(server.baseUrl, "/api/bootstrap");
+  assert.equal(snapshotAfterCopy.status, 200);
+  const originalArtifactAfterCopy = snapshotAfterCopy.body.artifacts.find(
+    (artifact) => artifact.id === publicArtifact.body.artifact.id,
+  );
+  assert.equal(originalArtifactAfterCopy.messageId, publicMessage.body.message.id);
 
   const rootReferences = await postJson(server.baseUrl, "/tutti/references/list", {
     limit: 50,
@@ -208,6 +236,13 @@ async function postJson(baseUrl, pathName, body) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
+  const text = await response.text();
+  const parsed = text ? JSON.parse(text) : null;
+  return { status: response.status, body: parsed };
+}
+
+async function getJson(baseUrl, pathName) {
+  const response = await fetch(`${baseUrl}${pathName}`);
   const text = await response.text();
   const parsed = text ? JSON.parse(text) : null;
   return { status: response.status, body: parsed };

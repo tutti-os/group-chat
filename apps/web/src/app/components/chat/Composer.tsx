@@ -13,6 +13,7 @@ import {
   formatSummaryLink,
   isArtifactOnlyClipboardPlainText,
   parseMessageLinkIds,
+  primaryMessageLinkId,
   readArtifactClipboardFromDataTransfer,
   readRecentArtifactClipboardStashForPaste,
   readStashedSummaryLink,
@@ -111,8 +112,10 @@ export function Composer(props: {
   focusRequest: { seq: number } | null;
   summaryTasks: BackgroundTask[];
   onOpenSummaryLink?: (taskId: string) => void;
+  onOpenMessageLink?: (messageId: string) => void;
   userDisplayName: string;
   artifacts: Artifact[];
+  allArtifacts: Artifact[];
   onFocusRoomFile?: (input: { messageId: string; artifactId: string }) => void;
   composerRequest:
     | { type: "insert"; seq: number; content: string }
@@ -882,7 +885,7 @@ export function Composer(props: {
   const resolvePastedArtifacts = (clipboardData: DataTransfer, pastedText: string) => {
     const payload = readArtifactClipboardFromDataTransfer(clipboardData);
     if (payload?.artifactIds.length) {
-      const artifacts = resolveArtifactsByIds(payload.artifactIds, props.artifacts);
+      const artifacts = resolveArtifactsByIds(payload.artifactIds, props.allArtifacts);
       if (artifacts.length > 0) {
         let preferOverClipboardFiles = payload.preferOverClipboardFiles;
         const files = clipboardFiles(clipboardData);
@@ -902,7 +905,7 @@ export function Composer(props: {
     if (!pastedText.trim()) {
       const stash = readRecentArtifactClipboardStashForPaste();
       if (stash?.artifactIds.length) {
-        const artifacts = resolveArtifactsByIds(stash.artifactIds, props.artifacts);
+        const artifacts = resolveArtifactsByIds(stash.artifactIds, props.allArtifacts);
         if (artifacts.length > 0) {
           return {
             artifacts,
@@ -1025,7 +1028,7 @@ export function Composer(props: {
 
     const recentArtifactStash = readRecentArtifactClipboardStashForPaste();
     if (recentArtifactStash && !recentArtifactStash.includeText) {
-      const stashArtifacts = resolveArtifactsByIds(recentArtifactStash.artifactIds, props.artifacts);
+      const stashArtifacts = resolveArtifactsByIds(recentArtifactStash.artifactIds, props.allArtifacts);
       if (stashArtifacts.length > 0) {
         event.preventDefault();
         applyPastedArtifacts({
@@ -1530,12 +1533,21 @@ export function Composer(props: {
                 syncEditorText(true);
               }}
               onMouseDown={(event) => {
+                const messageChip = (event.target as Element).closest("[data-message-link-id]");
+                if (messageChip) event.preventDefault();
                 const summaryChip = (event.target as Element).closest("[data-summary-link-id]");
                 if (summaryChip) event.preventDefault();
                 const linkChip = (event.target as Element).closest('[data-mention-display-mode="reference-link"]');
                 if (linkChip) event.preventDefault();
               }}
               onClick={(event) => {
+                const messageChip = (event.target as Element).closest("[data-message-link-id]");
+                if (messageChip instanceof HTMLElement) {
+                  event.preventDefault();
+                  const messageId = primaryMessageLinkId(messageChip.dataset.messageLinkId ?? "");
+                  if (messageId) props.onOpenMessageLink?.(messageId);
+                  return;
+                }
                 const summaryChip = (event.target as Element).closest("[data-summary-link-id]");
                 if (summaryChip instanceof HTMLElement) {
                   event.preventDefault();
