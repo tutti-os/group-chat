@@ -10,6 +10,12 @@ export function formatMessageStatus(status: Message["status"]) {
   return status;
 }
 
+export function formatMessageTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+}
+
 export function listenModeLabel(mode: ParticipantListenMode) {
   if (mode === "active") return "A";
   if (mode === "passive") return "P";

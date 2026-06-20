@@ -992,7 +992,15 @@ export class ChatRepository {
   attachArtifactToMessage(artifactId: string, messageId: string) {
     const artifact = this.getArtifact(artifactId);
     if (!artifact) return null;
-    if (!artifact.messageId || artifact.messageId === messageId) {
+    const message = this.getMessage(messageId);
+    if (!message) return null;
+    const conversation = this.getConversation(message.conversationId);
+    if (!conversation) return null;
+    if (
+      (!artifact.messageId || artifact.messageId === messageId)
+      && artifact.conversationId === conversation.id
+      && artifact.roomId === conversation.roomId
+    ) {
       getDb().prepare(`UPDATE artifacts SET message_id = ? WHERE id = ?`).run(messageId, artifactId);
       return this.getArtifact(artifactId);
     }
@@ -1006,8 +1014,8 @@ export class ChatRepository {
       )
       .run(
         id,
-        artifact.roomId,
-        artifact.conversationId,
+        conversation.roomId,
+        conversation.id,
         messageId,
         artifact.sourceRunId,
         artifact.kind,

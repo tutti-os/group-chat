@@ -45,11 +45,36 @@ export function enrichMessageContentForCopy(
 
 export function normalizeComposerPasteText(html: string, plain: string) {
   const fromHtml = clipboardHtmlToComposerMarkdown(html);
-  if (!fromHtml) return plain.replace(/\r\n?/g, "\n");
-  const normalizedPlain = plain.replace(/\r\n?/g, "\n");
-  if (!normalizedPlain.trim()) return fromHtml;
-  if (fromHtml.includes("](group-chat://") || fromHtml.includes("](mention://")) return fromHtml;
+  const normalizedPlain = sanitizeComposerPasteText(plain.replace(/\u200b/g, "").replace(/\r\n?/g, "\n"));
+  if (!fromHtml) return normalizedPlain;
+  const normalizedHtml = sanitizeComposerPasteText(fromHtml.replace(/\u200b/g, ""));
+  if (!normalizedPlain.trim()) return normalizedHtml;
+  if (normalizedHtml.includes("](group-chat://") || normalizedHtml.includes("](mention://")) return normalizedHtml;
   return normalizedPlain;
+}
+
+const MEANINGFUL_GROUP_CHAT_LINK_PATTERN = /group-chat:\/\/(?:message\/[A-Za-z0-9_-]+(?:,[A-Za-z0-9_-]+)*|summary\/[A-Za-z0-9_-]+)/g;
+const MEANINGFUL_GROUP_CHAT_MARKDOWN_PATTERN = /\[[^\]]+\]\(group-chat:\/\/(?:reference|participant)\/[^)]+\)/g;
+const INTERNAL_GROUP_CHAT_TOKEN_PATTERN = /group-chat:\/\/[^\s]*/g;
+
+/** Removes leaked or incomplete internal protocol URLs while retaining links the composer renders as structured content. */
+export function sanitizeComposerPasteText(value: string) {
+  const protectedValues: string[] = [];
+  const protect = (match: string) => {
+    const index = protectedValues.push(match) - 1;
+    return `\uE000${index}\uE001`;
+  };
+
+  const protectedText = value
+    .replace(MEANINGFUL_GROUP_CHAT_MARKDOWN_PATTERN, protect)
+    .replace(MEANINGFUL_GROUP_CHAT_LINK_PATTERN, protect);
+  const withoutLeakedLinks = protectedText
+    .replace(/^[ \t]*group-chat:\/\/[^\s]*[ \t]*(?:\n|$)/gm, "")
+    .replace(INTERNAL_GROUP_CHAT_TOKEN_PATTERN, "")
+    .replace(/[ \t]+(?=\n|$)/g, "")
+    .replace(/(^|\n)[ \t]*(?=\n|$)/g, "$1");
+
+  return withoutLeakedLinks.replace(/\uE000(\d+)\uE001/g, (_match, index: string) => protectedValues[Number(index)] ?? "");
 }
 
 function clipboardHtmlToComposerMarkdown(html: string) {

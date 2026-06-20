@@ -7,7 +7,7 @@ import type { Artifact, AgentRun, AgentRunEvent, Conversation, Identity, Message
 import { isLocalUserMessage, resolveMessageVisibility, enrichAssistantContentWithWorkspaceResourceLinks, resolveTriggerUserMentions } from "@group-chat/shared";
 import { revealArtifactInTuttiFileManager } from "../../artifact-actions.js";
 import { enrichMessageContentForCopy } from "../../composer-paste-content.js";
-import { formatBytes, formatMessageStatus } from "../../formatting.js";
+import { formatBytes, formatMessageStatus, formatMessageTime } from "../../formatting.js";
 import { TuttiMessageLinkIcon } from "../../tutti-reference-icons.js";
 import type { LocalUserProfile } from "../../user-profile.js";
 import { UserAvatar, type UserAvatarSize } from "../ui/UserAvatar.js";
@@ -39,6 +39,8 @@ import { MessageReferenceContent } from "./MessageReferenceContent.js";
 import { isMessageGroupBreak, MESSAGE_GROUP_IDLE_MS } from "../../message-group-breaks.js";
 import { attachmentLabel, t, translateAgentError, translateSystemNotice, useTranslation } from "../../i18n/index.js";
 import { resolveSummaryCardPresentation, SUMMARY_LINK_CARD_CLASS } from "../../summary-link-card.js";
+import { resolveLinkedMessagePreviewBlocks } from "../../message-card-elements.js";
+import { resolveMessageHoverTimePosition } from "../../message-hover-layout.js";
 
 const COLLAPSED_MESSAGE_CHAR_LIMIT = 800;
 const COPY_TIP_OFFSET_PX = 8;
@@ -163,7 +165,9 @@ export function MessageTimeline(props: {
   messages: Message[];
   allMessages: Message[];
   blocks: MessageBlock[];
+  allBlocks: MessageBlock[];
   artifacts: Artifact[];
+  allArtifacts: Artifact[];
   agentRunEvents: AgentRunEvent[];
   agentRuns: AgentRun[];
   participants: Participant[];
@@ -649,7 +653,8 @@ export function MessageTimeline(props: {
           isLastInGroup={groupLayout.isLastInGroup}
           quotedMessage={resolveReferencedMessage(message, props.messages, props.allParticipants, props.identities)}
           blocks={blocksByMessageId.get(message.id) ?? EMPTY_MESSAGE_BLOCKS}
-          artifacts={props.artifacts}
+          allBlocks={props.allBlocks}
+          artifacts={props.allArtifacts}
           agentRunEvents={props.agentRunEvents}
           agentRuns={props.agentRuns}
           allMessages={props.allMessages}
@@ -1079,6 +1084,7 @@ function MessageRow(props: {
   isLastInGroup: boolean;
   quotedMessage: Message | null;
   blocks: MessageBlock[];
+  allBlocks: MessageBlock[];
   artifacts: Artifact[];
   agentRunEvents: AgentRunEvent[];
   agentRuns: AgentRun[];
@@ -1288,7 +1294,7 @@ function MessageRow(props: {
                 key={block.id}
                 block={block}
                 artifacts={props.artifacts}
-                allBlocks={props.blocks}
+                allBlocks={props.allBlocks}
                 allMessages={props.allMessages}
                 allParticipants={props.allParticipants}
                 identities={props.identities}
@@ -1330,7 +1336,7 @@ function MessageRow(props: {
                   updatedAt: props.message.updatedAt,
                 }}
                 artifacts={props.artifacts}
-                allBlocks={props.blocks}
+                allBlocks={props.allBlocks}
                 allMessages={props.allMessages}
                 allParticipants={props.allParticipants}
                 identities={props.identities}
@@ -2570,12 +2576,6 @@ function restoreTimelineScroll(container: HTMLElement, scrollTop: number) {
   window.setTimeout(apply, 48);
 }
 
-function formatMessageTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
 async function copyTextToClipboard(text: string) {
   if (!text) return;
   try {
@@ -2621,13 +2621,18 @@ function RuntimeEventGroup(props: { blocks: MessageBlock[]; artifacts: Artifact[
 }
 
 const MESSAGE_ACTION_BAR_GAP_PX = 4;
-const MESSAGE_HOVER_TIME_GAP_PX = 6;
-const MESSAGE_ACTION_ANCHOR_SELECTOR = '[data-slot="message-block"], [data-slot="artifact-block"]';
+const MESSAGE_ACTION_ANCHOR_SELECTOR = '[data-message-action-anchor], [data-slot="message-block"], [data-slot="artifact-block"]';
 
 type MessageBubbleAnchor = { top: number; left: number; width: number; height: number };
 
 function resolveDefaultMessageActionAnchor(body: HTMLElement): HTMLElement | null {
   const anchors = body.querySelectorAll(MESSAGE_ACTION_ANCHOR_SELECTOR);
+  for (let index = anchors.length - 1; index >= 0; index -= 1) {
+    const candidate = anchors.item(index);
+    if (candidate instanceof HTMLElement && candidate.hasAttribute("data-message-action-anchor")) {
+      return candidate;
+    }
+  }
   for (let index = anchors.length - 1; index >= 0; index -= 1) {
     const candidate = anchors.item(index);
     if (candidate instanceof HTMLElement && candidate.dataset.slot === "artifact-block") {
@@ -2655,13 +2660,6 @@ function measureMessageActionBarPosition(anchor: MessageBubbleAnchor): { top: nu
   return {
     top: anchor.top,
     left: anchor.left + anchor.width + MESSAGE_ACTION_BAR_GAP_PX,
-  };
-}
-
-function measureHoverTimePosition(anchor: MessageBubbleAnchor): { top: number; left: number } {
-  return {
-    top: anchor.top + anchor.height / 2,
-    left: anchor.left - MESSAGE_HOVER_TIME_GAP_PX,
   };
 }
 
@@ -2792,7 +2790,7 @@ function MessageBodyShell(props: {
   }, [props.onOpenMenu]);
 
   const actionBarPosition = bubbleAnchor ? measureMessageActionBarPosition(bubbleAnchor) : null;
-  const hoverTimePosition = bubbleAnchor ? measureHoverTimePosition(bubbleAnchor) : null;
+  const hoverTimePosition = bubbleAnchor ? resolveMessageHoverTimePosition(bubbleAnchor) : null;
 
   useLayoutEffect(() => {
     updateBubbleAnchor();
@@ -3114,6 +3112,7 @@ function SummaryLinkCard(props: {
   return (
     <button
       type="button"
+      data-message-action-anchor
       className={SUMMARY_LINK_CARD_CLASS}
       onClick={props.onOpen}
     >
@@ -3182,6 +3181,7 @@ function MessageLinkCard(props: {
   );
   return (
     <div
+      data-message-action-anchor
       className={embeddedLinkCardClassName}
       role="group"
       aria-label={linkLabel}
@@ -3254,34 +3254,12 @@ function LinkedMessageCardBody(props: {
   }
 
   const message = props.message;
-  if (props.artifactBlocks.length) {
-    return (
-      <span className={"[display:grid] [gap:3px]"}>
-        {props.artifactBlocks.map((block) => (
-          <MessageBlockRenderer
-            key={block.id}
-            block={block}
-            artifacts={props.artifacts}
-            onOpenArtifact={props.onOpenArtifact}
-          />
-        ))}
-      </span>
-    );
-  }
-
-  const previewBlocks: MessageBlock[] = props.textBlocks.length
-    ? props.textBlocks
-    : [{
-        id: `${message.id}-link-preview`,
-        messageId: message.id,
-        type: "main_text" as const,
-        content: message.content || attachmentLabel(),
-        status: "success",
-        metadata: null,
-        sortOrder: 0,
-        createdAt: message.createdAt,
-        updatedAt: message.updatedAt,
-      }];
+  const previewBlocks = resolveLinkedMessagePreviewBlocks(
+    message,
+    props.textBlocks,
+    props.artifactBlocks,
+    attachmentLabel(),
+  );
 
   return (
     <span className={"[display:grid] [gap:4px] [&_[data-slot=message-block]]:[padding:0] [&_[data-slot=message-block]]:[font-size:13px] [&_[data-slot=message-block]]:[font-weight:600]"}>

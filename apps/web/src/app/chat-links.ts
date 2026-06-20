@@ -403,6 +403,14 @@ function escapeHtmlAttribute(value: string) {
     .replaceAll(">", "&gt;");
 }
 
+function escapeClipboardHtmlText(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\n", "<br>");
+}
+
 function parseArtifactClipboardFromHtml(html: string): ArtifactClipboardPayload | null {
   if (!html.trim()) return null;
   try {
@@ -439,9 +447,9 @@ export async function copyMessagesToClipboard(input: { text: string; artifactIds
   const plainText = includeText ? input.text : ARTIFACT_ONLY_CLIPBOARD_PLAIN;
   const payload = clipboardPayload ? JSON.stringify(clipboardPayload) : "";
   const htmlText = clipboardPayload
-    ? artifactIds.map((artifactId) =>
-        `<span data-artifact-id="${escapeHtmlAttribute(artifactId)}" data-group-chat-copy-token="${escapeHtmlAttribute(clipboardPayload.copyToken ?? "")}"></span>`,
-      ).join("")
+    ? `${includeText && input.text ? `<span data-group-chat-copy-text>${escapeClipboardHtmlText(input.text)}</span>` : ""}${artifactIds.map((artifactId) =>
+        `<span data-artifact-id="${escapeHtmlAttribute(artifactId)}" data-group-chat-copy-token="${escapeHtmlAttribute(clipboardPayload.copyToken ?? "")}">${ARTIFACT_ONLY_CLIPBOARD_PLAIN}</span>`,
+      ).join("")}`
     : "";
   try {
     if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {

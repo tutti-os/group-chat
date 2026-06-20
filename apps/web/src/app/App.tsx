@@ -77,6 +77,7 @@ import { dispatchAgentGuiTask, type TuttiAgentGuiProvider } from "./agent-gui-di
 import { localAgentLauncherAppId, resolveAgentGuiProviderFromRuntimeProvider } from "./agent-launcher-mentions.js";
 import {
   fetchAvailableAgentLauncherAppIds,
+  isAgentLauncherAvailable,
   readCachedAvailableAgentLauncherAppIds,
   sameStringSet,
 } from "./agent-launcher-availability.js";
@@ -230,6 +231,9 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
+    const launcherRefreshTimers = [0, 250, 900, 1800].map((delayMs) => window.setTimeout(() => {
+      if (!cancelled) refreshAvailableAgentLauncherApps({ force: true });
+    }, delayMs));
     fetchSnapshot()
       .then((snapshot) => {
         if (cancelled) return;
@@ -247,9 +251,9 @@ export function App() {
         // If a cached snapshot is already rendered, keep it visible until reconnect succeeds.
       });
     void refreshLocalAgentProviders();
-    refreshAvailableAgentLauncherApps();
     return () => {
       cancelled = true;
+      launcherRefreshTimers.forEach((timer) => window.clearTimeout(timer));
     };
   }, [refreshAvailableAgentLauncherApps, refreshLocalAgentProviders]);
 
@@ -439,6 +443,7 @@ export function App() {
     [currentConversation, state.artifacts],
   );
   const agentForwardTargets = useMemo<AgentForwardTarget[]>(() => {
+    const agentGuiBridgeAvailable = Boolean(window.tuttiExternal?.workspace?.openFeature);
     const targets = listCanonicalRuntimeProfiles(state.runtimeProfiles)
       .filter((profile) => profile.kind === "local-agent")
       .map((profile): AgentForwardTarget | null => {
@@ -446,7 +451,12 @@ export function App() {
         if (!provider) return null;
         const status = localAgentStatus(profile, localAgentProviders);
         const launcherAppId = localAgentLauncherAppId(profile.provider);
-        if (launcherAppId && !availableAgentLauncherAppIds.has(launcherAppId)) return null;
+        if (launcherAppId && !isAgentLauncherAvailable(
+          launcherAppId,
+          availableAgentLauncherAppIds,
+          status?.available === true,
+          agentGuiBridgeAvailable,
+        )) return null;
         if (!launcherAppId && !status?.available) return null;
         const target: AgentForwardTarget = {
           provider,
@@ -1452,7 +1462,9 @@ export function App() {
                   messages={currentMessages}
                   allMessages={state.messages}
                   blocks={currentMessageBlocks}
+                  allBlocks={state.messageBlocks}
                   artifacts={currentArtifacts}
+                  allArtifacts={state.artifacts}
                   agentRunEvents={state.agentRunEvents}
                   agentRuns={state.agentRuns}
                   participants={currentParticipants}
@@ -1587,8 +1599,10 @@ export function App() {
                         composerRequest={composerRequest}
                         summaryTasks={backgroundTasks}
                         onOpenSummaryLink={openSummaryLink}
+                        onOpenMessageLink={openMessageLink}
                         userDisplayName={userProfile.displayName}
                         artifacts={currentArtifacts}
+                        allArtifacts={state.artifacts}
                         onFocusRoomFile={({ messageId, artifactId }) => {
                           setFocusMessageRequest((current) => ({
                             messageId,

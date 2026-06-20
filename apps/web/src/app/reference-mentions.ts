@@ -239,7 +239,7 @@ function resolveReferenceSegmentForAgentForward(
   if (!parsed) return segment.label;
 
   if (parsed.providerId === "file" || parsed.providerId === "agent-generated-file") {
-    return segment.label;
+    return `[${segment.label}](${segment.href})`;
   }
 
   if (isParticipantMentionHref(segment.href)) {
