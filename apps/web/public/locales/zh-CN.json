@@ -161,7 +161,7 @@
   "messageActions.summarize": "总结",
   "messageActions.viewThinking": "查看思考过程",
   "messageActions.copyLink": "复制消息链接",
-  "messageActions.forwardTo": "发送给 agent",
+  "messageActions.forwardTo": "发送给 Tutti Agent",
   "messageActions.tuttiAgent": "tutti agent",
   "messageActions.noTuttiAgentsAvailable": "暂无可用 Tutti Agent。",
   "messageActions.forwardToAgentFailed": "无法打开 Tutti Agent 输入框。",

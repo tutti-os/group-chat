@@ -161,7 +161,7 @@
   "messageActions.summarize": "Summarize",
   "messageActions.viewThinking": "View thinking",
   "messageActions.copyLink": "Copy message link",
-  "messageActions.forwardTo": "Send to agent",
+  "messageActions.forwardTo": "Send to Tutti Agent",
   "messageActions.tuttiAgent": "Tutti agent",
   "messageActions.noTuttiAgentsAvailable": "No available Tutti agents.",
   "messageActions.forwardToAgentFailed": "Unable to open the Tutti agent input.",
