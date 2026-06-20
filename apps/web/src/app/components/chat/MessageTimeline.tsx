@@ -1486,7 +1486,7 @@ function ForwardToAgentAction(props: {
   moreMenuOpen: boolean;
   onCloseMenu: () => void;
 }) {
-  const { closeMenu, open, toggleMenu } = useForwardSubmenuHover();
+  const { anchorRef, closeMenu, open, toggleMenu } = useForwardSubmenuHover();
 
   useEffect(() => {
     if (!props.active) closeMenu();
@@ -1498,6 +1498,7 @@ function ForwardToAgentAction(props: {
 
   return (
     <div
+      ref={anchorRef}
       className={"[position:relative] [display:inline-grid]"}
     >
       <button
@@ -1534,7 +1535,10 @@ function ForwardToAgentAction(props: {
             variant="inline"
             attach="below"
             targets={props.targets}
-            onForward={props.onForward}
+            onForward={(provider) => {
+              closeMenu();
+              props.onForward(provider);
+            }}
           />
         </div>
       ) : null}
@@ -1692,6 +1696,19 @@ function useForwardSubmenuHover() {
 
   useEffect(() => () => clearCloseTimer(), [clearCloseTimer]);
 
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (anchorRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest("[data-agent-forward-submenu]")) return;
+      closeMenu();
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [closeMenu, open]);
+
   return { anchorRef, closeMenu, open, openMenu, scheduleClose, toggleMenu };
 }
 
@@ -1728,7 +1745,7 @@ function ForwardToAgentMenuItem(props: {
   onForward: (provider: TuttiAgentGuiProvider) => void;
   onLayoutChange?: () => void;
 }) {
-  const { open, toggleMenu } = useForwardSubmenuHover();
+  const { anchorRef, closeMenu, open, toggleMenu } = useForwardSubmenuHover();
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -1737,6 +1754,7 @@ function ForwardToAgentMenuItem(props: {
 
   return (
     <div
+      ref={anchorRef}
       className={"[min-width:0] [overflow:hidden]"}
     >
       <button
@@ -1758,7 +1776,10 @@ function ForwardToAgentMenuItem(props: {
         <AgentForwardSubmenu
           variant="inline"
           targets={props.targets}
-          onForward={props.onForward}
+          onForward={(provider) => {
+            closeMenu();
+            props.onForward(provider);
+          }}
         />
       ) : null}
     </div>
@@ -1769,7 +1790,7 @@ function ForwardToAgentToolbarItem(props: {
   targets: AgentForwardTarget[];
   onForward: (provider: TuttiAgentGuiProvider) => void;
 }) {
-  const { anchorRef, open, toggleMenu } = useForwardSubmenuHover();
+  const { anchorRef, closeMenu, open, toggleMenu } = useForwardSubmenuHover();
   const [menuStyle, setMenuStyle] = useState<CSSProperties>({ visibility: "hidden" });
 
   useLayoutEffect(() => {
@@ -1798,7 +1819,10 @@ function ForwardToAgentToolbarItem(props: {
       {open ? createPortal(
         <AgentForwardSubmenu
           targets={props.targets}
-          onForward={props.onForward}
+          onForward={(provider) => {
+            closeMenu();
+            props.onForward(provider);
+          }}
           className={"[position:fixed] [display:grid]"}
           style={{ ...menuStyle, zIndex: AGENT_FORWARD_SUBMENU_Z_INDEX }}
         />,
@@ -1841,17 +1865,13 @@ function AgentForwardSubmenu(props: {
   return (
     <div
       className={`${shellClass} ${props.className ?? ""}`}
+      data-agent-forward-submenu
       style={props.style}
       role="menu"
       onPointerDown={(event) => event.stopPropagation()}
       onMouseEnter={props.onMouseEnter}
       onMouseLeave={props.onMouseLeave}
     >
-      {!isInline ? (
-        <div className={"[padding:6px_8px_5px] [color:var(--muted)] [font-size:11px] [font-weight:650] [line-height:16px]"}>
-          {t("messageActions.tuttiAgent")}
-        </div>
-      ) : null}
       {props.targets.length ? props.targets.map((target, index) => (
         <button
           key={target.provider}
@@ -2481,7 +2501,7 @@ function ToolbarButton(props: {
   return (
     <button
       type="button"
-      className={`[display:inline-flex] [height:34px] [align-items:center] [gap:6px] [border:1px_solid_transparent] [border-radius:999px] [padding:0_12px] [font-size:12px] [font-weight:780] [letter-spacing:-0.01em] [white-space:nowrap] [transition:transform_0.12s_ease,_box-shadow_0.12s_ease,_background_0.12s_ease,_border-color_0.12s_ease] hover:[transform:translateY(-1px)] focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:2px] ${props.danger ? "[border-color:#fecdd3] [color:#be123c] [background:#fff1f2] hover:[background:#ffe4e6] hover:[box-shadow:0_8px_20px_rgb(190_18_60_/_14%)]" : "[color:#111827] [background:#f8fafc] hover:[border-color:#dbe3ef] hover:[background:#ffffff] hover:[box-shadow:0_8px_20px_rgb(15_23_42_/_10%)]"}`}
+      className={`[display:inline-flex] [height:34px] [align-items:center] [gap:6px] [border:1px_solid_transparent] [border-radius:999px] [padding:0_12px] [font-size:12px] [font-weight:780] [letter-spacing:-0.01em] [white-space:nowrap] [transition:transform_0.12s_ease,_box-shadow_0.12s_ease,_background_0.12s_ease,_border-color_0.12s_ease] hover:[transform:translateY(-1px)] focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:2px] ${props.danger ? "[border-color:#fecdd3] [color:#be123c] [background:#fff1f2] hover:[background:#ffe4e6] hover:[box-shadow:0_8px_20px_rgb(190_18_60_/_14%)]" : "[color:#111827] [background:#eef2f6] hover:[border-color:#d5dde8] hover:[background:#f8fafc] hover:[box-shadow:0_8px_20px_rgb(15_23_42_/_10%)]"}`}
       onClick={props.onClick}
     >
       {props.icon ? <span className={"[display:grid] [place-items:center] [color:currentColor]"}>{props.icon}</span> : null}
