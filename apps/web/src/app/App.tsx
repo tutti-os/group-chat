@@ -43,6 +43,8 @@ import {
 import { ConversationSidebar } from "./components/chat/ConversationSidebar.js";
 import { ChatHeader } from "./components/chat/ChatHeader.js";
 import { ConversationFilesPanel } from "./components/chat/ConversationFilesPanel.js";
+import { MessageLinkDetailPanel } from "./components/chat/MessageLinkDetailPanel.js";
+import { revealArtifactInTuttiFileManager } from "./artifact-actions.js";
 import { AgentRunPanel } from "./components/chat/AgentRunPanel.js";
 import { AgentThinkingPanel } from "./components/chat/AgentThinkingPanel.js";
 import { RoomAgentsDialog } from "./components/chat/RoomAgentsDialog.js";
@@ -188,6 +190,7 @@ export function App() {
   const [backgroundTasks, setBackgroundTasks] = useState<BackgroundTask[]>([]);
   const [dismissedBackgroundTaskIds, setDismissedBackgroundTaskIds] = useState<Set<string>>(() => loadDismissedBackgroundTaskIds());
   const [openBackgroundTaskId, setOpenBackgroundTaskId] = useState<string | null>(null);
+  const [openMessageLinkSegment, setOpenMessageLinkSegment] = useState<string | null>(null);
   const [conversationReadAt, setConversationReadAt] = useState<ConversationReadAtMap>(() => loadConversationReadAt());
   const previousConversationIdRef = useRef<string | null>(null);
 
@@ -950,11 +953,13 @@ export function App() {
       window.alert(t("app.summaryNotFound"));
       return;
     }
-    setCurrentConversationId(message.conversationId);
-    setFocusMessageRequest((current) => ({
-      messageId,
-      seq: (current?.seq ?? 0) + 1,
-    }));
+    setOpenMessageLinkSegment(messageId);
+    setOpenBackgroundTaskId(null);
+    setOpenThinkingMessageId(null);
+  };
+
+  const closeMessageLinkPanel = () => {
+    setOpenMessageLinkSegment(null);
   };
 
   const ensureBackgroundTask = useCallback(async (taskId: string) => {
@@ -1450,6 +1455,26 @@ export function App() {
                       seq: (current?.seq ?? 0) + 1,
                     }));
                     setFilesPanelOpen(false);
+                  }}
+                />
+                <MessageLinkDetailPanel
+                  open={Boolean(openMessageLinkSegment)}
+                  messageIdSegment={openMessageLinkSegment ?? ""}
+                  messages={state.messages}
+                  blocks={state.messageBlocks}
+                  artifacts={state.artifacts}
+                  participants={state.participants}
+                  identities={state.identities}
+                  conversations={state.conversations}
+                  rooms={state.rooms}
+                  runtimeProfiles={state.runtimeProfiles}
+                  userProfile={userProfile}
+                  onClose={closeMessageLinkPanel}
+                  onOpenArtifact={(artifact) => revealArtifactInTuttiFileManager(artifact)}
+                  onOpenAgentProfile={(participant) => {
+                    setPendingNewAgentDraft(null);
+                    setAgentProfileShowRemove(true);
+                    setAgentProfileParticipantId(participant.id);
                   }}
                 />
                 <AgentRunPanel

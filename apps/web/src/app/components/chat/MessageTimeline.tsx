@@ -25,6 +25,7 @@ import {
   extractSummaryLinks,
   formatMessageLink,
   formatMessageLinkLabel,
+  parseMessageLinkIds,
   primaryMessageLinkId,
   removeEmbeddedLinks,
   readStashedSummaryLink,
@@ -3286,68 +3287,46 @@ function MessageLinkCard(props: {
   onOpen: () => void;
 }) {
   const messageId = primaryMessageLinkId(props.messageIdSegment);
-  const message = props.messages.find((item) => item.id === messageId) ?? null;
-  const messageBlocks = message
-    ? props.blocks
-        .filter((block) => block.messageId === message.id && !isRuntimeEventBlock(block))
-        .sort(compareMessageBlocks)
-    : [];
-  const artifactBlocks = messageBlocks.filter((block) => block.type === "image" || block.type === "file");
-  const textBlocks = messageBlocks.filter((block) => block.type !== "image" && block.type !== "file");
-  const participant = message?.senderParticipantId
-    ? props.participants.find((item) => item.id === message.senderParticipantId) ?? null
-    : null;
+  const messageIds = parseMessageLinkIds(props.messageIdSegment);
+  const linkedMessages = messageIds
+    .map((id) => props.messages.find((item) => item.id === id))
+    .filter((item): item is Message => Boolean(item));
+  const message = linkedMessages[0] ?? null;
   const conversation = message ? props.conversations.find((item) => item.id === message.conversationId) ?? null : null;
   const room = conversation ? props.rooms.find((item) => item.id === conversation.roomId) ?? null : null;
-  const linkLabel = formatMessageLinkLabel(
-    props.messageIdSegment,
-    props.messages,
-    props.participants,
-    props.identities,
-    props.userProfile?.displayName,
-  );
+
+  const senderNames: string[] = [];
+  const seenSenderKeys = new Set<string>();
+  for (const msg of linkedMessages) {
+    const key = msg.senderParticipantId ?? msg.senderName ?? msg.id;
+    if (seenSenderKeys.has(key)) continue;
+    seenSenderKeys.add(key);
+    const senderLabel = messageSenderLabel(msg, props.participants, props.identities, props.userProfile?.displayName);
+    if (senderLabel) senderNames.push(senderLabel);
+  }
+  const senderSummary = senderNames.length <= 2
+    ? senderNames.join("、")
+    : t("messageLink.sendersAndMore", { first: senderNames[0]!, second: senderNames[1]!, count: senderNames.length - 2 });
+  const cardLabel = t("messageLink.cardLabel", { senders: senderSummary, count: linkedMessages.length });
+
   return (
-    <div
+    <button
+      type="button"
       data-message-action-anchor
       className={embeddedLinkCardClassName}
       role="group"
-      aria-label={linkLabel}
+      aria-label={cardLabel}
+      onClick={props.onOpen}
     >
-      <button
-        type="button"
-        className={"[display:flex] [min-width:0] [align-items:center] [gap:5px] [border:0] [padding:0] [color:#2563eb] [background:transparent] [font-size:12px] [font-weight:700] [line-height:1.3] [text-align:left] [cursor:pointer] hover:[text-decoration:underline] focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:2px]"}
-        onClick={props.onOpen}
-      >
+      <span className={"[display:flex] [align-items:center] [gap:5px] [color:#2563eb] [font-size:12px] [font-weight:700] [line-height:1.3]"}>
         <TuttiMessageLinkIcon />
-        <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{linkLabel}</span>
-      </button>
-      <LinkedMessageCardBody
-        message={message}
-        textBlocks={textBlocks}
-        artifactBlocks={artifactBlocks}
-        messages={props.messages}
-        blocks={props.blocks}
-        artifacts={props.artifacts}
-        participants={props.participants}
-        identities={props.identities}
-        userProfile={props.userProfile}
-        conversations={props.conversations}
-        rooms={props.rooms}
-        summaryTasks={props.summaryTasks}
-        runtimeProfiles={props.runtimeProfiles}
-        depth={props.depth}
-        onOpenArtifact={props.onOpenArtifact}
-        onOpenMessageLink={props.onOpenMessageLink}
-        onOpenSummaryLink={props.onOpenSummaryLink}
-        onEnsureSummaryTask={props.onEnsureSummaryTask}
-        onOpenAgentProfile={props.onOpenAgentProfile}
-      />
+        <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{cardLabel}</span>
+      </span>
       <span className={"[display:flex] [align-items:center] [gap:6px] [color:var(--muted)] [font-size:11px] [line-height:1.3]"}>
         <span>{room?.title || conversation?.title || t("common.unknownConversation")}</span>
-        {participant ? <span>{participant.displayName}</span> : null}
         {message ? <span>{formatMessageTime(message.createdAt)}</span> : null}
       </span>
-    </div>
+    </button>
   );
 }
 

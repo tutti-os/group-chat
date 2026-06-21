@@ -1,6 +1,7 @@
 import type { Artifact, Identity, MentionTarget, Message, Participant, PrivateTaskSnapshot } from "@group-chat/shared";
 import {
   formatMessageLinkLabel,
+  messageSenderLabel,
   primaryMessageLinkId,
   summaryLinkLabel,
 } from "./chat-links.js";
@@ -261,7 +262,15 @@ function buildMessageLinkMarkdown(
     messageId,
     conversationId: message?.conversationId,
   });
-  return `[${escapeMarkdownLabel(displayLabel)}](${href ?? `group-chat://message/${idSegment}`})`;
+  const linkMarkdown = `[${escapeMarkdownLabel(displayLabel)}](${href ?? `group-chat://message/${idSegment}`})`;
+
+  if (message && message.content.trim()) {
+    const sender = messageSenderLabel(message, context.participants ?? [], context.identities ?? [], context.userDisplayName);
+    const content = message.content.trim().replace(/\n{3,}/g, "\n\n");
+    return `${linkMarkdown}\n> ${sender}: ${content}`;
+  }
+
+  return linkMarkdown;
 }
 
 function buildSummaryLinkMarkdown(
