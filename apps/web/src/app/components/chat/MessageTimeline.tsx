@@ -2640,7 +2640,7 @@ function ToolbarButton(props: {
   );
 }
 
-function MessageSenderAvatar(props: {
+export function MessageSenderAvatar(props: {
   message: Message;
   participant: Participant | null;
   identity?: Pick<Identity, "name" | "icon" | "defaultRuntimeProfileId"> | null;
@@ -2982,7 +2982,7 @@ function MessageBodyShell(props: {
   );
 }
 
-function MessageBlockRenderer(props: {
+export function MessageBlockRenderer(props: {
   block: MessageBlock;
   artifacts: Artifact[];
   allBlocks?: MessageBlock[];
@@ -3130,7 +3130,7 @@ function MessageBlockRenderer(props: {
               onOpenSummaryLink={props.onOpenSummaryLink}
               onEnsureSummaryTask={props.onEnsureSummaryTask}
               onOpenAgentProfile={props.onOpenAgentProfile}
-              onOpen={() => props.onOpenMessageLink?.(primaryMessageLinkId(messageIdSegment))}
+              onOpen={() => props.onOpenMessageLink?.(messageIdSegment)}
             />
           ))}
           {summaryLinks.map((taskId) => (

@@ -1,13 +1,30 @@
 import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
-import type { Artifact, Identity, Message, MessageBlock, Participant, Room, Conversation, RuntimeProfile } from "@group-chat/shared";
-import { resolveArtifactLinkedMessageId } from "@group-chat/shared";
-import { parseMessageLinkIds, primaryMessageLinkId } from "../../chat-links.js";
-import { messageSenderLabel } from "../../chat-links.js";
+import type { Artifact, Identity, Message, MessageBlock, Participant, Room, Conversation, RuntimeProfile, AgentRun, AgentRunEvent } from "@group-chat/shared";
+import { parseMessageLinkIds } from "../../chat-links.js";
+import { messageSenderLabel, resolveMessageSenderLabel } from "../../chat-links.js";
 import { formatMessageTime } from "../../formatting.js";
 import { t, useTranslation } from "../../i18n/index.js";
-import { MessageReferenceContent } from "./MessageReferenceContent.js";
-import { ArtifactBlock } from "./MessageTimeline.js";
+import { MessageBlockRenderer, MessageSenderAvatar } from "./MessageTimeline.js";
+import type { BackgroundTask } from "../../background-tasks.js";
+import type { LocalUserProfile } from "../../user-profile.js";
+
+const MESSAGE_ROLE_CONTENT_CLASS =
+  "[&[data-role=assistant]_[data-slot=message-block]:not([data-link-only])]:[background:#f2f3f5] "
+  + "[&[data-role=assistant]_[data-slot=message-block]:not([data-link-only])]:[border-radius:8px] "
+  + "[&[data-role=user]_[data-slot=message-block]:not([data-link-only])]:[border-color:transparent] "
+  + "[&[data-role=user]_[data-slot=message-block]:not([data-link-only])]:[background:#d6e9ff]";
+
+const MESSAGE_GROUP_GAP_MS = 60_000;
+
+function shouldStartNewMessageGroup(previous: Message, current: Message) {
+  if (previous.senderParticipantId !== current.senderParticipantId) return true;
+  if (previous.conversationId !== current.conversationId) return true;
+  const previousTime = Date.parse(previous.createdAt);
+  const currentTime = Date.parse(current.createdAt);
+  if (!Number.isFinite(previousTime) || !Number.isFinite(currentTime)) return true;
+  return currentTime - previousTime > MESSAGE_GROUP_GAP_MS;
+}
 
 export function MessageLinkDetailPanel(props: {
   open: boolean;
@@ -19,11 +36,17 @@ export function MessageLinkDetailPanel(props: {
   identities: Identity[];
   conversations: Conversation[];
   rooms: Room[];
-  runtimeProfiles?: RuntimeProfile[];
-  userProfile?: { displayName: string };
+  runtimeProfiles: RuntimeProfile[];
+  agentRuns: AgentRun[];
+  agentRunEvents: AgentRunEvent[];
+  summaryTasks: BackgroundTask[];
+  userProfile: Pick<LocalUserProfile, "avatarPreset" | "customAvatarUrl" | "displayName">;
   onClose: () => void;
   onOpenArtifact?: (artifact: Artifact) => void;
   onOpenAgentProfile?: (participant: Participant) => void;
+  onOpenMessageLink?: (messageId: string) => void;
+  onOpenSummaryLink?: (taskId: string) => void;
+  onEnsureSummaryTask?: (taskId: string) => Promise<BackgroundTask | null>;
 }) {
   useTranslation();
   const panelRef = useRef<HTMLElement | null>(null);
@@ -49,20 +72,19 @@ export function MessageLinkDetailPanel(props: {
   const conversation = firstMessage ? props.conversations.find((item) => item.id === firstMessage.conversationId) ?? null : null;
   const room = conversation ? props.rooms.find((item) => item.id === conversation.roomId) ?? null : null;
 
-  const senders = new Map<string, { name: string; count: number }>();
-  for (const message of linkedMessages) {
-    const senderLabel = messageSenderLabel(message, props.participants, props.identities, props.userProfile?.displayName);
-    const existing = senders.get(message.senderParticipantId ?? message.senderName ?? senderLabel);
-    if (existing) {
-      existing.count += 1;
-    } else {
-      senders.set(message.senderParticipantId ?? message.senderName ?? senderLabel, { name: senderLabel, count: 1 });
-    }
+  const senderNames: string[] = [];
+  const seenSenderKeys = new Set<string>();
+  for (const msg of linkedMessages) {
+    const key = msg.senderParticipantId ?? msg.senderName ?? msg.id;
+    if (seenSenderKeys.has(key)) continue;
+    seenSenderKeys.add(key);
+    const senderLabel = messageSenderLabel(msg, props.participants, props.identities, props.userProfile?.displayName);
+    if (senderLabel) senderNames.push(senderLabel);
   }
 
   const panelTitle = t("messageLink.detailTitle", {
     count: linkedMessages.length,
-    senders: [...senders.values()].map((s) => s.name).slice(0, 3).join("、"),
+    senders: senderNames.slice(0, 3).join("、"),
   });
 
   return (
@@ -86,67 +108,89 @@ export function MessageLinkDetailPanel(props: {
         </button>
       </div>
 
-      <div className={"[min-height:0] [overflow-y:auto] [padding:12px] [display:grid] [align-content:start] [gap:12px]"}>
+      <div className={"[min-height:0] [overflow-y:auto] [padding:8px_6px] [display:grid] [align-content:start]"}>
         {linkedMessages.length === 0 ? (
           <div className={"[padding:28px_12px] [color:var(--muted)] [font-size:13px] [line-height:1.5] [text-align:center]"}>
             {t("messageLink.notFound")}
           </div>
         ) : null}
         {linkedMessages.map((message, index) => {
-          const senderLabel = messageSenderLabel(message, props.participants, props.identities, props.userProfile?.displayName);
+          const isUserMessage = message.role === "user";
+          const previous = index > 0 ? linkedMessages[index - 1]! : null;
+          const showHeader = !previous || shouldStartNewMessageGroup(previous, message);
           const messageBlocks = props.blocks
             .filter((block) => block.messageId === message.id)
             .sort((a, b) => a.sortOrder - b.sortOrder);
-          const artifactBlocks = messageBlocks.filter((block) => block.type === "image" || block.type === "file");
-          const messageArtifacts = artifactBlocks
-            .map((block) => block.metadata?.artifactId)
-            .filter((id): id is string => Boolean(id))
-            .map((id) => props.artifacts.find((item) => item.id === id))
-            .filter((item): item is Artifact => Boolean(item));
-          const textBlocks = messageBlocks.filter((block) => block.type === "main_text" || block.type === "reasoning" || block.type === "tool_result");
+          const conversationBlocks = messageBlocks.filter((block) => block.type !== "tool_call" && block.type !== "reasoning");
+          const visibleBlocks = conversationBlocks.filter((block) => block.content.trim() || block.type === "image" || block.type === "file");
+          const participant = message.senderParticipantId
+            ? props.participants.find((item) => item.id === message.senderParticipantId) ?? null
+            : null;
+          const participantIdentity = participant?.identityId
+            ? props.identities.find((identity) => identity.id === participant.identityId) ?? null
+            : null;
+          const senderLabel = resolveMessageSenderLabel(
+            message,
+            participant,
+            participantIdentity,
+            props.userProfile.displayName,
+          );
 
           return (
             <div
               key={message.id}
-              className={"[border-radius:10px] [padding:8px_10px] [background:#f8f9fa] [display:grid] [gap:4px]"}
+              data-role={message.role}
+              data-group-continuation={!showHeader || undefined}
+              className={`[position:relative] [display:grid] [grid-template-columns:34px_minmax(0,_1fr)] [gap:8px] [align-items:start] ${showHeader ? "[margin-top:14px]" : "[margin-top:2px]"} ${MESSAGE_ROLE_CONTENT_CLASS}`}
             >
-              <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:8px]"}>
-                <span className={"[font-size:12px] [font-weight:700] [color:var(--text)] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>
-                  {senderLabel}
-                </span>
-                <span className={"[flex-shrink:0] [color:var(--muted)] [font-size:10px]"}>
-                  {formatMessageTime(message.createdAt)}
-                </span>
-              </div>
-              <div className={"[display:grid] [gap:4px] [font-size:12px] [line-height:1.4] [color:var(--text)] [word-break:break-word] [overflow-wrap:anywhere]"}>
-                {textBlocks.length === 0 && messageArtifacts.length === 0 ? (
-                  <span className={"[color:var(--muted)] [font-size:11px]"}>{t("common.attachment")}</span>
+              {showHeader ? (
+                <div data-slot="message-avatar" className={"[display:inline-flex] [flex:0_0_auto] [width:34px] [height:34px] [align-items:flex-start] [justify-content:center] [padding-top:2px]"}>
+                  <MessageSenderAvatar
+                    message={message}
+                    participant={participant}
+                    identity={participantIdentity}
+                    runtimeProfiles={props.runtimeProfiles}
+                    userProfile={props.userProfile}
+                  />
+                </div>
+              ) : (
+                <div data-slot="message-avatar" aria-hidden="true" className={"[width:34px] [height:34px]"} />
+              )}
+              <div className={"[min-width:0] [display:grid]"}>
+                {showHeader ? (
+                  <div className={"[display:flex] [align-items:center] [gap:7px] [min-height:20px] [margin-bottom:4px]"}>
+                    <strong className={"[color:var(--muted)] [font-size:12px] [font-weight:550]"}>{senderLabel}</strong>
+                    <span className={"[color:var(--muted)] [font-size:12px]"}>{formatMessageTime(message.createdAt)}</span>
+                  </div>
                 ) : null}
-                {textBlocks.map((block) => (
-                  <div key={block.id} className={"[display:contents]"}>
-                    <MessageReferenceContent
-                      content={(block.content || " ").replace(/\n{3,}/g, "\n\n").trim()}
-                      mentions={message.mentions}
+                <div className={"[user-select:text] [min-width:0]"}>
+                  {visibleBlocks.length === 0 ? (
+                    <span className={"[color:var(--muted)] [font-size:13px]"}>{t("common.attachment")}</span>
+                  ) : null}
+                  {visibleBlocks.map((block) => (
+                    <MessageBlockRenderer
+                      key={block.id}
+                      block={block}
                       artifacts={props.artifacts}
-                      participants={props.participants}
-                      runtimeProfiles={props.runtimeProfiles}
+                      allBlocks={props.blocks}
+                      allMessages={props.messages}
+                      allParticipants={props.participants}
+                      identities={props.identities}
+                      userProfile={props.userProfile}
+                      conversations={props.conversations}
+                      rooms={props.rooms}
+                      onOpenArtifact={props.onOpenArtifact ?? (() => {})}
+                      onOpenMessageLink={props.onOpenMessageLink}
+                      onOpenSummaryLink={props.onOpenSummaryLink}
+                      onEnsureSummaryTask={props.onEnsureSummaryTask}
+                      summaryTasks={props.summaryTasks}
+                      referenceMentions={message.mentions}
+                      messageRole={message.role}
                       onOpenAgentProfile={props.onOpenAgentProfile}
-                      onOpenArtifact={props.onOpenArtifact}
-                      tightSpacing
+                      runtimeProfiles={props.runtimeProfiles}
                     />
-                  </div>
-                ))}
-                {messageArtifacts.length > 0 ? (
-                  <div className={"[display:flex] [flex-wrap:wrap] [gap:6px]"}>
-                    {messageArtifacts.map((artifact) => (
-                      <ArtifactBlock
-                        key={artifact.id}
-                        artifact={artifact}
-                        onOpen={() => props.onOpenArtifact?.(artifact)}
-                      />
-                    ))}
-                  </div>
-                ) : null}
+                  ))}
+                </div>
               </div>
             </div>
           );

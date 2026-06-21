@@ -68,7 +68,7 @@ import {
 } from "./conversation-read-state.js";
 import { applyEvent, applyRoomUpdate, emptyState, normalizeSnapshot, removeActiveRun, removeDeletedRoom, removeHiddenMessages, upsert, upsertIdentity, upsertMany, upsertMessage, upsertParticipant, type AppState } from "./state.js";
 import { backgroundTaskFromSnapshot, createOptimisticBackgroundTask, createPendingAgentReplyTargets, enrichBackgroundTask, isPendingAgentRunId, loadDismissedBackgroundTaskIds, loadLocalTaskBarTaskIds, mergeBackgroundTask, pendingAgentReplyKey, removeLocalTaskBarTaskId, saveDismissedBackgroundTaskIds, addLocalTaskBarTaskId, type AgentRunTaskItem, type BackgroundTask, type PendingAgentReplyTarget } from "./background-tasks.js";
-import { formatSummaryLink, resolveAgentProfileParticipant, resolveMessageAgentParticipant, resolveMessageSenderLabel, messageSenderLabel } from "./chat-links.js";
+import { formatSummaryLink, primaryMessageLinkId, resolveAgentProfileParticipant, resolveMessageAgentParticipant, resolveMessageSenderLabel, messageSenderLabel } from "./chat-links.js";
 import { attachmentLabel, subscribeI18n, t } from "./i18n/index.js";
 import { collectMessageProcess } from "./agent-thinking.js";
 import { UNREAD_FEATURE_ENABLED } from "./feature-flags.js";
@@ -947,13 +947,14 @@ export function App() {
     [state.messageBlocks, state.artifacts],
   );
 
-  const openMessageLink = (messageId: string) => {
-    const message = state.messages.find((item) => item.id === messageId);
+  const openMessageLink = (messageIdSegment: string) => {
+    const firstMessageId = primaryMessageLinkId(messageIdSegment);
+    const message = state.messages.find((item) => item.id === firstMessageId);
     if (!message) {
       window.alert(t("app.summaryNotFound"));
       return;
     }
-    setOpenMessageLinkSegment(messageId);
+    setOpenMessageLinkSegment(messageIdSegment);
     setOpenBackgroundTaskId(null);
     setOpenThinkingMessageId(null);
   };
@@ -1468,6 +1469,9 @@ export function App() {
                   conversations={state.conversations}
                   rooms={state.rooms}
                   runtimeProfiles={state.runtimeProfiles}
+                  agentRuns={state.agentRuns}
+                  agentRunEvents={state.agentRunEvents}
+                  summaryTasks={backgroundTasks}
                   userProfile={userProfile}
                   onClose={closeMessageLinkPanel}
                   onOpenArtifact={(artifact) => revealArtifactInTuttiFileManager(artifact)}
@@ -1476,6 +1480,9 @@ export function App() {
                     setAgentProfileShowRemove(true);
                     setAgentProfileParticipantId(participant.id);
                   }}
+                  onOpenMessageLink={openMessageLink}
+                  onOpenSummaryLink={(taskId) => void openSummaryLink(taskId)}
+                  onEnsureSummaryTask={ensureBackgroundTask}
                 />
                 <AgentRunPanel
                   open={Boolean(openAgentRunId && openAgentRun)}

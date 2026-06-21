@@ -2,6 +2,7 @@ import type { Artifact, Identity, MentionTarget, Message, Participant, PrivateTa
 import {
   formatMessageLinkLabel,
   messageSenderLabel,
+  parseMessageLinkIds,
   primaryMessageLinkId,
   summaryLinkLabel,
 } from "./chat-links.js";
@@ -248,29 +249,44 @@ function buildMessageLinkMarkdown(
   idSegment: string,
   context: AgentGuiDraftPromptContext,
 ) {
-  const displayLabel = label?.trim()
-    || formatMessageLinkLabel(
-      idSegment,
-      context.messages ?? [],
-      context.participants ?? [],
-      context.identities ?? [],
-      context.userDisplayName,
-    );
+  const allMessageIds = parseMessageLinkIds(idSegment);
+  const linkedMessages = allMessageIds
+    .map((id) => context.messages?.find((item) => item.id === id))
+    .filter((item): item is Message => Boolean(item));
+
+  let displayLabel: string;
+  if (linkedMessages.length > 0) {
+    const senderNames: string[] = [];
+    const seenSenderKeys = new Set<string>();
+    for (const msg of linkedMessages) {
+      const key = msg.senderParticipantId ?? msg.senderName ?? msg.id;
+      if (seenSenderKeys.has(key)) continue;
+      seenSenderKeys.add(key);
+      const senderLabel = messageSenderLabel(msg, context.participants ?? [], context.identities ?? [], context.userDisplayName);
+      if (senderLabel) senderNames.push(senderLabel);
+    }
+    const senderSummary = senderNames.length <= 2
+      ? senderNames.join("、")
+      : `${senderNames[0]}、${senderNames[1]}等${senderNames.length - 2}人`;
+    displayLabel = `来自${senderSummary}的${linkedMessages.length}条消息`;
+  } else {
+    displayLabel = label?.trim()
+      || formatMessageLinkLabel(
+        idSegment,
+        context.messages ?? [],
+        context.participants ?? [],
+        context.identities ?? [],
+        context.userDisplayName,
+      );
+  }
+
   const messageId = primaryMessageLinkId(idSegment);
   const message = context.messages?.find((item) => item.id === messageId) ?? null;
   const href = buildGroupChatAppMentionHref(context, {
     messageId,
     conversationId: message?.conversationId,
   });
-  const linkMarkdown = `[${escapeMarkdownLabel(displayLabel)}](${href ?? `group-chat://message/${idSegment}`})`;
-
-  if (message && message.content.trim()) {
-    const sender = messageSenderLabel(message, context.participants ?? [], context.identities ?? [], context.userDisplayName);
-    const content = message.content.trim().replace(/\n{3,}/g, "\n\n");
-    return `${linkMarkdown}\n> ${sender}: ${content}`;
-  }
-
-  return linkMarkdown;
+  return `[${escapeMarkdownLabel(displayLabel)}](${href ?? `group-chat://message/${idSegment}`})`;
 }
 
 function buildSummaryLinkMarkdown(
