@@ -50,7 +50,7 @@ import {
   type TuttiAtQueryResult,
   type TuttiAtRoomFileMeta,
 } from "../../tutti-at-mentions.js";
-import { serializeReferenceMentionChip } from "../../reference-mentions.js";
+import { serializeReferenceMentionChip, parseReferenceMentionHref, isReferenceMentionHref } from "../../reference-mentions.js";
 import { buildReferencePasteTarget, normalizeComposerPasteText, splitComposerPasteContent, type ComposerPasteContext } from "../../composer-paste-content.js";
 import { createSummaryLinkChipElement } from "../../summary-link-card.js";
 import { mentionTabProviders } from "../../mention-panel-tabs.js";
@@ -832,6 +832,26 @@ export function Composer(props: {
     if (option.kind === "all") {
       insertAllMention();
     } else if (option.kind === "reference") {
+      if (option.providerId === "file" || option.providerId === "agent-generated-file") {
+        const artifactId = option.item.itemId;
+        const artifact = props.artifacts.find((item) => item.id === artifactId);
+        if (artifact) {
+          const queryRange = mentionQueryRangeRef.current;
+          if (queryRange && editor && editor.contains(queryRange.startContainer)) {
+            suppressEditorSyncRef.current = true;
+            try {
+              queryRange.deleteContents();
+            } finally {
+              suppressEditorSyncRef.current = false;
+            }
+          }
+          queueExistingArtifacts([artifact]);
+          setMentionQuery(null);
+          mentionSelectionRef.current = null;
+          mentionQueryRangeRef.current = null;
+          return;
+        }
+      }
       const mentionId = tuttiAtMentionKey(option.providerId, option.item.itemId);
       insertMentionChipAtActiveQuery(option.label, mentionId, option.item);
     } else if (option.kind === "local-agent") {
@@ -1185,6 +1205,33 @@ export function Composer(props: {
 
     if (!pastedText.trim() || isArtifactOnlyClipboardPlainText(pastedText)) return;
     event.preventDefault();
+    const fileRefArtifacts = extractFileReferenceArtifactsFromPasteText(pastedText, props.allArtifacts);
+    if (fileRefArtifacts.length > 0) {
+      const textWithoutFileRefs = stripFileReferenceLinks(pastedText);
+      if (textWithoutFileRefs.trim() && !isPlaceholderAttachmentText(textWithoutFileRefs)) {
+        insertComposerPasteAtCaret(
+          textWithoutFileRefs,
+          {
+            getMessageLabel: (messageIdSegment) => formatMessageLinkLabel(
+              messageIdSegment,
+              props.allMessages,
+              props.allParticipants,
+              props.identities,
+              props.userDisplayName,
+            ),
+            getSummaryTask: (taskId) => props.summaryTasks.find((task) => task.id === taskId) ?? null,
+          },
+          composerPasteContext,
+        );
+      }
+      queueExistingArtifacts(fileRefArtifacts);
+      requestAnimationFrame(() => {
+        const editor = editorRef.current;
+        if (editor) syncMentionedIdsFromEditor(editor);
+        syncEditorText(true);
+      });
+      return;
+    }
     insertComposerPasteAtCaret(
       pastedText,
       {
@@ -3652,4 +3699,25 @@ function buildParticipantMentionOptions(
     });
   }
   return results;
+}
+
+const FILE_REFERENCE_LINK_PATTERN = /\[([^\]]+)\]\(group-chat:\/\/reference\/(?:file|agent-generated-file)\/([^)]+)\)/g;
+
+function extractFileReferenceArtifactsFromPasteText(text: string, artifacts: Artifact[]): Artifact[] {
+  const artifactsById = new Map(artifacts.map((item) => [item.id, item]));
+  const result: Artifact[] = [];
+  const seen = new Set<string>();
+  for (const match of text.matchAll(FILE_REFERENCE_LINK_PATTERN)) {
+    const entityId = match[2]!;
+    const artifact = artifactsById.get(entityId);
+    if (artifact && !seen.has(artifact.id)) {
+      seen.add(artifact.id);
+      result.push(artifact);
+    }
+  }
+  return result;
+}
+
+function stripFileReferenceLinks(text: string): string {
+  return text.replace(FILE_REFERENCE_LINK_PATTERN, "").trim();
 }

@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { contentHasReferenceMentions, findArtifactForFileReference, isFileReferenceProvider, parseReferenceMentionHref, splitContentByReferenceMentions } from "../../reference-mentions.js";
-import { ArtifactBlock } from "./ArtifactBlock.js";
+import { ArtifactBlock } from "./MessageTimeline.js";
 import { ReferenceMentionLink, createReferenceMentionMarkdownComponents } from "./ReferenceMentionLink.js";
 
 const INLINE_MARKDOWN_COMPONENTS = {

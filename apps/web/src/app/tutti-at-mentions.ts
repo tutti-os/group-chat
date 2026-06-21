@@ -369,12 +369,9 @@ async function queryLocalRoomFileReferences(
 
 function mapLocalFileReferences(response: AppReferenceListResponse): TuttiAtQueryResult[] {
   const items: TuttiAtQueryResult[] = [];
-  const seenPaths = new Set<string>();
   for (const item of response.items) {
     if (item.type !== "reference" || item.reference.kind !== "file") continue;
     const path = item.reference.location.path;
-    if (seenPaths.has(path)) continue;
-    seenPaths.add(path);
     const label = item.reference.displayName?.trim() || path.split("/").pop() || path;
     const mimeType = item.reference.mimeType ?? "";
     const previewUrl = item.reference.previewUrl ?? null;
