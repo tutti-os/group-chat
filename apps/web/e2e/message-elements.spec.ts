@@ -1,5 +1,331 @@
 import { expect, test } from "@playwright/test";
 
+test("sends interleaved composer images and text in visual order", async ({ page, request }) => {
+  const roomBundle = await (await request.post("/api/rooms", { data: { title: "Interleaved Message Room" } })).json();
+  await page.goto("/");
+  await page.getByRole("button", { name: /Interleaved Message Room/ }).click();
+  const composer = page.getByRole("textbox", { name: /消息输入框|Message input/ });
+  const fileInput = composer.locator("xpath=ancestor::footer").locator('input[type="file"]');
+  const imageBuffer = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+  await fileInput.setInputFiles({ name: "first.png", mimeType: "image/png", buffer: imageBuffer });
+  await page.keyboard.type("第一段");
+  await fileInput.setInputFiles({ name: "second.png", mimeType: "image/png", buffer: imageBuffer });
+  await page.keyboard.type("第二段");
+
+  const sent = page.waitForResponse((response) =>
+    response.request().method() === "POST"
+    && response.url().endsWith(`/api/conversations/${roomBundle.conversation.id}/messages`),
+  );
+  await page.getByLabel(/发送消息|Send message/).click();
+  const result = await (await sent).json();
+  expect(result.blocks.map((block: { type: string; content: string }) => ({ type: block.type, content: block.content }))).toEqual([
+    { type: "image", content: "" },
+    { type: "main_text", content: "第一段" },
+    { type: "image", content: "" },
+    { type: "main_text", content: "第二段" },
+  ]);
+});
+
+test("copies composer images and files across rooms", async ({ context, page, request }) => {
+  await request.post("/api/rooms", { data: { title: "Clipboard Source Room" } });
+  await request.post("/api/rooms", { data: { title: "Clipboard Target Room" } });
+  await page.goto("/");
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(page.url()).origin });
+  await page.getByRole("button", { name: /Clipboard Source Room/ }).click();
+  const composer = page.getByRole("textbox", { name: /消息输入框|Message input/ });
+  await composer.locator("xpath=ancestor::footer").locator('input[type="file"]').setInputFiles([
+    {
+      name: "cross-room.png",
+      mimeType: "image/png",
+      buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
+    },
+    { name: "cross-room.txt", mimeType: "text/plain", buffer: Buffer.from("cross room") },
+  ]);
+  await expect(composer.locator("[data-upload-item-id]")).toHaveCount(2);
+  await composer.click();
+  await page.keyboard.press("Meta+A");
+  await page.keyboard.press("Meta+C");
+
+  await page.getByRole("button", { name: /Clipboard Target Room/ }).click();
+  const targetComposer = page.getByRole("textbox", { name: /消息输入框|Message input/ });
+  await targetComposer.click();
+  await page.keyboard.press("Meta+V");
+
+  await expect(targetComposer.locator("[data-upload-item-id]")).toHaveCount(2);
+  await expect(targetComposer.getByRole("button", { name: /Preview cross-room\.png/ })).toBeVisible();
+  await expect(targetComposer.getByRole("button", { name: /Preview cross-room\.txt/ })).toBeVisible();
+});
+
+test("copies and pastes composer images as attachments", async ({ context, page }) => {
+  await page.goto("/");
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(page.url()).origin });
+  const composer = page.getByRole("textbox", { name: /消息输入框|Message input/ });
+  await composer.locator("xpath=ancestor::footer").locator('input[type="file"]').setInputFiles({
+    name: "composer-copy.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
+  });
+  const image = composer.locator("[data-upload-item-id]");
+  await expect(image).toHaveCount(1);
+  await composer.locator("[data-upload-caret-anchor]").evaluate((anchor) => {
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  await page.keyboard.type("复制文字");
+  await page.keyboard.press("Meta+A");
+  await page.keyboard.press("Meta+C");
+  await page.keyboard.press("Backspace");
+  await expect(composer.locator("[data-upload-item-id]")).toHaveCount(0);
+  await page.keyboard.press("Meta+V");
+
+  await expect(composer.locator("[data-upload-item-id]")).toHaveCount(1);
+  expect(await composer.evaluate((editor) => {
+    const clone = editor.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll("[data-upload-item-id]").forEach((node) => node.remove());
+    return clone.textContent?.replaceAll("\u200b", "").trim();
+  })).toBe("复制文字");
+
+  await page.keyboard.press("Meta+A");
+  await page.keyboard.press("Backspace");
+  await expect(composer.locator("[data-upload-item-id]")).toHaveCount(0);
+  await page.keyboard.press("Meta+V");
+  await expect(composer.locator("[data-upload-item-id]")).toHaveCount(1);
+});
+
+test("restores message actions after dismissing the agent menu outside", async ({ page, request }) => {
+  const roomBundle = await (await request.post("/api/rooms", { data: { title: "Agent Menu Hover Room" } })).json();
+  await request.post(`/api/conversations/${roomBundle.conversation.id}/messages`, {
+    data: { content: "Hover actions must return", artifactIds: [], mentions: [] },
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: /Agent Menu Hover Room/ }).click();
+
+  const message = page.getByRole("article").filter({ hasText: "Hover actions must return" });
+  const actions = message.locator('[data-slot="message-actions"]');
+  await message.hover();
+  await expect(actions).toHaveCSS("opacity", "1");
+  await actions.getByRole("button", { name: /发送给|Send to/ }).click();
+  await expect(page.locator("[data-agent-forward-submenu]")).toBeVisible();
+
+  await page.mouse.click(20, 20);
+  await expect(page.locator("[data-agent-forward-submenu]")).toBeHidden();
+  await page.waitForTimeout(180);
+  await expect(actions).toHaveCSS("opacity", "0");
+
+  await message.hover();
+  await expect(actions).toHaveCSS("opacity", "1");
+});
+
+test("pastes only the exact text selected from a message", async ({ context, page, request }) => {
+  const roomBundle = await (await request.post("/api/rooms", { data: { title: "Exact Selection Room" } })).json();
+  const fullText = "用这个应用做一个音乐网站";
+  await request.post(`/api/conversations/${roomBundle.conversation.id}/messages`, {
+    data: { content: fullText, artifactIds: [], mentions: [] },
+  });
+  await page.goto("/");
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(page.url()).origin });
+  await page.getByRole("button", { name: /Exact Selection Room/ }).click();
+
+  const messageText = page.getByRole("paragraph").filter({ hasText: fullText });
+  await messageText.evaluate((element) => {
+    const textNode = [...element.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent?.includes("应用做"));
+    if (!textNode?.textContent) throw new Error("message text node missing");
+    const start = textNode.textContent.indexOf("应用做");
+    const range = document.createRange();
+    range.setStart(textNode, start);
+    range.setEnd(textNode, start + 3);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  await page.keyboard.press("Meta+C");
+
+  const composer = page.getByRole("textbox", { name: /消息输入框|Message input/ });
+  await composer.click();
+  await page.keyboard.press("Meta+V");
+  await expect(composer).toHaveText("应用做");
+});
+
+test("pastes the same copied message image more than once", async ({ context, page, request }) => {
+  const roomBundle = await (await request.post("/api/rooms", { data: { title: "Repeated Image Room" } })).json();
+  const imageBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+  const uploaded = await (await request.post(`/api/conversations/${roomBundle.conversation.id}/artifacts`, {
+    data: { filename: "repeat.png", mimeType: "image/png", dataBase64: imageBase64 },
+  })).json();
+  await request.post(`/api/conversations/${roomBundle.conversation.id}/messages`, {
+    data: { content: "", artifactIds: [uploaded.artifact.id], mentions: [] },
+  });
+  await page.goto("/");
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(page.url()).origin });
+  await page.getByRole("button", { name: /Repeated Image Room/ }).click();
+
+  const image = page.getByRole("button", { name: "repeat.png" });
+  await image.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNode(element);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  await page.keyboard.press("Meta+C");
+
+  const composer = page.getByRole("textbox", { name: /消息输入框|Message input/ });
+  await composer.click();
+  await page.keyboard.press("Meta+V");
+  await page.keyboard.press("Meta+V");
+  await expect(page.locator("[data-upload-item-id]")).toHaveCount(2);
+  const caretMetrics = await composer.evaluate((editor) => {
+    const chips = editor.querySelectorAll("[data-upload-item-id]");
+    const selection = window.getSelection();
+    if (chips.length !== 2 || !selection?.rangeCount) return null;
+    const secondChip = chips[1] as HTMLElement;
+    const anchor = secondChip.nextElementSibling as HTMLElement | null;
+    const range = selection.getRangeAt(0);
+    if (!anchor) return null;
+    const anchorRect = anchor.getBoundingClientRect();
+    const chipRect = secondChip.getBoundingClientRect();
+    return {
+      caretInsideAnchor: range.collapsed && anchor.contains(range.startContainer),
+      anchorHeight: anchorRect.height,
+      bottomDelta: Math.abs(anchorRect.bottom - chipRect.bottom),
+    };
+  });
+  expect(caretMetrics?.caretInsideAnchor).toBe(true);
+  expect(caretMetrics?.anchorHeight).toBeLessThanOrEqual(20);
+  expect(caretMetrics?.bottomDelta).toBeLessThanOrEqual(3);
+
+  await page.keyboard.type("323");
+  const trailingTextMetrics = await composer.evaluate((editor) => {
+    const chip = editor.querySelectorAll("[data-upload-item-id]")[1] as HTMLElement;
+    const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+    let textNode: Text | null = null;
+    while (walker.nextNode()) {
+      const candidate = walker.currentNode as Text;
+      if (candidate.textContent?.includes("323")) {
+        textNode = candidate;
+        break;
+      }
+    }
+    if (!textNode) return null;
+    const range = document.createRange();
+    range.selectNodeContents(textNode);
+    const rects = [...range.getClientRects()];
+    return {
+      text: textNode.textContent?.replaceAll("\u200b", ""),
+      lineCount: new Set(rects.map((rect) => Math.round(rect.top))).size,
+      startsAfterImage: rects[0]?.left >= chip.getBoundingClientRect().right,
+    };
+  });
+  expect(trailingTextMetrics).toEqual({ text: "323", lineCount: 1, startsAfterImage: true });
+
+  const pastedImages = page.locator("[data-upload-item-id]");
+  const firstImageBox = await pastedImages.nth(0).boundingBox();
+  const secondImageBox = await pastedImages.nth(1).boundingBox();
+  if (!firstImageBox || !secondImageBox) throw new Error("image geometry unavailable");
+  await page.mouse.click(
+    (firstImageBox.x + firstImageBox.width + secondImageBox.x) / 2,
+    firstImageBox.y + firstImageBox.height / 2,
+  );
+  await page.keyboard.type("中");
+  expect(await composer.evaluate((editor) => {
+    const nodes = [...editor.childNodes];
+    const firstImage = nodes.findIndex((node) => node instanceof HTMLElement && node.dataset.uploadItemId);
+    const text = nodes.findIndex((node) => node.textContent?.includes("中"));
+    const secondImage = nodes.findIndex((node, index) => index > firstImage && node instanceof HTMLElement && node.dataset.uploadItemId);
+    return firstImage < text && text < secondImage;
+  })).toBe(true);
+
+  await composer.evaluate((editor, externalImageBase64) => {
+    const bytes = Uint8Array.from(atob(externalImageBase64), (character) => character.charCodeAt(0));
+    const clipboardData = new DataTransfer();
+    clipboardData.items.add(new File([bytes], "external.png", { type: "image/png" }));
+    editor.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData }));
+  }, imageBase64);
+  await expect(page.getByRole("button", { name: "Preview external.png" })).toBeVisible();
+});
+
+test("selects an image attachment when dragging left from composer text", async ({ page }) => {
+  await page.goto("/");
+  const composer = page.getByRole("textbox", { name: /消息输入框|Message input/ });
+  await composer.locator("xpath=ancestor::footer").locator('input[type="file"]').setInputFiles({
+    name: "selection.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
+  });
+  await composer.focus();
+  await page.keyboard.type("222");
+
+  const attachment = page.locator("[data-upload-item-id]");
+  await expect(attachment).toBeVisible();
+  const attachmentBox = await attachment.boundingBox();
+  if (!attachmentBox) throw new Error("composer geometry unavailable");
+
+  await page.mouse.move(attachmentBox.x + attachmentBox.width + 18, attachmentBox.y + attachmentBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(attachmentBox.x + attachmentBox.width / 2, attachmentBox.y + attachmentBox.height / 2, { steps: 8 });
+  await page.mouse.up();
+
+  await expect(attachment).toHaveAttribute("data-selected", "");
+});
+
+test("keeps an image pasted at the end visually after existing text", async ({ page }) => {
+  await page.goto("/");
+  const composer = page.getByRole("textbox", { name: /消息输入框|Message input/ });
+  await composer.fill("1");
+  await composer.evaluate((editor, imageBase64) => {
+    const bytes = Uint8Array.from(atob(imageBase64), (character) => character.charCodeAt(0));
+    const clipboardData = new DataTransfer();
+    clipboardData.items.add(new File([bytes], "after-text.png", { type: "image/png" }));
+    editor.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData }));
+  }, "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
+
+  const attachment = page.locator("[data-upload-item-id]");
+  await expect(attachment).toBeVisible();
+  const placeholder = composer.locator("xpath=preceding-sibling::*[@data-slot='composer-placeholder']");
+  await expect(placeholder).toBeHidden();
+  expect(await composer.evaluate((editor) => {
+    const attachment = editor.querySelector("[data-upload-item-id]");
+    const selection = window.getSelection();
+    if (!attachment || !selection?.rangeCount) return false;
+    const nodes = [...editor.childNodes];
+    const textIndex = nodes.findIndex((node) => node.textContent?.includes("1"));
+    const attachmentIndex = nodes.indexOf(attachment);
+    const range = selection.getRangeAt(0);
+    const caretAnchor = attachment.nextElementSibling;
+    return textIndex < attachmentIndex
+      && range.collapsed
+      && Boolean(caretAnchor?.contains(range.startContainer));
+  })).toBe(true);
+
+  const attachmentBox = await attachment.boundingBox();
+  if (!attachmentBox) throw new Error("attachment geometry unavailable");
+  await page.mouse.click(attachmentBox.x - 2, attachmentBox.y + attachmentBox.height / 2);
+  await page.keyboard.type("中");
+  expect(await composer.evaluate((editor) => {
+    const attachment = editor.querySelector("[data-upload-item-id]");
+    if (!attachment) return false;
+    const nodes = [...editor.childNodes];
+    const attachmentIndex = nodes.indexOf(attachment);
+    return nodes.slice(0, attachmentIndex).some((node) => node.textContent?.includes("1中"));
+  })).toBe(true);
+
+  await attachment.click();
+  const previewDialog = page.getByRole("dialog", { name: "after-text.png" });
+  await expect(previewDialog).toBeVisible();
+  const chatHeader = page.locator("main header").first();
+  const headerBox = await chatHeader.boundingBox();
+  if (!headerBox) throw new Error("chat header geometry unavailable");
+  expect(await page.evaluate(({ x, y }) => {
+    const topElement = document.elementFromPoint(x, y);
+    return Boolean(topElement?.closest('[data-slot="attachment-preview-overlay"]'));
+  }, { x: headerBox.x + headerBox.width / 2, y: headerBox.y + headerBox.height / 2 })).toBe(true);
+  await previewDialog.getByRole("button", { name: /关闭预览|Close preview/ }).click();
+});
+
 test("preserves message cards and attachments through copy, paste, send, and navigation", async ({ context, page, request }) => {
   const sourceBundle = await (await request.post("/api/rooms", { data: { title: "Element Source Room" } })).json();
   const targetBundle = await (await request.post("/api/rooms", { data: { title: "Element Target Room" } })).json();

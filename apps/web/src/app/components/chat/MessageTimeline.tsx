@@ -86,26 +86,6 @@ function hasMeaningfulMessageCopyText(text: string) {
   return Boolean(trimmed) && trimmed !== attachmentLabel();
 }
 
-function buildMessagesClipboardPayload(
-  messages: Message[],
-  blocks: MessageBlock[],
-  artifacts: Artifact[],
-) {
-  const visibleMessages = messages.filter((message) => message.status !== "deleted" && message.status !== "recalled");
-  const text = visibleMessages
-    .map((message) => enrichMessageContentForCopy(message.content.trim() || attachmentLabel(), message.mentions ?? []).trim() || attachmentLabel())
-    .join("\n");
-  const collected = collectImageFileArtifactsForMessages(visibleMessages, blocks, artifacts);
-  if (!hasMeaningfulMessageCopyText(text) && collected.length === 1) {
-    return { text: "", artifactIds: [collected[0]!.id], includeText: false as const };
-  }
-  return {
-    text,
-    artifactIds: collected.map((artifact) => artifact.id),
-    includeText: true as const,
-  };
-}
-
 function selectionIntersectsNode(range: Range, node: Node) {
   try {
     return range.intersectsNode(node);
@@ -121,21 +101,37 @@ function selectionIntersectsTimelineCopyContent(range: Range, container: HTMLEle
   return false;
 }
 
-function collectMessagesFromNativeSelection(
-  range: Range,
-  container: HTMLElement,
-  messages: Message[],
-) {
-  const selected: Message[] = [];
-  for (const message of messages) {
-    if (message.status === "deleted" || message.status === "recalled" || message.role === "system") continue;
-    const row = container.querySelector(`[data-message-id="${CSS.escape(message.id)}"]`);
-    const content = row?.querySelector('[data-slot="message-copy-content"]');
-    if (content instanceof HTMLElement && selectionIntersectsNode(range, content)) {
-      selected.push(message);
+function selectedTextFromTimelineRange(range: Range, container: HTMLElement) {
+  const parts: string[] = [];
+  for (const content of container.querySelectorAll<HTMLElement>('[data-slot="message-copy-content"]')) {
+    if (!selectionIntersectsNode(range, content)) continue;
+    const contentRange = document.createRange();
+    contentRange.selectNodeContents(content);
+    const intersection = document.createRange();
+    if (range.compareBoundaryPoints(Range.START_TO_START, contentRange) > 0) {
+      intersection.setStart(range.startContainer, range.startOffset);
+    } else {
+      intersection.setStart(contentRange.startContainer, contentRange.startOffset);
     }
+    if (range.compareBoundaryPoints(Range.END_TO_END, contentRange) < 0) {
+      intersection.setEnd(range.endContainer, range.endOffset);
+    } else {
+      intersection.setEnd(contentRange.endContainer, contentRange.endOffset);
+    }
+    const text = intersection.toString();
+    if (text) parts.push(text);
   }
-  return selected;
+  return parts.join("\n");
+}
+
+function selectedArtifactIdsFromTimelineRange(range: Range, container: HTMLElement) {
+  const artifactIds = new Set<string>();
+  for (const element of container.querySelectorAll<HTMLElement>('[data-slot="artifact-block"][data-artifact-id]')) {
+    if (!selectionIntersectsNode(range, element)) continue;
+    const artifactId = element.dataset.artifactId?.trim();
+    if (artifactId) artifactIds.add(artifactId);
+  }
+  return [...artifactIds];
 }
 
 const MESSAGE_MENU_ACTIVE_ATTR = "data-menu-active";
@@ -249,6 +245,29 @@ export function MessageTimeline(props: {
     () => props.messages.filter(shouldShowMessage),
     [props.messages],
   );
+  const messagesById = useMemo(
+    () => new Map(props.messages.map((message) => [message.id, message])),
+    [props.messages],
+  );
+  const messageIndexesById = useMemo(
+    () => new Map(props.messages.map((message, index) => [message.id, index])),
+    [props.messages],
+  );
+  const referencedMessagesById = useMemo(() => {
+    const referencedById = new Map<string, Message>();
+    for (const message of visibleMessages) {
+      const referenced = resolveReferencedMessage(
+        message,
+        props.messages,
+        props.allParticipants,
+        props.identities,
+        messagesById,
+        messageIndexesById,
+      );
+      if (referenced) referencedById.set(message.id, referenced);
+    }
+    return referencedById;
+  }, [messageIndexesById, messagesById, props.allParticipants, props.identities, props.messages, visibleMessages]);
   const blocksByMessageId = useMemo(
     () => groupMessageBlocksByMessageId(props.blocks),
     [props.blocks],
@@ -268,14 +287,21 @@ export function MessageTimeline(props: {
     [selectedMessageIds, visibleMessages],
   );
   const detailReplyMessage = useMemo(
-    () => detailReplyMessageId ? props.messages.find((message) => message.id === detailReplyMessageId) ?? null : null,
-    [detailReplyMessageId, props.messages],
+    () => detailReplyMessageId ? messagesById.get(detailReplyMessageId) ?? null : null,
+    [detailReplyMessageId, messagesById],
   );
   const detailMessages = useMemo(
     () => detailReplyMessage
-      ? buildReferencedThread(detailReplyMessage, props.messages, props.allParticipants, props.identities)
+      ? buildReferencedThread(
+          detailReplyMessage,
+          props.messages,
+          props.allParticipants,
+          props.identities,
+          messagesById,
+          messageIndexesById,
+        )
       : [],
-    [detailReplyMessage, props.allParticipants, props.identities, props.messages],
+    [detailReplyMessage, messageIndexesById, messagesById, props.allParticipants, props.identities, props.messages],
   );
   const summaryTaskIds = useMemo(
     () => collectSummaryTaskIds(props.messages, props.blocks),
@@ -503,11 +529,16 @@ export function MessageTimeline(props: {
     if (!container.contains(range.commonAncestorContainer)) return;
     if (!selectionIntersectsTimelineCopyContent(range, container)) return;
 
-    const messages = collectMessagesFromNativeSelection(range, container, visibleMessages);
-    if (!messages.length) return;
+    const selectedText = selectedTextFromTimelineRange(range, container);
+    const artifactIds = selectedArtifactIdsFromTimelineRange(range, container);
+    if (!selectedText && artifactIds.length === 0) return;
 
     event.preventDefault();
-    await copyMessagesToClipboard(buildMessagesClipboardPayload(messages, props.blocks, props.artifacts));
+    await copyMessagesToClipboard({
+      text: selectedText,
+      artifactIds,
+      includeText: Boolean(selectedText),
+    });
   };
 
   const copyMessageLink = async (messageIds: string | string[], position: CopyTipPosition) => {
@@ -651,7 +682,7 @@ export function MessageTimeline(props: {
           message={message}
           showHeader={groupLayout.showHeader}
           isLastInGroup={groupLayout.isLastInGroup}
-          quotedMessage={resolveReferencedMessage(message, props.messages, props.allParticipants, props.identities)}
+          quotedMessage={referencedMessagesById.get(message.id) ?? null}
           blocks={blocksByMessageId.get(message.id) ?? EMPTY_MESSAGE_BLOCKS}
           allBlocks={props.allBlocks}
           artifacts={props.allArtifacts}
@@ -963,13 +994,17 @@ function resolveReferencedMessage(
   messages: Message[],
   participants: Participant[],
   identities: Identity[],
+  messagesById?: Map<string, Message>,
+  messageIndexesById?: Map<string, number>,
 ) {
   if (message.parentMessageId) {
-    return messages.find((item) => item.id === message.parentMessageId) ?? null;
+    return messagesById?.get(message.parentMessageId)
+      ?? messages.find((item) => item.id === message.parentMessageId)
+      ?? null;
   }
   const legacyQuote = extractLeadingReplyQuote(normalizeMarkdownContent(message.content));
   if (!legacyQuote) return null;
-  const messageIndex = messages.findIndex((item) => item.id === message.id);
+  const messageIndex = messageIndexesById?.get(message.id) ?? messages.findIndex((item) => item.id === message.id);
   const candidates = (messageIndex === -1 ? messages : messages.slice(0, messageIndex)).filter(
     (candidate) => candidate.status !== "deleted" && candidate.status !== "recalled",
   );
@@ -986,6 +1021,8 @@ function buildReferencedThread(
   messages: Message[],
   participants: Participant[],
   identities: Identity[],
+  messagesById?: Map<string, Message>,
+  messageIndexesById?: Map<string, number>,
 ) {
   const chain: Message[] = [];
   const seen = new Set<string>();
@@ -993,7 +1030,7 @@ function buildReferencedThread(
   while (current && !seen.has(current.id)) {
     seen.add(current.id);
     chain.unshift(current);
-    current = resolveReferencedMessage(current, messages, participants, identities);
+    current = resolveReferencedMessage(current, messages, participants, identities, messagesById, messageIndexesById);
   }
   return chain;
 }
@@ -1436,6 +1473,7 @@ function MessageActionBar(props: {
   onForwardToAgent: (provider: TuttiAgentGuiProvider) => void | Promise<void>;
   onOpenMenu: (anchor: HTMLElement) => void;
   onCloseMenu: () => void;
+  onDismissActions: () => void;
 }) {
   return (
     <div
@@ -1466,6 +1504,7 @@ function MessageActionBar(props: {
         active={Boolean((props.visible || props.menuOpen) && props.position)}
         moreMenuOpen={props.menuOpen}
         onCloseMenu={props.onCloseMenu}
+        onDismissActions={props.onDismissActions}
       />
       <IconAction
         title={t("common.more")}
@@ -1491,8 +1530,9 @@ function ForwardToAgentAction(props: {
   active: boolean;
   moreMenuOpen: boolean;
   onCloseMenu: () => void;
+  onDismissActions: () => void;
 }) {
-  const { anchorRef, closeMenu, open, toggleMenu } = useForwardSubmenuHover();
+  const { anchorRef, closeMenu, open, toggleMenu } = useForwardSubmenuHover(props.onDismissActions);
 
   useEffect(() => {
     if (!props.active) closeMenu();
@@ -1672,7 +1712,7 @@ function MessageMoreMenu(props: {
 const AGENT_FORWARD_SUBMENU_WIDTH_PX = 230;
 const AGENT_FORWARD_SUBMENU_Z_INDEX = MESSAGE_MORE_MENU_Z_INDEX + 1;
 
-function useForwardSubmenuHover() {
+function useForwardSubmenuHover(onOutsideDismiss?: () => void) {
   const anchorRef = useRef<HTMLDivElement | null>(null);
   const closeTimerRef = useRef<number | null>(null);
   const [open, setOpen] = useState(false);
@@ -1710,10 +1750,11 @@ function useForwardSubmenuHover() {
       if (anchorRef.current?.contains(target)) return;
       if (target instanceof Element && target.closest("[data-agent-forward-submenu]")) return;
       closeMenu();
+      onOutsideDismiss?.();
     };
     document.addEventListener("pointerdown", handlePointerDown);
     return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [closeMenu, open]);
+  }, [closeMenu, onOutsideDismiss, open]);
 
   return { anchorRef, closeMenu, open, openMenu, scheduleClose, toggleMenu };
 }
@@ -2846,6 +2887,7 @@ function MessageBodyShell(props: {
           onForwardToAgent={props.onForwardToAgent}
           onOpenMenu={props.onOpenMenu}
           onCloseMenu={props.onCloseMenu}
+          onDismissActions={props.onHideActions}
         />
       ) : null}
       {props.showHoverTime && props.createdAt && !props.selectionMode && !props.disabled ? (

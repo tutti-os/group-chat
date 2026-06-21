@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { MessageSquarePlus, Pin, PinOff, Trash2 } from "lucide-react";
 import type { Conversation, Message, Room } from "@group-chat/shared";
 import { formatShortDate } from "../../formatting.js";
 import { t, useTranslation } from "../../i18n/index.js";
 import { RoomAvatar } from "../ui/RoomAvatar.js";
 import { UnreadBadge } from "../ui/UnreadBadge.js";
+import { buildLatestPreviewMessageIndex } from "../../conversation-preview-index.js";
 
 export function ConversationSidebar(props: {
   rooms: Room[];
@@ -17,27 +18,54 @@ export function ConversationSidebar(props: {
   onDeleteRoom: (room: Room, conversation: Conversation) => void;
   onTogglePin: (conversation: Conversation, pinned: boolean) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [query, setQuery] = useState("");
   const [contextMenu, setContextMenu] = useState<{ conversationId: string; x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const normalizedQuery = query.trim().toLowerCase();
 
-  const visibleConversations = props.conversations
-    .filter((conversation) => {
-      const room = props.rooms.find((item) => item.id === conversation.roomId);
-      if (!room) return false;
-      const preview = buildRecentMessagePreview(conversation, room, props.messages);
+  const roomsById = useMemo(
+    () => new Map(props.rooms.map((room) => [room.id, room])),
+    [props.rooms],
+  );
+  const conversationsById = useMemo(
+    () => new Map(props.conversations.map((conversation) => [conversation.id, conversation])),
+    [props.conversations],
+  );
+  const latestPreviewMessageByConversationId = useMemo(
+    () => buildLatestPreviewMessageIndex(props.messages),
+    [props.messages],
+  );
+  const conversationEntries = useMemo(
+    () => props.conversations.flatMap((conversation) => {
+      const room = roomsById.get(conversation.roomId);
+      if (!room) return [];
+      return [{
+        conversation,
+        room,
+        preview: buildRecentMessagePreview(
+          conversation,
+          room,
+          latestPreviewMessageByConversationId.get(conversation.id) ?? null,
+        ),
+      }];
+    }),
+    [latestPreviewMessageByConversationId, locale, props.conversations, roomsById],
+  );
+  const visibleConversationEntries = useMemo(
+    () => conversationEntries
+      .filter(({ conversation, room, preview }) => {
       if (!normalizedQuery) return true;
       return [conversation.title, conversation.lastMessage, preview.sender, preview.content, room.title, room.description]
         .filter(Boolean)
         .some((value) => value!.toLowerCase().includes(normalizedQuery));
-    })
-    .slice()
-    .sort(sortConversations);
+      })
+      .sort((left, right) => sortConversations(left.conversation, right.conversation)),
+    [conversationEntries, normalizedQuery],
+  );
 
   const contextConversation = contextMenu
-    ? props.conversations.find((item) => item.id === contextMenu.conversationId) ?? null
+    ? conversationsById.get(contextMenu.conversationId) ?? null
     : null;
 
   useEffect(() => {
@@ -82,7 +110,7 @@ export function ConversationSidebar(props: {
         />
       </div>
       <div className={"[min-height:0] [flex:1_1_auto] [overflow-y:auto] [padding:2px_8px_12px]"}>
-        {visibleConversations.length === 0 ? (
+        {visibleConversationEntries.length === 0 ? (
           <div className={"[display:grid] [gap:10px] [margin:8px_4px] [border:1px_dashed_var(--border)] [border-radius:10px] [padding:24px_14px] [color:var(--muted)] [background:#ffffff99] [font-size:12px] [line-height:1.5] [text-align:center] [&_strong]:[color:var(--text)] [&_strong]:[font-size:13px] [&_button]:[justify-self:center] [&_button]:[height:32px] [&_button]:[border:0] [&_button]:[border-radius:6px] [&_button]:[padding:0_12px] [&_button]:[color:#ffffff] [&_button]:[background:var(--primary)] [&_button]:[font-size:12px] [&_button]:[font-weight:650]"}>
             <strong>{normalizedQuery ? t("sidebar.noMatchTitle") : t("sidebar.emptyTitle")}</strong>
             <span>{normalizedQuery ? t("sidebar.noMatchHint") : t("sidebar.emptyHint")}</span>
@@ -91,10 +119,7 @@ export function ConversationSidebar(props: {
             </button>
           </div>
         ) : null}
-        {visibleConversations.map((conversation) => {
-          const room = props.rooms.find((item) => item.id === conversation.roomId);
-          if (!room) return null;
-          const preview = buildRecentMessagePreview(conversation, room, props.messages);
+        {visibleConversationEntries.map(({ conversation, room, preview }) => {
           const unreadCount = props.unreadCounts[conversation.id] ?? 0;
           return (
             <div
@@ -195,8 +220,7 @@ function sortConversations(left: Conversation, right: Conversation) {
   return right.updatedAt.localeCompare(left.updatedAt);
 }
 
-function buildRecentMessagePreview(conversation: Conversation, room: Room, messages: Message[]) {
-  const message = [...messages].reverse().find((item) => item.conversationId === conversation.id && shouldUseMessageForPreview(item));
+function buildRecentMessagePreview(conversation: Conversation, room: Room, message: Message | null) {
   if (!message) {
     return {
       sender: "",
@@ -219,10 +243,6 @@ function buildRecentMessagePreview(conversation: Conversation, room: Room, messa
     sender: messageSenderLabel(message),
     content: message.content.trim() || conversation.lastMessage || t("common.attachment"),
   };
-}
-
-function shouldUseMessageForPreview(message: Message) {
-  return !(message.role === "assistant" && message.status === "cancelled" && !message.content.trim());
 }
 
 function messageSenderLabel(message: Message) {

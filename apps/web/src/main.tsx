@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App.js";
 import { I18nProvider } from "./app/i18n/index.js";
+import { AppContextMenu } from "./app/components/ui/AppContextMenu.js";
 import "./styles/index.css";
 
 async function bootstrap() {
@@ -13,6 +14,7 @@ async function bootstrap() {
     <StrictMode>
       <I18nProvider>
         <App />
+        <AppContextMenu />
       </I18nProvider>
     </StrictMode>,
   );

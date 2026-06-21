@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AppWindow, AtSign, Bot, Ear, FileOutput, FileText, ImageIcon, LayoutList, LoaderCircle, Paperclip, Send, Square, Video, X } from "lucide-react";
+import { AppWindow, AtSign, Bot, Ear, FileOutput, FileText, LayoutList, LoaderCircle, Paperclip, Send, Square, Video, X } from "lucide-react";
 import type { AgentRun, Artifact, Conversation, Identity, LocalAgentProviderStatus, MentionTarget, Message, Participant, Room, RuntimeProfile, TuttiAtProviderId } from "@group-chat/shared";
 import { resolveArtifactLinkedMessageId } from "@group-chat/shared";
 import { cancelRun, sendMessage, updateMessage, uploadArtifact } from "../../../api/client.js";
 import { getArtifactCategory, revealArtifactInTuttiFileManager, resolveArtifactPublicUrl } from "../../artifact-actions.js";
 import { formatBytes, fileToBase64 } from "../../formatting.js";
 import {
-  clearArtifactClipboardStash,
   formatMessageLink,
   formatMessageLinkLabel,
   formatSummaryLink,
@@ -15,7 +14,6 @@ import {
   parseMessageLinkIds,
   primaryMessageLinkId,
   readArtifactClipboardFromDataTransfer,
-  readRecentArtifactClipboardStashForPaste,
   readStashedSummaryLink,
   SUMMARY_LINK_MIME,
 } from "../../chat-links.js";
@@ -66,6 +64,9 @@ import {
 } from "../../mention-panel-tabs.js";
 
 const MENTION_MENU_Z_INDEX = 90;
+const COMPOSER_UPLOAD_CLIPBOARD_MIME = "application/x-agent-chat-composer-uploads";
+const COMPOSER_UPLOAD_CLIPBOARD_CACHE_LIMIT = 10;
+const composerUploadClipboardSnapshots = new Map<string, UploadItem[]>();
 
 function mentionPanelCacheKey(tab: MentionPanelTab, roomId: string, roomFileFingerprint: string) {
   return tab === "files"
@@ -147,6 +148,8 @@ export function Composer(props: {
   const [sending, setSending] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const editorRef = useRef<HTMLDivElement | null>(null);
+  const attachmentDragSelectionRef = useRef<{ pointerId: number; startX: number } | null>(null);
+  const suppressEditorClickClearRef = useRef(false);
   const composerDraftsRef = useRef<Map<string, ComposerDraft>>(new Map());
   const activeDraftConversationIdRef = useRef(props.conversationId);
   const pendingFocusSeqRef = useRef(0);
@@ -421,7 +424,12 @@ export function Composer(props: {
         setMentionQuery(null);
         return;
       }
-      const artifacts = await uploadQueuedItems(uploadItems);
+      const orderedUploadItems = uploadItemsInEditorOrder(editorRef.current, uploadItems);
+      const artifacts = await uploadQueuedItems(orderedUploadItems);
+      const artifactsByUploadItemId = new Map(
+        orderedUploadItems.flatMap((item, index) => artifacts[index] ? [[item.id, artifacts[index]!] as const] : []),
+      );
+      const messageParts = serializeComposerMessageParts(editorRef.current, artifactsByUploadItemId);
       const editorMentions = collectMentionTargetsFromEditor(editorRef.current, allMentionableParticipants);
       const isWhisper = WHISPER_FEATURE_ENABLED && hasWhisperChipInEditor(editorRef.current);
       const messageContent = quotes.length ? `${formatQuotesForMessage(quotes)}\n\n${text}` : text;
@@ -440,6 +448,7 @@ export function Composer(props: {
       const result = await props.onSend(props.conversationId, {
         content: messageContent,
         artifactIds: artifacts.map((artifact) => artifact.id),
+        parts: quotes.length ? undefined : messageParts,
         parentMessageId: quotes.length === 1 ? quotes[0]!.messageId : null,
         mentions: editorMentions,
         visibility: isWhisper ? "whisper" : "public",
@@ -608,6 +617,18 @@ export function Composer(props: {
     resizeComposerEditor(editorRef.current);
   }, [text, quotes.length, uploadItems.length, props.conversationId]);
 
+  useLayoutEffect(() => {
+    syncUploadItemChips(editorRef.current, uploadItems);
+  }, [uploadItems]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    for (const chip of editor.querySelectorAll<HTMLElement>("[data-upload-item-id]")) {
+      chip.toggleAttribute("data-selected", selectedUploadItemIds.has(chip.dataset.uploadItemId ?? ""));
+    }
+  }, [selectedUploadItemIds]);
+
   useEffect(() => {
     setSelectedUploadItemIds((current) => {
       if (!current.size) return current;
@@ -616,6 +637,29 @@ export function Composer(props: {
       return next.size === current.size ? current : next;
     });
   }, [uploadItems]);
+
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      const drag = attachmentDragSelectionRef.current;
+      const footer = footerRef.current;
+      if (!drag || drag.pointerId !== event.pointerId || !footer) return;
+      const selectedIds = uploadItemIdsCrossedByLeftDrag(footer, drag.startX, event.clientX, event.clientY);
+      setSelectedUploadItemIds((current) => sameStringSet(current, selectedIds) ? current : selectedIds);
+      if (selectedIds.size > 0) suppressEditorClickClearRef.current = true;
+    };
+    const handlePointerEnd = (event: PointerEvent) => {
+      if (attachmentDragSelectionRef.current?.pointerId !== event.pointerId) return;
+      attachmentDragSelectionRef.current = null;
+    };
+    document.addEventListener("pointermove", handlePointerMove);
+    document.addEventListener("pointerup", handlePointerEnd);
+    document.addEventListener("pointercancel", handlePointerEnd);
+    return () => {
+      document.removeEventListener("pointermove", handlePointerMove);
+      document.removeEventListener("pointerup", handlePointerEnd);
+      document.removeEventListener("pointercancel", handlePointerEnd);
+    };
+  }, []);
 
   const insertMentionChipAtActiveQuery = (label: string, mentionId: string, reference?: TuttiAtQueryResult): boolean => {
     const editor = editorRef.current;
@@ -856,6 +900,7 @@ export function Composer(props: {
       };
     });
     setUploadItems((current) => [...current, ...queued]);
+    insertUploadItemsAtCaret(editorRef.current, queued);
   };
 
   const focusComposerAfterAttachmentInsert = () => {
@@ -880,6 +925,50 @@ export function Composer(props: {
       artifact,
     }));
     setUploadItems((current) => [...current, ...queued]);
+    insertUploadItemsAtCaret(editorRef.current, queued);
+  };
+
+  const duplicateComposerUploadItems = (itemIds: string[], sourceItems = uploadItems) => {
+    const ids = new Set(itemIds);
+    const duplicated = sourceItems
+      .filter((item) => ids.has(item.id))
+      .map((item): UploadItem => {
+        const previewUrl = item.artifact
+          ? item.previewUrl
+          : item.mimeType.startsWith("image/")
+            ? URL.createObjectURL(item.file)
+            : null;
+        if (previewUrl && !item.artifact) previewUrlsRef.current.add(previewUrl);
+        return {
+          ...item,
+          id: crypto.randomUUID(),
+          previewUrl,
+          status: item.artifact ? "uploaded" : "pending",
+          error: undefined,
+        };
+      });
+    if (!duplicated.length) return false;
+    setUploadItems((current) => [...current, ...duplicated]);
+    insertUploadItemsAtCaret(editorRef.current, duplicated);
+    return true;
+  };
+
+  const copyComposerUploads = (event: ClipboardEvent<HTMLDivElement>) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const itemIds = selectedUploadItemIds.size > 0
+      ? [...selectedUploadItemIds]
+      : uploadItemIdsInSelection(editor);
+    if (!itemIds.length) return;
+    const selectedText = composerTextInSelection(editor);
+    const token = crypto.randomUUID();
+    storeComposerUploadClipboardSnapshot(
+      token,
+      uploadItems.filter((item) => itemIds.includes(item.id)).map((item) => ({ ...item })),
+    );
+    event.preventDefault();
+    event.clipboardData.setData(COMPOSER_UPLOAD_CLIPBOARD_MIME, JSON.stringify({ token, itemIds, text: selectedText }));
+    event.clipboardData.setData("text/plain", selectedText);
   };
 
   const resolvePastedArtifacts = (clipboardData: DataTransfer, pastedText: string) => {
@@ -902,20 +991,6 @@ export function Composer(props: {
       }
     }
 
-    if (!pastedText.trim()) {
-      const stash = readRecentArtifactClipboardStashForPaste();
-      if (stash?.artifactIds.length) {
-        const artifacts = resolveArtifactsByIds(stash.artifactIds, props.allArtifacts);
-        if (artifacts.length > 0) {
-          return {
-            artifacts,
-            includeText: stash.includeText,
-            preferOverClipboardFiles: true,
-          };
-        }
-      }
-    }
-
     return { artifacts: [] as Artifact[], includeText: true, preferOverClipboardFiles: false };
   };
 
@@ -923,10 +998,6 @@ export function Composer(props: {
     pastedArtifactClipboard: ReturnType<typeof resolvePastedArtifacts>,
     pastedText: string,
   ) => {
-    if (pastedArtifactClipboard.artifacts.length > 0) {
-      queueExistingArtifacts(pastedArtifactClipboard.artifacts);
-      clearArtifactClipboardStash();
-    }
     if (
       pastedArtifactClipboard.includeText
       && pastedText.trim()
@@ -953,7 +1024,10 @@ export function Composer(props: {
         syncEditorText(true);
       });
     }
-    focusComposerAfterAttachmentInsert();
+    if (pastedArtifactClipboard.artifacts.length > 0) {
+      queueExistingArtifacts(pastedArtifactClipboard.artifacts);
+    }
+    requestAnimationFrame(() => syncEditorText(true));
   };
 
   const ensureUploadItemArtifact = (item: UploadItem): Promise<Artifact | null> => {
@@ -1022,23 +1096,32 @@ export function Composer(props: {
   };
 
   const pasteFiles = (event: ClipboardEvent<HTMLDivElement>) => {
+    const copiedUploads = readComposerUploadClipboard(event.clipboardData);
+    if (copiedUploads.itemIds.length > 0) {
+      event.preventDefault();
+      if (selectedUploadItemIds.size > 0) removeUploadItems(selectedUploadItemIds);
+      duplicateComposerUploadItems(
+        copiedUploads.itemIds,
+        composerUploadClipboardSnapshots.get(copiedUploads.token) ?? uploadItems,
+      );
+      if (copiedUploads.text) {
+        insertComposerPasteAtCaret(copiedUploads.text, {
+          getMessageLabel: (messageIdSegment) => formatMessageLinkLabel(
+            messageIdSegment,
+            props.allMessages,
+            props.allParticipants,
+            props.identities,
+            props.userDisplayName,
+          ),
+          getSummaryTask: (taskId) => props.summaryTasks.find((task) => task.id === taskId) ?? null,
+        }, composerPasteContext);
+      }
+      requestAnimationFrame(() => syncEditorText(true));
+      return;
+    }
     if (selectedUploadItemIds.size > 0) removeUploadItems(selectedUploadItemIds);
     const pastedHtml = event.clipboardData.getData("text/html");
     const pastedText = normalizeComposerPasteText(pastedHtml, event.clipboardData.getData("text/plain"));
-
-    const recentArtifactStash = readRecentArtifactClipboardStashForPaste();
-    if (recentArtifactStash && !recentArtifactStash.includeText) {
-      const stashArtifacts = resolveArtifactsByIds(recentArtifactStash.artifactIds, props.allArtifacts);
-      if (stashArtifacts.length > 0) {
-        event.preventDefault();
-        applyPastedArtifacts({
-          artifacts: stashArtifacts,
-          includeText: false,
-          preferOverClipboardFiles: true,
-        }, "");
-        return;
-      }
-    }
 
     const pastedArtifactClipboard = resolvePastedArtifacts(event.clipboardData, pastedText);
     const summaryLinkFromMime = event.clipboardData.getData(SUMMARY_LINK_MIME).trim();
@@ -1072,7 +1155,7 @@ export function Composer(props: {
     if (files.length > 0) {
       event.preventDefault();
       queueFiles(files);
-      focusComposerAfterAttachmentInsert();
+      requestAnimationFrame(() => syncEditorText(true));
       return;
     }
 
@@ -1114,6 +1197,7 @@ export function Composer(props: {
     revokePreviewUrl(item?.previewUrl ?? null);
     if (item?.previewUrl) previewUrlsRef.current.delete(item.previewUrl);
     setUploadItems((current) => current.filter((candidate) => candidate.id !== itemId));
+    removeUploadItemChip(editorRef.current, itemId);
     setSelectedUploadItemIds((current) => {
       if (!current.has(itemId)) return current;
       const next = new Set(current);
@@ -1132,6 +1216,7 @@ export function Composer(props: {
       if (item.previewUrl) previewUrlsRef.current.delete(item.previewUrl);
     }
     setUploadItems((current) => current.filter((candidate) => !ids.has(candidate.id)));
+    for (const itemId of ids) removeUploadItemChip(editorRef.current, itemId);
     setSelectedUploadItemIds(new Set());
     return true;
   };
@@ -1168,16 +1253,6 @@ export function Composer(props: {
       }
     }
     requestAnimationFrame(() => editor?.focus({ preventScroll: true }));
-    return true;
-  };
-
-  const deleteLastUploadFromEmptyEditor = () => {
-    const editor = editorRef.current;
-    if (!editor || uploadItems.length === 0 || editorText(editor).length > 0) return false;
-    const lastItem = uploadItems.at(-1);
-    if (!lastItem) return false;
-    removeUploadItem(lastItem.id);
-    requestAnimationFrame(() => editor.focus({ preventScroll: true }));
     return true;
   };
 
@@ -1507,16 +1582,9 @@ export function Composer(props: {
         <div className={"[display:grid] [min-height:40px] [align-content:start] [gap:6px] [padding:2px_0]"}>
           {quotes.length ? <QuoteComposerBar quotes={quotes} onRemove={() => setQuotes([])} /> : null}
           <div className={"[display:flex] [min-height:28px] [min-width:0] [flex-wrap:wrap] [align-items:flex-start] [gap:4px_6px]"}>
-            <PendingAttachmentTray
-              uploadItems={uploadItems}
-              selectedUploadItemIds={selectedUploadItemIds}
-              onRemoveUpload={removeUploadItem}
-              onOpenUpload={openUploadItem}
-              onSelectAll={selectAllComposerContent}
-            />
-            <div className={"[position:relative] [min-width:0] [flex:1_1_180px] [min-height:28px] [display:grid] [align-items:start] [overflow:hidden]"}>
-            {!text && t("composer.placeholder").trim() ? (
-              <span className={"[pointer-events:none] [position:absolute] [left:0] [top:4px] [color:#17171755] [font-size:13px] [line-height:20px]"}>
+            <div className={"[position:relative] [min-width:0] [flex:1_1_180px] [min-height:28px] [display:grid] [align-items:start] [overflow:hidden] [&:has([data-upload-item-id])_[data-slot=composer-placeholder]]:[display:none] [&:has([data-mention-chip])_[data-slot=composer-placeholder]]:[display:none] [&:has([data-message-link-id])_[data-slot=composer-placeholder]]:[display:none] [&:has([data-summary-link-id])_[data-slot=composer-placeholder]]:[display:none]"}>
+            {!text && uploadItems.length === 0 && t("composer.placeholder").trim() ? (
+              <span data-slot="composer-placeholder" className={"[pointer-events:none] [position:absolute] [left:0] [top:4px] [color:#17171755] [font-size:13px] [line-height:20px]"}>
                 {t("composer.placeholder")}
               </span>
             ) : null}
@@ -1528,8 +1596,30 @@ export function Composer(props: {
               contentEditable
               suppressContentEditableWarning
               className={"[width:100%] [min-width:0] [min-height:28px] [max-height:168px] [overflow-y:hidden] [outline:none] [white-space:pre-wrap] [overflow-wrap:anywhere] [word-break:break-word] [color:var(--text)] [font-size:13px] [line-height:20px] [padding:4px_0] empty:before:[content:'']"}
+              onPointerDown={(event) => {
+                if (event.button !== 0 || uploadItems.length === 0) return;
+                attachmentDragSelectionRef.current = { pointerId: event.pointerId, startX: event.clientX };
+                suppressEditorClickClearRef.current = false;
+              }}
               onInput={() => {
                 setSelectedUploadItemIds((current) => current.size ? new Set() : current);
+                const editor = editorRef.current;
+                if (editor) {
+                  const itemIds = new Set(
+                    [...editor.querySelectorAll<HTMLElement>("[data-upload-item-id]")]
+                      .map((chip) => chip.dataset.uploadItemId)
+                      .filter((itemId): itemId is string => Boolean(itemId)),
+                  );
+                  setUploadItems((current) => {
+                    const removed = current.filter((item) => !itemIds.has(item.id));
+                    if (removed.length === 0) return current;
+                    for (const item of removed) {
+                      revokePreviewUrl(item.previewUrl);
+                      if (item.previewUrl) previewUrlsRef.current.delete(item.previewUrl);
+                    }
+                    return current.filter((item) => itemIds.has(item.id));
+                  });
+                }
                 syncEditorText(true);
               }}
               onMouseDown={(event) => {
@@ -1541,6 +1631,19 @@ export function Composer(props: {
                 if (linkChip) event.preventDefault();
               }}
               onClick={(event) => {
+                const uploadChip = (event.target as Element).closest<HTMLElement>("[data-upload-item-id]");
+                if (uploadChip) {
+                  event.preventDefault();
+                  const itemId = uploadChip.dataset.uploadItemId;
+                  if (!itemId) return;
+                  if ((event.target as Element).closest("[data-upload-remove]")) {
+                    removeUploadItem(itemId);
+                    return;
+                  }
+                  const item = uploadItems.find((candidate) => candidate.id === itemId);
+                  if (item) void openUploadItem(item);
+                  return;
+                }
                 const messageChip = (event.target as Element).closest("[data-message-link-id]");
                 if (messageChip instanceof HTMLElement) {
                   event.preventDefault();
@@ -1561,10 +1664,16 @@ export function Composer(props: {
                   openFileReferenceFromChip(linkChip);
                   return;
                 }
+                if (suppressEditorClickClearRef.current) {
+                  suppressEditorClickClearRef.current = false;
+                  syncEditorText(true);
+                  return;
+                }
                 setSelectedUploadItemIds((current) => current.size ? new Set() : current);
                 syncEditorText(true);
               }}
               onPaste={pasteFiles}
+              onCopy={copyComposerUploads}
               onKeyUp={() => syncEditorText(true)}
               onFocus={() => {
                 scheduleLocalAgentProviderRefreshBurst();
@@ -1573,6 +1682,35 @@ export function Composer(props: {
               }}
               onBlur={handleEditorBlur}
               onKeyDown={(event) => {
+                if (
+                  event.key.length === 1
+                  && !event.metaKey
+                  && !event.ctrlKey
+                  && !event.altKey
+                  && insertTextAfterUploadCaretAnchor(editorRef.current, event.key)
+                ) {
+                  event.preventDefault();
+                  syncEditorText(true);
+                  return;
+                }
+                const focusedUploadChip = document.activeElement instanceof HTMLElement
+                  ? document.activeElement.closest<HTMLElement>("[data-upload-item-id]")
+                  : null;
+                if (focusedUploadChip) {
+                  const itemId = focusedUploadChip.dataset.uploadItemId;
+                  const item = uploadItems.find((candidate) => candidate.id === itemId);
+                  if ((event.key === "Enter" || event.key === " ") && item) {
+                    event.preventDefault();
+                    void openUploadItem(item);
+                    return;
+                  }
+                  if ((event.key === "Backspace" || event.key === "Delete") && itemId) {
+                    event.preventDefault();
+                    removeUploadItem(itemId);
+                    requestAnimationFrame(() => editorRef.current?.focus({ preventScroll: true }));
+                    return;
+                  }
+                }
                 if (
                   event.key.toLowerCase() === "a"
                   && (event.metaKey || event.ctrlKey)
@@ -1597,16 +1735,14 @@ export function Composer(props: {
                 if (shouldReplaceSelectedUploadItems(event, selectedUploadItemIds)) {
                   removeUploadItems(selectedUploadItemIds);
                 }
-                if (
-                  (event.key === "Backspace" || event.key === "Delete")
-                  && !event.metaKey
-                  && !event.ctrlKey
-                  && !event.altKey
-                  && !event.shiftKey
-                  && deleteLastUploadFromEmptyEditor()
-                ) {
-                  event.preventDefault();
-                  return;
+                if (event.key === "Backspace" || event.key === "Delete") {
+                  const adjacentUploadItemId = findAdjacentUploadItemId(editorRef.current, event.key);
+                  if (adjacentUploadItemId) {
+                    event.preventDefault();
+                    removeUploadItem(adjacentUploadItemId);
+                    syncEditorText();
+                    return;
+                  }
                 }
                 if ((event.key === "Backspace" || event.key === "Delete") && deleteAdjacentMentionChip(editorRef.current, event.key)) {
                   event.preventDefault();
@@ -2785,6 +2921,7 @@ function textPosition(editor: HTMLDivElement, offset: number) {
 }
 
 function nodeTextValue(node: Node) {
+  if (isUploadItemChip(node)) return "";
   if (isWhisperChip(node)) return "";
   if (isMentionChip(node)) {
     if (node.dataset.mentionDisplayMode === "reference-link") {
@@ -2794,7 +2931,7 @@ function nodeTextValue(node: Node) {
   }
   if (isMessageLinkChip(node)) return formatMessageLink(...parseMessageLinkIds(node.dataset.messageLinkId ?? ""));
   if (isSummaryLinkChip(node)) return formatSummaryLink(node.dataset.summaryLinkId ?? "");
-  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+  if (node.nodeType === Node.TEXT_NODE) return (node.textContent ?? "").replaceAll("\u200b", "");
   let text = "";
   node.childNodes.forEach((child) => {
     text += nodeTextValue(child);
@@ -2823,8 +2960,16 @@ function isSummaryLinkChip(node: Node): node is HTMLElement {
   return node instanceof HTMLElement && typeof node.dataset.summaryLinkId === "string";
 }
 
+function isUploadItemChip(node: Node): node is HTMLElement {
+  return node instanceof HTMLElement && typeof node.dataset.uploadItemId === "string";
+}
+
 function isAtomicEditorChip(node: Node): node is HTMLElement {
-  return isMentionChip(node) || isWhisperChip(node) || isMessageLinkChip(node) || isSummaryLinkChip(node);
+  return isMentionChip(node)
+    || isWhisperChip(node)
+    || isMessageLinkChip(node)
+    || isSummaryLinkChip(node)
+    || isUploadItemChip(node);
 }
 
 function childIndex(node: Node) {
@@ -2878,6 +3023,18 @@ function deleteAdjacentMentionChip(editor: HTMLDivElement | null, key: "Backspac
   selection.removeAllRanges();
   selection.addRange(nextRange);
   return true;
+}
+
+function findAdjacentUploadItemId(editor: HTMLDivElement | null, key: "Backspace" | "Delete") {
+  if (!editor) return null;
+  const selection = window.getSelection();
+  if (!selection?.rangeCount || !selection.isCollapsed) return null;
+  const range = selection.getRangeAt(0);
+  if (!editor.contains(range.startContainer)) return null;
+  const candidate = key === "Backspace"
+    ? previousEditableNode(range.startContainer, range.startOffset, editor)
+    : nextEditableNode(range.startContainer, range.startOffset, editor);
+  return candidate && isUploadItemChip(candidate) ? candidate.dataset.uploadItemId ?? null : null;
 }
 
 function previousEditableNode(container: Node, offset: number, editor: HTMLDivElement) {
@@ -3055,6 +3212,264 @@ function createMessageLinkChip(messageId: string, label: string) {
   return chip;
 }
 
+function insertUploadItemsAtCaret(editor: HTMLDivElement | null, items: UploadItem[]) {
+  if (!editor || items.length === 0) return;
+  editor.focus({ preventScroll: true });
+  const selection = window.getSelection();
+  let range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+  if (!range || !editor.contains(range.startContainer)) {
+    range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+  } else {
+    range = normalizeUploadCaretRange(range);
+    range.deleteContents();
+  }
+  const fragment = document.createDocumentFragment();
+  let lastCaretAnchor: HTMLElement | null = null;
+  for (const item of items) {
+    const chip = createUploadItemChip(item);
+    const caretAnchor = createUploadCaretAnchor();
+    fragment.append(chip, caretAnchor);
+    lastCaretAnchor = caretAnchor;
+  }
+  range.insertNode(fragment);
+  if (lastCaretAnchor) {
+    const caretText = lastCaretAnchor.firstChild;
+    if (caretText?.nodeType === Node.TEXT_NODE) {
+      range.setStart(caretText, caretText.textContent?.length ?? 0);
+    } else {
+      range.setStart(lastCaretAnchor, lastCaretAnchor.childNodes.length);
+    }
+    range.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
+  resizeComposerEditor(editor);
+}
+
+function normalizeUploadCaretRange(range: Range) {
+  if (!range.collapsed) return range;
+  const startElement = range.startContainer instanceof Element
+    ? range.startContainer
+    : range.startContainer.parentElement;
+  const caretAnchor = startElement?.closest<HTMLElement>("[data-upload-caret-anchor]");
+  if (!caretAnchor) return range;
+  const nextRange = document.createRange();
+  nextRange.setStartAfter(caretAnchor);
+  nextRange.collapse(true);
+  return nextRange;
+}
+
+function createUploadItemChip(item: UploadItem) {
+  const chip = document.createElement("span");
+  chip.contentEditable = "false";
+  chip.dataset.uploadItemId = item.id;
+  chip.dataset.uploadMimeType = item.mimeType;
+  chip.setAttribute("role", "button");
+  chip.setAttribute("tabindex", "0");
+  chip.setAttribute("aria-label", t("composer.previewFile", { filename: item.filename }));
+  chip.title = item.filename;
+  chip.className = item.mimeType.startsWith("image/") && item.previewUrl
+    ? "group [position:relative] [display:inline-grid] [width:58px] [height:44px] [margin:2px_3px] [overflow:hidden] [vertical-align:bottom] [border:1px_solid_var(--border)] [border-radius:10px] [background:#00000008] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] [outline:none] [&[data-selected]]:[border-color:var(--primary)] [&[data-selected]]:[box-shadow:0_0_0_3px_#2563eb33] [&[data-error]]:[border-color:var(--danger)]"
+    : "group [position:relative] [display:inline-flex] [max-width:220px] [height:32px] [margin:2px_3px] [align-items:center] [gap:7px] [vertical-align:bottom] [border:1px_solid_var(--border)] [border-radius:10px] [padding:4px_24px_4px_8px] [background:var(--panel)] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] [outline:none] [&[data-selected]]:[border-color:var(--primary)] [&[data-selected]]:[box-shadow:0_0_0_3px_#2563eb33] [&[data-error]]:[border-color:var(--danger)]";
+
+  if (item.mimeType.startsWith("image/") && item.previewUrl) {
+    const image = document.createElement("img");
+    image.src = item.previewUrl;
+    image.alt = "";
+    image.draggable = false;
+    image.className = "[width:100%] [height:100%] [object-fit:cover]";
+    chip.append(image);
+  } else {
+    const label = document.createElement("span");
+    label.className = "[min-width:0] [overflow:hidden] [font-size:12px] [font-weight:650] [line-height:16px] [text-overflow:ellipsis] [white-space:nowrap]";
+    label.textContent = item.filename;
+    const size = document.createElement("small");
+    size.className = "[flex:0_0_auto] [color:var(--muted)] [font-size:11px] [line-height:14px]";
+    size.textContent = formatBytes(item.sizeBytes);
+    chip.append(label, size);
+  }
+
+  const remove = document.createElement("span");
+  remove.dataset.uploadRemove = "true";
+  remove.setAttribute("role", "button");
+  remove.setAttribute("aria-label", `Remove ${item.filename}`);
+  remove.title = `Remove ${item.filename}`;
+  remove.textContent = "×";
+  remove.className = "[position:absolute] [right:3px] [top:3px] [display:inline-grid] [width:18px] [height:18px] [place-items:center] [border-radius:999px] [color:var(--text)] [background:#fffffff0] [opacity:0] [font-size:14px] [line-height:18px] group-hover:[opacity:1]";
+  chip.append(remove);
+  return chip;
+}
+
+function createUploadCaretAnchor() {
+  const anchor = document.createElement("span");
+  anchor.dataset.uploadCaretAnchor = "true";
+  anchor.className = "[display:inline-block] [min-width:1px] [height:20px] [line-height:20px] [vertical-align:bottom] [overflow:visible] [white-space:nowrap]";
+  anchor.textContent = "\u200b";
+  return anchor;
+}
+
+function insertTextAfterUploadCaretAnchor(editor: HTMLDivElement | null, text: string) {
+  const selection = window.getSelection();
+  if (!editor || !selection?.rangeCount) return false;
+  const selectionRange = selection.getRangeAt(0);
+  if (!selectionRange.collapsed) return false;
+  const startElement = selectionRange.startContainer instanceof Element
+    ? selectionRange.startContainer
+    : selectionRange.startContainer.parentElement;
+  const anchor = startElement?.closest<HTMLElement>("[data-upload-caret-anchor]");
+  if (!anchor || !editor.contains(anchor)) return false;
+  const textNode = document.createTextNode(text);
+  anchor.after(textNode);
+  const range = document.createRange();
+  range.setStart(textNode, text.length);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return true;
+}
+
+
+function ensureUploadCaretAnchorAfter(chip: HTMLElement) {
+  if (chip.nextSibling instanceof HTMLElement && chip.nextSibling.dataset.uploadCaretAnchor === "true") return;
+  chip.after(createUploadCaretAnchor());
+}
+
+function syncUploadItemChips(editor: HTMLDivElement | null, items: UploadItem[]) {
+  if (!editor) return;
+  const itemsById = new Map(items.map((item) => [item.id, item]));
+  for (const chip of editor.querySelectorAll<HTMLElement>("[data-upload-item-id]")) {
+    const itemId = chip.dataset.uploadItemId;
+    const item = itemId ? itemsById.get(itemId) : null;
+    if (!itemId || !item) {
+      chip.remove();
+    } else {
+      chip.dataset.uploadStatus = item.status;
+      chip.toggleAttribute("data-error", item.status === "error");
+      itemsById.delete(itemId);
+      ensureUploadCaretAnchorAfter(chip);
+    }
+  }
+  if (itemsById.size === 0) return;
+  const missingItems = items.filter((item) => itemsById.has(item.id));
+  const fragment = document.createDocumentFragment();
+  for (const item of missingItems) fragment.append(createUploadItemChip(item), createUploadCaretAnchor());
+  editor.append(fragment);
+}
+
+function uploadItemsInEditorOrder(editor: HTMLDivElement | null, items: UploadItem[]) {
+  if (!editor || items.length < 2) return items;
+  const itemsById = new Map(items.map((item) => [item.id, item]));
+  const ordered: UploadItem[] = [];
+  for (const chip of editor.querySelectorAll<HTMLElement>("[data-upload-item-id]")) {
+    const itemId = chip.dataset.uploadItemId;
+    const item = itemId ? itemsById.get(itemId) : null;
+    if (!item) continue;
+    ordered.push(item);
+    itemsById.delete(item.id);
+  }
+  for (const item of items) {
+    if (itemsById.has(item.id)) ordered.push(item);
+  }
+  return ordered;
+}
+
+function serializeComposerMessageParts(
+  editor: HTMLDivElement | null,
+  artifactsByUploadItemId: Map<string, Artifact>,
+): NonNullable<import("@group-chat/shared").SendMessageRequest["parts"]> {
+  if (!editor) return [];
+  const parts: NonNullable<import("@group-chat/shared").SendMessageRequest["parts"]> = [];
+  let text = "";
+  const flushText = () => {
+    const content = text.replaceAll("\u200b", "");
+    text = "";
+    if (content.trim()) parts.push({ type: "text", content });
+  };
+  const visit = (node: Node) => {
+    if (node instanceof HTMLElement && node.dataset.uploadItemId) {
+      flushText();
+      const artifact = artifactsByUploadItemId.get(node.dataset.uploadItemId);
+      if (artifact) parts.push({ type: "artifact", artifactId: artifact.id });
+      return;
+    }
+    if (node instanceof Text) {
+      text += node.textContent ?? "";
+      return;
+    }
+    for (const child of node.childNodes) visit(child);
+  };
+  for (const child of editor.childNodes) visit(child);
+  flushText();
+  return parts;
+}
+
+function uploadItemIdsInSelection(editor: HTMLDivElement) {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount || selection.isCollapsed) return [];
+  const range = selection.getRangeAt(0);
+  if (!editor.contains(range.commonAncestorContainer)) return [];
+  return [...editor.querySelectorAll<HTMLElement>("[data-upload-item-id]")]
+    .filter((chip) => selection.containsNode(chip, true))
+    .map((chip) => chip.dataset.uploadItemId)
+    .filter((itemId): itemId is string => Boolean(itemId));
+}
+
+function storeComposerUploadClipboardSnapshot(token: string, items: UploadItem[]) {
+  composerUploadClipboardSnapshots.set(token, items);
+  while (composerUploadClipboardSnapshots.size > COMPOSER_UPLOAD_CLIPBOARD_CACHE_LIMIT) {
+    const oldestToken = composerUploadClipboardSnapshots.keys().next().value;
+    if (typeof oldestToken !== "string") break;
+    composerUploadClipboardSnapshots.delete(oldestToken);
+  }
+}
+
+function composerTextInSelection(editor: HTMLDivElement) {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount || selection.isCollapsed) return "";
+  const range = selection.getRangeAt(0);
+  if (!editor.contains(range.commonAncestorContainer)) return "";
+  const container = document.createElement("div");
+  container.append(range.cloneContents());
+  container.querySelectorAll("[data-upload-item-id]").forEach((node) => node.remove());
+  container.querySelectorAll<HTMLElement>("[data-upload-caret-anchor]").forEach((anchor) => {
+    anchor.replaceWith(document.createTextNode((anchor.textContent ?? "").replaceAll("\u200b", "")));
+  });
+  return (container.textContent ?? "").replaceAll("\u200b", "");
+}
+
+function readComposerUploadClipboard(clipboardData: DataTransfer) {
+  const raw = clipboardData.getData(COMPOSER_UPLOAD_CLIPBOARD_MIME).trim();
+  if (!raw) return { token: "", itemIds: [] as string[], text: "" };
+  try {
+    const parsed = JSON.parse(raw) as { token?: unknown; itemIds?: unknown; text?: unknown };
+    return {
+      token: typeof parsed.token === "string" ? parsed.token : "",
+      itemIds: Array.isArray(parsed.itemIds)
+        ? parsed.itemIds.filter((itemId): itemId is string => typeof itemId === "string" && itemId.length > 0)
+        : [],
+      text: typeof parsed.text === "string" ? parsed.text : "",
+    };
+  } catch {
+    return { token: "", itemIds: [] as string[], text: "" };
+  }
+}
+
+function removeUploadItemChip(editor: HTMLDivElement | null, itemId: string) {
+  const chip = editor?.querySelector<HTMLElement>(`[data-upload-item-id="${CSS.escape(itemId)}"]`);
+  const caretAnchor = chip?.nextSibling;
+  chip?.remove();
+  if (
+    caretAnchor instanceof HTMLElement
+    && caretAnchor.dataset.uploadCaretAnchor === "true"
+    && !(caretAnchor.textContent ?? "").replaceAll("\u200b", "")
+  ) {
+    caretAnchor.remove();
+  }
+  resizeComposerEditor(editor);
+}
+
 interface UploadItem {
   id: string;
   filename: string;
@@ -3151,145 +3566,23 @@ function compactQuoteContent(content: string) {
   return content.replace(/\s+/g, " ").trim().slice(0, 120);
 }
 
-function PendingAttachmentTray(props: {
-  uploadItems: UploadItem[];
-  selectedUploadItemIds: Set<string>;
-  onRemoveUpload: (itemId: string) => void;
-  onOpenUpload: (item: UploadItem) => void;
-  onSelectAll: () => void;
-}) {
-  if (props.uploadItems.length === 0) return null;
-
-  return (
-    <div className={"[display:contents]"} aria-label="Pending attachments">
-      {props.uploadItems.map((item) => (
-        <AttachmentPill
-          key={item.id}
-          filename={item.filename}
-          mimeType={item.mimeType}
-          sizeBytes={item.sizeBytes}
-          previewUrl={item.previewUrl ?? item.artifact?.publicUrl ?? null}
-          status={attachmentStatusLabel(item.status)}
-          failed={item.status === "error"}
-          selected={props.selectedUploadItemIds.has(item.id)}
-          onRemove={() => props.onRemoveUpload(item.id)}
-          onOpen={() => props.onOpenUpload(item)}
-          onSelectAll={props.onSelectAll}
-        />
-      ))}
-    </div>
-  );
-}
-
-function AttachmentPill(props: {
-  filename: string;
-  mimeType: string;
-  sizeBytes: number;
-  previewUrl: string | null;
-  status: string;
-  failed?: boolean;
-  selected?: boolean;
-  onRemove: () => void;
-  onOpen: () => void;
-  onSelectAll: () => void;
-}) {
-  const isImage = props.mimeType.startsWith("image/");
-  const addedLabel = t("composer.uploadAdded");
-  const hasStatus = props.status !== addedLabel;
-  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key.toLowerCase() === "a" && (event.metaKey || event.ctrlKey) && !event.altKey) {
-      event.preventDefault();
-      props.onSelectAll();
-      return;
-    }
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      props.onOpen();
-      return;
-    }
-    if (event.key === "Backspace" || event.key === "Delete") {
-      event.preventDefault();
-      props.onRemove();
-    }
-  };
-  if (isImage && props.previewUrl) {
-    return (
-      <div
-        data-selected={props.selected || undefined}
-        className={`group [position:relative] [width:58px] [height:44px] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:10px] [background:#00000008] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] [outline:none] focus-visible:[border-color:var(--primary)] focus-visible:[box-shadow:0_0_0_3px_#2563eb22] [&[data-selected=true]]:[border-color:var(--primary)] [&[data-selected=true]]:[box-shadow:0_0_0_3px_#2563eb33] ${props.failed ? "[border-color:#ef444455]" : ""}`}
-        role="button"
-        tabIndex={0}
-        aria-label={t("composer.previewFile", { filename: props.filename })}
-        onClick={props.onOpen}
-        onKeyDown={handleKeyDown}
-      >
-        <img className={"[width:100%] [height:100%] [object-fit:cover]"} src={props.previewUrl} alt="" />
-        {props.selected ? <span aria-hidden="true" className={"[position:absolute] [inset:0] [background:#2563eb33] [box-shadow:inset_0_0_0_2px_var(--primary)]"} /> : null}
-        <button
-          className={"[position:absolute] [right:3px] [top:3px] [display:inline-grid] [width:18px] [height:18px] [place-items:center] [border:0] [border-radius:999px] [color:var(--text)] [background:#fffffff0] [opacity:0] [box-shadow:0_1px_4px_rgb(0_0_0_/_12%)] [transition:opacity_0.12s_ease,_background-color_0.12s_ease,_color_0.12s_ease] group-hover:[opacity:1] focus-visible:[opacity:1] [&:hover]:[background:#ffffff]"}
-          type="button"
-          aria-label={`Remove ${props.filename}`}
-          title={`Remove ${props.filename}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            props.onRemove();
-          }}
-        >
-          <X size={11} />
-        </button>
-      </div>
-    );
+function uploadItemIdsCrossedByLeftDrag(
+  container: HTMLElement,
+  startX: number,
+  currentX: number,
+  currentY: number,
+) {
+  const selectedIds = new Set<string>();
+  if (currentX >= startX) return selectedIds;
+  for (const element of container.querySelectorAll<HTMLElement>("[data-upload-item-id]")) {
+    const rect = element.getBoundingClientRect();
+    const crossesHorizontally = rect.left <= startX && currentX <= rect.right;
+    const staysOnRow = currentY >= rect.top - 4 && currentY <= rect.bottom + 4;
+    if (!crossesHorizontally || !staysOnRow) continue;
+    const itemId = element.dataset.uploadItemId;
+    if (itemId) selectedIds.add(itemId);
   }
-
-  return (
-    <div
-      data-selected={props.selected || undefined}
-      className={`group [position:relative] [display:grid] [grid-template-columns:24px_minmax(0,_1fr)] [align-items:center] [gap:7px] [width:min(220px,_100%)] [height:32px] [border:1px_solid_var(--border)] [border-radius:10px] [padding:4px_24px_4px_5px] [background:var(--panel)] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] [outline:none] focus-visible:[border-color:var(--primary)] focus-visible:[box-shadow:0_0_0_3px_#2563eb22] [&[data-selected=true]]:[border-color:var(--primary)] [&[data-selected=true]]:[box-shadow:0_0_0_3px_#2563eb33] ${props.failed ? "[border-color:#ef444455] [background:#ef44440a]" : ""}`}
-      role="button"
-      tabIndex={0}
-      aria-label={t("composer.previewFile", { filename: props.filename })}
-      onClick={props.onOpen}
-      onKeyDown={handleKeyDown}
-    >
-      <span className={"[display:inline-grid] [width:24px] [height:24px] [overflow:hidden] [place-items:center] [border-radius:7px] [color:var(--muted)] [background:#00000008]"}>
-        {isImage && props.previewUrl ? (
-          <img className={"[width:100%] [height:100%] [object-fit:cover]"} src={props.previewUrl} alt="" />
-        ) : isImage ? (
-          <ImageIcon size={14} />
-        ) : (
-          <FileText size={14} />
-        )}
-      </span>
-      <span className={"[display:flex] [min-width:0] [align-items:baseline] [gap:5px]"}>
-        <strong className={"[min-width:0] [overflow:hidden] [color:var(--text)] [font-size:12px] [font-weight:650] [line-height:16px] [text-overflow:ellipsis] [white-space:nowrap]"}>
-          {props.filename}
-        </strong>
-        <small className={`[flex:0_0_auto] [overflow:hidden] [font-size:11px] [font-weight:450] [line-height:14px] [text-overflow:ellipsis] [white-space:nowrap] ${props.failed ? "[color:var(--danger)]" : "[color:var(--muted)]"}`}>
-          {hasStatus ? `${props.status} ` : ""}
-          {formatBytes(props.sizeBytes)}
-        </small>
-      </span>
-      <button
-        className={"[position:absolute] [right:4px] [top:6px] [display:inline-grid] [width:18px] [height:18px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:#ffffffd9] [opacity:0] [box-shadow:0_1px_4px_rgb(0_0_0_/_8%)] [transition:opacity_0.12s_ease,_background-color_0.12s_ease,_color_0.12s_ease] group-hover:[opacity:1] focus-visible:[opacity:1] [&:hover]:[color:var(--text)] [&:hover]:[background:#ffffff]"}
-        type="button"
-        aria-label={`Remove ${props.filename}`}
-        title={`Remove ${props.filename}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          props.onRemove();
-        }}
-      >
-        <X size={11} />
-      </button>
-    </div>
-  );
-}
-
-function attachmentStatusLabel(status: UploadItem["status"]) {
-  if (status === "pending") return t("composer.uploadPending");
-  if (status === "uploading") return t("composer.uploadUploading");
-  if (status === "error") return t("composer.uploadError");
-  return t("composer.uploadAdded");
+  return selectedIds;
 }
 
 function revokePreviewUrl(previewUrl: string | null) {

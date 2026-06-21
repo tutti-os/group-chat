@@ -16,6 +16,7 @@ playwright-report/
 !.env.example
 
 .agent-chat/
+.group-chat/
 *.db
 *.db-shm
 *.db-wal

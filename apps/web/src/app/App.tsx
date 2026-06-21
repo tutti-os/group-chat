@@ -442,6 +442,20 @@ export function App() {
       : [],
     [currentConversation, state.artifacts],
   );
+  const messagesById = useMemo(
+    () => new Map(state.messages.map((message) => [message.id, message])),
+    [state.messages],
+  );
+  const currentParticipantsById = useMemo(
+    () => new Map(currentParticipants.map((participant) => [participant.id, participant])),
+    [currentParticipants],
+  );
+  const currentConversationAgentRuns = useMemo(
+    () => currentConversation
+      ? state.agentRuns.filter((run) => run.conversationId === currentConversation.id)
+      : [],
+    [currentConversation, state.agentRuns],
+  );
   const agentForwardTargets = useMemo<AgentForwardTarget[]>(() => {
     const agentGuiBridgeAvailable = Boolean(window.tuttiExternal?.workspace?.openFeature);
     const targets = listCanonicalRuntimeProfiles(state.runtimeProfiles)
@@ -476,10 +490,10 @@ export function App() {
     () => currentConversation
       ? visibleActiveRuns(
           state.activeRuns.filter((run) => run.conversationId === currentConversation.id),
-          state.messages,
+          messagesById,
         )
       : [],
-    [currentConversation, state.activeRuns, state.messages],
+    [currentConversation, messagesById, state.activeRuns],
   );
   const currentBackgroundTasks = useMemo(() => {
     const localTaskIds = loadLocalTaskBarTaskIds();
@@ -507,20 +521,20 @@ export function App() {
           sourceMessage:
             openBackgroundTask.sourceMessage
             ?? (openBackgroundTask.sourceMessageId
-              ? state.messages.find((message) => message.id === openBackgroundTask.sourceMessageId) ?? null
+              ? messagesById.get(openBackgroundTask.sourceMessageId) ?? null
               : null),
           targetParticipant:
             openBackgroundTask.targetParticipant
-            ?? currentParticipants.find((participant) => participant.id === openBackgroundTask.participantId)
+            ?? currentParticipantsById.get(openBackgroundTask.participantId)
             ?? null,
         }
       : null,
-    [currentParticipants, openBackgroundTask, state.messages],
+    [currentParticipantsById, messagesById, openBackgroundTask],
   );
   const agentRunTasks: AgentRunTaskItem[] = useMemo(() => {
     const runTasks = currentActiveRuns.map((run) => {
       const visibility = resolveAgentRunVisibility(run, currentMessages);
-      const participantName = currentParticipants.find((participant) => participant.id === run.participantId)?.displayName ?? t("common.agent");
+      const participantName = currentParticipantsById.get(run.participantId ?? "")?.displayName ?? t("common.agent");
       return {
         id: run.id,
         type: "agent-run" as const,
@@ -533,8 +547,8 @@ export function App() {
     });
     if (!currentConversation) return runTasks;
     const settledKeys = new Set(
-      state.agentRuns
-        .filter((run) => run.conversationId === currentConversation.id && run.triggerMessageId && run.participantId)
+      currentConversationAgentRuns
+        .filter((run) => run.triggerMessageId && run.participantId)
         .map((run) => pendingAgentReplyKey(run.triggerMessageId!, run.participantId!)),
     );
     const optimisticTasks = pendingReplyTargets
@@ -550,7 +564,7 @@ export function App() {
         visibility: pending.visibility,
       }));
     return [...optimisticTasks, ...runTasks];
-  }, [currentActiveRuns, currentConversation, currentMessages, currentParticipants, pendingReplyTargets, state.agentRuns]);
+  }, [currentActiveRuns, currentConversation, currentConversationAgentRuns, currentMessages, currentParticipantsById, pendingReplyTargets]);
   const openAgentRun = openAgentRunId
     ? currentActiveRuns.find((run) => run.id === openAgentRunId)
       ?? (openAgentRunSnapshot?.id === openAgentRunId ? openAgentRunSnapshot : null)
@@ -1588,7 +1602,7 @@ export function App() {
                         conversations={state.conversations}
                         rooms={state.rooms}
                         activeRuns={currentActiveRuns}
-                        agentRuns={state.agentRuns.filter((run) => run.conversationId === currentConversation.id)}
+                        agentRuns={currentConversationAgentRuns}
                         onSend={onSendMessage}
                         onUpdateMessage={onUpdateMessage}
                         onUpload={uploadArtifact}
@@ -1694,11 +1708,11 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-function visibleActiveRuns(runs: AgentRun[], messages: Message[]) {
+function visibleActiveRuns(runs: AgentRun[], messagesById: Map<string, Message>) {
   return runs.filter((run) => {
     if (run.status !== "accepted" && run.status !== "running") return false;
     if (!run.assistantMessageId) return true;
-    const assistantMessage = messages.find((message) => message.id === run.assistantMessageId);
+    const assistantMessage = messagesById.get(run.assistantMessageId);
     if (!assistantMessage) return true;
     return assistantMessage.status === "pending" || assistantMessage.status === "streaming";
   });

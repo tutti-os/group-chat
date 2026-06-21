@@ -567,6 +567,10 @@ export type MessageVisibility = "public" | "whisper";
 export interface SendMessageRequest {
   content: string;
   artifactIds?: string[];
+  parts?: Array<
+    | { type: "text"; content: string }
+    | { type: "artifact"; artifactId: string }
+  >;
   mentions?: MentionTarget[];
   parentMessageId?: string | null;
   maxReplyRounds?: number;

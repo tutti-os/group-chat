@@ -158,9 +158,11 @@ export function removeActiveRun(state: AppState, runId: string): AppState {
 export function upsert<T extends { id: string }>(items: T[], item: T | null | undefined): T[] {
   if (!item) return items;
   const existingIndex = items.findIndex((current) => current.id === item.id);
-  return existingIndex === -1
-    ? [...items, item]
-    : items.map((current) => (current.id === item.id ? item : current));
+  if (existingIndex === -1) return [...items, item];
+  if (items[existingIndex] === item) return items;
+  const result = items.slice();
+  result[existingIndex] = item;
+  return result;
 }
 
 export function upsertMessage(messages: Message[], incoming: Message | null | undefined): Message[] {
@@ -220,10 +222,10 @@ function resolveMessagesVisibility(messages: Message[]): Message[] {
   for (const createdAts of whisperAssistantCreatedAtByParticipant.values()) {
     createdAts.sort();
   }
-  return messages.map((message) => ({
-    ...message,
-    visibility: resolveMessageVisibilityFromIndex(message, whisperAssistantCreatedAtByParticipant),
-  }));
+  return messages.map((message) => {
+    const visibility = resolveMessageVisibilityFromIndex(message, whisperAssistantCreatedAtByParticipant);
+    return message.visibility === visibility ? message : { ...message, visibility };
+  });
 }
 
 function resolveMessageVisibilityFromIndex(
@@ -298,5 +300,4 @@ export function removeDeletedRoom(state: AppState, roomId: string | null, conver
     activeRuns: state.activeRuns.filter((run) => run.roomId !== roomId && run.conversationId !== conversationId),
   };
 }
-
 

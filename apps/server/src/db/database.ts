@@ -70,6 +70,8 @@ function migrate(database: DatabaseSync) {
       updated_at TEXT NOT NULL,
       FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
+    CREATE INDEX IF NOT EXISTS idx_participants_conversation_order ON participants(conversation_id, sort_order);
+    CREATE INDEX IF NOT EXISTS idx_participants_identity_created ON participants(identity_id, created_at);
 
     CREATE TABLE IF NOT EXISTS runtime_profiles (
       id TEXT PRIMARY KEY,
@@ -156,6 +158,8 @@ function migrate(database: DatabaseSync) {
       FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE,
       FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
+    CREATE INDEX IF NOT EXISTS idx_artifacts_message_created ON artifacts(message_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_artifacts_run_created ON artifacts(source_run_id, created_at);
 
     CREATE TABLE IF NOT EXISTS agent_runs (
       id TEXT PRIMARY KEY,
@@ -175,6 +179,7 @@ function migrate(database: DatabaseSync) {
       FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
       FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
     );
+    CREATE INDEX IF NOT EXISTS idx_agent_runs_status_created ON agent_runs(status, created_at);
 
     CREATE TABLE IF NOT EXISTS agent_run_events (
       id TEXT PRIMARY KEY,
@@ -270,6 +275,9 @@ function migrate(database: DatabaseSync) {
   ensureColumn(database, "rooms", "avatar", "TEXT");
   ensureColumn(database, "identities", "default_listen_mode", "TEXT NOT NULL DEFAULT 'passive'");
   ensureColumn(database, "identities", "default_reasoning_effort", "TEXT");
+  database.exec(
+    "CREATE INDEX IF NOT EXISTS idx_agent_runs_trigger_status_created ON agent_runs(trigger_message_id, status, created_at)",
+  );
 }
 
 function ensureColumn(database: DatabaseSync, table: string, column: string, definition: string) {

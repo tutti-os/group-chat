@@ -366,10 +366,9 @@ export function readRecentArtifactClipboardStashForPaste(): ArtifactClipboardRea
 }
 
 function shouldPreferRecentStashOverClipboard(dataTransfer: DataTransfer) {
-  if (dataTransfer.getData("text/plain").trim()) return false;
-  const hasClipboardFiles = dataTransfer.files.length > 0
-    || [...dataTransfer.items].some((item) => item.kind === "file");
-  return hasClipboardFiles || !dataTransfer.getData("text/html").trim();
+  const plainText = dataTransfer.getData("text/plain");
+  if (plainText.trim() && !isArtifactOnlyClipboardPlainText(plainText)) return false;
+  return plainText.includes(ARTIFACT_ONLY_CLIPBOARD_PLAIN);
 }
 
 function resolveFreshArtifactClipboardPayload(payload: ArtifactClipboardPayload): ArtifactClipboardPayload {

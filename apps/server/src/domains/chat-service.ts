@@ -340,7 +340,12 @@ export class ChatService {
     const conversation = this.repo.getConversation(conversationId);
     if (!conversation) throw new Error("Conversation not found");
     const content = input.content.trim();
-    if (!content && !input.artifactIds?.length) throw new Error("Message content is required");
+    const orderedParts = input.parts?.filter((part) =>
+      part.type === "artifact" ? Boolean(part.artifactId) : Boolean(part.content.trim()),
+    ) ?? [];
+    if (!content && !input.artifactIds?.length && !orderedParts.some((part) => part.type === "artifact")) {
+      throw new Error("Message content is required");
+    }
 
     const message = this.repo.createMessage({
       conversationId,
@@ -352,13 +357,7 @@ export class ChatService {
       status: "success",
       parentMessageId: input.parentMessageId ?? null,
     });
-    const textBlock = this.repo.createMessageBlock({
-      messageId: message.id,
-      type: "main_text",
-      content,
-      sortOrder: 0,
-    });
-    const blocks = [textBlock];
+    const blocks = [];
     const artifacts = [];
     this.repo.touchConversation(conversationId, content || "Attached files");
     this.events.emit({
@@ -367,14 +366,30 @@ export class ChatService {
       conversationId,
       payload: { message },
     });
-    this.events.emit({
-      type: "message_block.created",
-      roomId: conversation.roomId,
-      conversationId,
-      payload: { block: textBlock },
-    });
-
-    for (const [index, artifactId] of (input.artifactIds ?? []).entries()) {
+    const parts = orderedParts.length > 0
+      ? orderedParts
+      : [
+          ...(content ? [{ type: "text" as const, content }] : []),
+          ...(input.artifactIds ?? []).map((artifactId) => ({ type: "artifact" as const, artifactId })),
+        ];
+    for (const [index, part] of parts.entries()) {
+      if (part.type === "text") {
+        const block = this.repo.createMessageBlock({
+          messageId: message.id,
+          type: "main_text",
+          content: part.content,
+          sortOrder: index,
+        });
+        blocks.push(block);
+        this.events.emit({
+          type: "message_block.created",
+          roomId: conversation.roomId,
+          conversationId,
+          payload: { block },
+        });
+        continue;
+      }
+      const artifactId = part.artifactId;
       const artifact = this.repo.attachArtifactToMessage(artifactId, message.id);
       if (!artifact) continue;
       artifacts.push(artifact);
@@ -383,7 +398,7 @@ export class ChatService {
         type: artifact.mimeType.startsWith("image/") ? "image" : "file",
         content: artifact.textPreview ?? "",
         metadata: { artifactId: artifact.id },
-        sortOrder: index + 1,
+        sortOrder: index,
       });
       blocks.push(block);
       this.events.emit({

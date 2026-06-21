@@ -1,5 +1,6 @@
 import { FileText, X } from "lucide-react";
 import type { Ref } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "../../i18n/index.js";
 
 export interface AttachmentPreview {
@@ -20,10 +21,11 @@ export function AttachmentPreviewDialog(props: {
   const isImage = props.preview.mimeType.startsWith("image/");
   const isVideo = props.preview.mimeType.startsWith("video/");
 
-  return (
+  return createPortal(
     <div
       ref={props.overlayRef}
-      className={"[position:fixed] [inset:0] [z-index:80] [display:grid] [place-items:center] [padding:24px] [background:rgb(15_23_42_/_52%)]"}
+      data-slot="attachment-preview-overlay"
+      className={"[position:fixed] [inset:0] [z-index:200] [display:grid] [place-items:center] [padding:24px] [background:rgb(15_23_42_/_52%)]"}
       role="dialog"
       aria-modal="true"
       aria-label={props.preview.title}
@@ -65,7 +67,8 @@ export function AttachmentPreviewDialog(props: {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
