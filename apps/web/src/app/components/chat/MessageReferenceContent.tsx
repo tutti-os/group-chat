@@ -2,7 +2,8 @@ import type { Artifact, MentionTarget, Participant, RuntimeProfile } from "@grou
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { contentHasReferenceMentions, splitContentByReferenceMentions } from "../../reference-mentions.js";
+import { contentHasReferenceMentions, findArtifactForFileReference, isFileReferenceProvider, parseReferenceMentionHref, splitContentByReferenceMentions } from "../../reference-mentions.js";
+import { ArtifactBlock } from "./ArtifactBlock.js";
 import { ReferenceMentionLink, createReferenceMentionMarkdownComponents } from "./ReferenceMentionLink.js";
 
 const INLINE_MARKDOWN_COMPONENTS = {
@@ -28,6 +29,7 @@ export function MessageReferenceContent(props: {
   participants?: Participant[];
   runtimeProfiles?: RuntimeProfile[];
   onOpenAgentProfile?: (participant: Participant) => void;
+  onOpenArtifact?: (artifact: Artifact) => void;
   tightSpacing?: boolean;
 }) {
   const markdownComponents = createReferenceMentionMarkdownComponents({
@@ -48,6 +50,34 @@ export function MessageReferenceContent(props: {
     <span className={props.tightSpacing ? "[display:contents] [line-height:1.35]" : "[display:contents]"}>
       {segments.map((segment, index) => {
         if (segment.kind === "reference") {
+          const parsed = segment.href.startsWith("mention://")
+            ? null
+            : parseReferenceMentionHref(segment.href);
+          const mention = props.mentions?.find((item) =>
+            item.mentionType === "reference"
+            && parsed
+            && item.referenceProviderId === parsed.providerId
+            && (item.referenceEntityId === parsed.entityId
+              || item.participantId === `tutti-at:${parsed.providerId}:${parsed.entityId}`),
+          );
+          const providerId = mention?.referenceProviderId ?? parsed?.providerId;
+          const entityId = mention?.referenceEntityId?.trim() || parsed?.entityId || "";
+          if (
+            isFileReferenceProvider(providerId)
+            && props.artifacts?.length
+            && props.onOpenArtifact
+          ) {
+            const artifact = findArtifactForFileReference(segment.href, entityId, mention, props.artifacts);
+            if (artifact) {
+              return (
+                <ArtifactBlock
+                  key={`reference-${index}`}
+                  artifact={artifact}
+                  onOpen={() => props.onOpenArtifact!(artifact)}
+                />
+              );
+            }
+          }
           return (
             <ReferenceMentionLink
               key={`reference-${index}`}

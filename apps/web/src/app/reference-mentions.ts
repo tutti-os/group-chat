@@ -1,4 +1,4 @@
-import type { MentionTarget, TuttiAtProviderId, TuttiReferenceInsert } from "@group-chat/shared";
+import type { Artifact, MentionTarget, TuttiAtProviderId, TuttiReferenceInsert } from "@group-chat/shared";
 import { TUTTI_AT_PROVIDER_IDS } from "@group-chat/shared";
 import {
   formatAgentLauncherMentionLabel,
@@ -58,8 +58,35 @@ export function parseParticipantMentionHref(href: string): { participantId: stri
   }
 }
 
+export function isFileReferenceProvider(providerId: string | undefined | null): providerId is TuttiAtProviderId {
+  return providerId === "file" || providerId === "agent-generated-file";
+}
+
 export function isParticipantMentionHref(href: string | undefined | null) {
   return Boolean(href?.startsWith(PARTICIPANT_MENTION_LINK_PREFIX));
+}
+
+export function findArtifactForFileReference(
+  href: string,
+  entityId: string,
+  mention: Pick<MentionTarget, "referenceInsert"> | null | undefined,
+  artifacts: ReadonlyArray<Artifact>,
+): Artifact | null {
+  const insert = mention?.referenceInsert;
+  const fileHref = insert?.kind === "markdown-link" ? insert.href : entityId;
+  if (!fileHref) return null;
+  const normalizedHref = fileHref.replace(/\\/g, "/");
+  return artifacts.find((item) => {
+    const localPath = item.localPath?.replace(/\\/g, "/") ?? "";
+    const publicUrl = item.publicUrl?.replace(/\\/g, "/") ?? "";
+    return (
+      localPath === normalizedHref
+      || localPath.endsWith(`/${normalizedHref}`)
+      || publicUrl === normalizedHref
+      || publicUrl.endsWith(`/${normalizedHref}`)
+      || item.id === entityId
+    );
+  }) ?? null;
 }
 
 export function parseReferenceMentionHref(href: string): { providerId: TuttiAtProviderId; entityId: string } | null {
