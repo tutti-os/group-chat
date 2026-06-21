@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { MessageSquarePlus, Pin, PinOff, Trash2 } from "lucide-react";
+import { MessageSquarePlus, Pin, PinOff } from "lucide-react";
 import type { Conversation, Message, Room } from "@group-chat/shared";
-import { formatShortDate } from "../../formatting.js";
+import { formatConversationListTimestamp } from "../../formatting.js";
 import { t, useTranslation } from "../../i18n/index.js";
 import { RoomAvatar } from "../ui/RoomAvatar.js";
 import { UnreadBadge } from "../ui/UnreadBadge.js";
@@ -15,7 +15,6 @@ export function ConversationSidebar(props: {
   unreadCounts: Record<string, number>;
   onSelect: (id: string) => void;
   onCreateRoom: () => void;
-  onDeleteRoom: (room: Room, conversation: Conversation) => void;
   onTogglePin: (conversation: Conversation, pinned: boolean) => void;
 }) {
   const { t, locale } = useTranslation();
@@ -124,7 +123,7 @@ export function ConversationSidebar(props: {
           return (
             <div
               key={conversation.id}
-              className={`[display:grid] [grid-template-columns:32px_minmax(0,_1fr)_28px] [align-items:center] [gap:8px] [width:100%] [min-width:0] [min-height:56px] [overflow:hidden] [border:0] [border-radius:14px] [padding:4px_8px] [text-align:left] [color:var(--text)] [background:transparent] [transition:background-color_0.12s_ease] [&:hover]:[background:var(--sidebar-hover)] [&:hover_[data-slot=conversation-delete]]:[opacity:1] [&:focus-within_[data-slot=conversation-delete]]:[opacity:1] ${conversation.id === props.currentConversationId ? "[background:var(--accent-soft)]" : ""}`}
+              className={`[position:relative] [display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:8px] [width:100%] [min-width:0] [min-height:56px] [overflow:hidden] [border:0] [border-radius:14px] [padding:4px_8px] [text-align:left] [color:var(--text)] [background:transparent] [transition:background-color_0.12s_ease] [&:hover]:[background:var(--sidebar-hover)] ${conversation.id === props.currentConversationId ? "[background:var(--accent-soft)]" : ""}`}
               onContextMenu={(event) => {
                 event.preventDefault();
                 setContextMenu({ conversationId: conversation.id, x: event.clientX, y: event.clientY });
@@ -134,7 +133,7 @@ export function ConversationSidebar(props: {
                 <RoomAvatar key={`${room.id}:${room.avatar ?? "default"}`} title={conversation.title} avatar={room.avatar} size={32} />
                 <UnreadBadge count={unreadCount} />
               </span>
-              <button className={"[display:grid] [min-width:0] [border:0] [padding:4px_4px_4px_0] [text-align:left] [color:inherit] [background:transparent] [&:focus-visible]:[outline:none]"} onClick={() => props.onSelect(conversation.id)}>
+              <button className={"[display:grid] [min-width:0] [border:0] [padding:4px_0] [text-align:left] [color:inherit] [background:transparent] [&:focus-visible]:[outline:none]"} onClick={() => props.onSelect(conversation.id)}>
                 <span className={"[display:flex] [min-width:0] [align-items:center] [justify-content:space-between] [gap:8px]"}>
                   <span className={"[display:flex] [min-width:0] [align-items:center] [gap:4px]"}>
                     {conversation.pinned ? (
@@ -142,7 +141,7 @@ export function ConversationSidebar(props: {
                     ) : null}
                     <span className={"[display:block] [overflow:hidden] [font-size:13px] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>{conversation.title}</span>
                   </span>
-                  <span className={"[flex:0_0_auto] [color:var(--muted)] [font-size:11px]"}>{formatShortDate(conversation.updatedAt)}</span>
+                  <span data-slot="conversation-time" className={"[flex:0_0_auto] [margin-left:auto] [color:var(--muted)] [font-size:11px] [text-align:right] [white-space:nowrap]"}>{formatConversationListTimestamp(conversation.updatedAt)}</span>
                 </span>
                 <span className={"[display:flex] [min-width:0] [margin-top:4px] [align-items:center] [gap:2px] [color:var(--muted)] [font-size:12px] [line-height:1.35] [white-space:nowrap]"}>
                   {preview.sender ? (
@@ -152,15 +151,6 @@ export function ConversationSidebar(props: {
                   ) : null}
                   <span className={"[display:block] [min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{preview.content}</span>
                 </span>
-              </button>
-              <button
-                type="button"
-                data-slot="conversation-delete"
-                className={"[justify-self:end] [&:focus-visible]:[outline:none] [display:inline-grid] [width:28px] [height:28px] [place-items:center] [border:0] [border-radius:8px] [color:var(--danger)] [background:transparent] [opacity:0] [transition:opacity_0.12s_ease,_background-color_0.12s_ease] [&:hover]:[background:#dc26261a]"}
-                title={t("sidebar.deleteChat")}
-                onClick={() => props.onDeleteRoom(room, conversation)}
-              >
-                <Trash2 size={14} />
               </button>
             </div>
           );

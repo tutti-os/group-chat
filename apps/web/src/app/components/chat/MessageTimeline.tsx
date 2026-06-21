@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -19,6 +19,7 @@ import type { TuttiAgentGuiProvider } from "../../agent-gui-dispatch.js";
 import {
   collectSummaryTaskIds,
   copyMessagesToClipboard,
+  copyMessagesToClipboardEvent,
   copySummaryToClipboard,
   extractMessageLinks,
   extractSummaryLinks,
@@ -132,6 +133,78 @@ function selectedArtifactIdsFromTimelineRange(range: Range, container: HTMLEleme
     if (artifactId) artifactIds.add(artifactId);
   }
   return [...artifactIds];
+}
+
+type OrderedClipboardPart =
+  | { type: "text"; content: string }
+  | { type: "artifact"; artifactId: string };
+
+function selectedOrderedPartsFromTimelineRange(
+  range: Range,
+  container: HTMLElement,
+  blocks: MessageBlock[],
+  messages: Message[],
+): OrderedClipboardPart[] {
+  const parts: OrderedClipboardPart[] = [];
+  for (const element of container.querySelectorAll<HTMLElement>(
+    '[data-slot="message-block"], [data-slot="artifact-block"][data-artifact-id]',
+  )) {
+    if (!selectionIntersectsNode(range, element)) continue;
+    if (element.dataset.slot === "artifact-block") {
+      const artifactId = element.dataset.artifactId?.trim();
+      if (artifactId) parts.push({ type: "artifact", artifactId });
+      continue;
+    }
+    const contentRange = document.createRange();
+    contentRange.selectNodeContents(element);
+    const intersection = document.createRange();
+    intersection.setStart(
+      range.compareBoundaryPoints(Range.START_TO_START, contentRange) > 0 ? range.startContainer : contentRange.startContainer,
+      range.compareBoundaryPoints(Range.START_TO_START, contentRange) > 0 ? range.startOffset : contentRange.startOffset,
+    );
+    intersection.setEnd(
+      range.compareBoundaryPoints(Range.END_TO_END, contentRange) < 0 ? range.endContainer : contentRange.endContainer,
+      range.compareBoundaryPoints(Range.END_TO_END, contentRange) < 0 ? range.endOffset : contentRange.endOffset,
+    );
+    const blockId = element.dataset.blockId;
+    const block = blockId ? blocks.find((item) => item.id === blockId) : null;
+    const message = block ? messages.find((item) => item.id === block.messageId) : null;
+    const fullySelected = range.compareBoundaryPoints(Range.START_TO_START, contentRange) <= 0
+      && range.compareBoundaryPoints(Range.END_TO_END, contentRange) >= 0;
+    const preserveWholeBlock = fullySelected || element.dataset.linkOnly === "true";
+    const content = preserveWholeBlock && block
+      ? enrichMessageContentForCopy(block.content, message?.mentions ?? [])
+      : serializeTimelineSelectionFragment(intersection.cloneContents());
+    if (content) parts.push({ type: "text", content });
+  }
+  return parts;
+}
+
+function orderedPartsForMessages(messages: Message[], blocks: MessageBlock[]): OrderedClipboardPart[] {
+  return messages.flatMap((message) => blocks
+    .filter((block) => block.messageId === message.id && !isRuntimeEventBlock(block))
+    .sort(compareMessageBlocks)
+    .flatMap((block): OrderedClipboardPart[] => {
+      if (block.type === "image" || block.type === "file") {
+        const artifactId = typeof block.metadata?.artifactId === "string" ? block.metadata.artifactId : "";
+        return artifactId ? [{ type: "artifact", artifactId }] : [];
+      }
+      const content = enrichMessageContentForCopy(block.content, message.mentions ?? []);
+      return content ? [{ type: "text", content }] : [];
+    }));
+}
+
+function serializeTimelineSelectionFragment(fragment: DocumentFragment) {
+  const serialize = (node: Node): string => {
+    if (node instanceof Text) return node.textContent ?? "";
+    if (!(node instanceof HTMLElement)) return [...node.childNodes].map(serialize).join("");
+    const pasteMarkdown = node.dataset.composerPasteMarkdown?.trim();
+    if (pasteMarkdown) return pasteMarkdown;
+    if (node.tagName === "BR") return "\n";
+    const content = [...node.childNodes].map(serialize).join("");
+    return node.tagName === "DIV" || node.tagName === "P" ? `${content}\n` : content;
+  };
+  return [...fragment.childNodes].map(serialize).join("").replace(/\n+$/, "");
 }
 
 const MESSAGE_MENU_ACTIVE_ATTR = "data-menu-active";
@@ -516,11 +589,12 @@ export function MessageTimeline(props: {
       text,
       artifactIds: artifacts.map((artifact) => artifact.id),
       includeText: true,
+      parts: orderedPartsForMessages(visibleMessages, props.blocks),
     });
     showCopyTip(position);
   };
 
-  const copyMessagesFromNativeSelection = async (event: ClipboardEvent<HTMLElement>) => {
+  const copyMessagesFromNativeSelection = (event: globalThis.ClipboardEvent) => {
     const selection = window.getSelection();
     if (!selection?.rangeCount || selection.isCollapsed) return;
     const container = scrollRef.current;
@@ -531,15 +605,24 @@ export function MessageTimeline(props: {
 
     const selectedText = selectedTextFromTimelineRange(range, container);
     const artifactIds = selectedArtifactIdsFromTimelineRange(range, container);
+    const parts = selectedOrderedPartsFromTimelineRange(range, container, props.blocks, props.allMessages);
     if (!selectedText && artifactIds.length === 0) return;
 
-    event.preventDefault();
-    await copyMessagesToClipboard({
+    copyMessagesToClipboardEvent(event, {
       text: selectedText,
       artifactIds,
       includeText: Boolean(selectedText),
+      parts,
     });
   };
+
+  useEffect(() => {
+    const handleCopy = (event: globalThis.ClipboardEvent) => {
+      copyMessagesFromNativeSelection(event);
+    };
+    document.addEventListener("copy", handleCopy);
+    return () => document.removeEventListener("copy", handleCopy);
+  });
 
   const copyMessageLink = async (messageIds: string | string[], position: CopyTipPosition) => {
     const ids = Array.isArray(messageIds) ? messageIds : [messageIds];
@@ -661,9 +744,8 @@ export function MessageTimeline(props: {
   return (
     <section
       ref={scrollRef}
-      className={`[position:relative] [min-height:0] [overflow-y:auto] [background:var(--panel)] [padding:26px_18px_18px_14px] max-[1080px]:[padding-inline:14px_18px] max-[760px]:[padding:18px_18px_18px_14px]`}
+      className={`[position:relative] [min-height:0] [overflow-y:auto] [background:var(--panel)] [padding:26px_18px_8px_14px] [&_article:last-of-type]:[margin-bottom:0] max-[1080px]:[padding-inline:14px_18px] max-[760px]:[padding:18px_18px_8px_14px]`}
       onScroll={updateJumpToBottomVisibility}
-      onCopy={(event) => void copyMessagesFromNativeSelection(event)}
     >
       {visibleMessages.length === 0 ? (
         <EmptyTimelineState

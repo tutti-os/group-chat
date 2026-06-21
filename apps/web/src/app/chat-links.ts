@@ -258,6 +258,10 @@ export function readStashedSummaryLink() {
 export interface ArtifactClipboardPayload {
   artifactIds: string[];
   includeText: boolean;
+  parts?: Array<
+    | { type: "text"; content: string }
+    | { type: "artifact"; artifactId: string }
+  >;
   copyToken?: string;
   stashedAt?: number;
 }
@@ -277,13 +281,26 @@ function normalizeArtifactClipboardPayload(value: unknown): ArtifactClipboardPay
     return artifactIds.length ? { artifactIds, includeText: true } : null;
   }
   if (!value || typeof value !== "object") return null;
-  const record = value as { artifactIds?: unknown; includeText?: unknown };
+  const record = value as { artifactIds?: unknown; includeText?: unknown; parts?: unknown };
   if (!Array.isArray(record.artifactIds)) return null;
   const artifactIds = record.artifactIds.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
-  if (!artifactIds.length) return null;
+  const parts: NonNullable<ArtifactClipboardPayload["parts"]> = [];
+  if (Array.isArray(record.parts)) {
+    for (const part of record.parts) {
+      if (!part || typeof part !== "object") continue;
+      const candidate = part as { type?: unknown; content?: unknown; artifactId?: unknown };
+      if (candidate.type === "text" && typeof candidate.content === "string") {
+        parts.push({ type: "text", content: candidate.content });
+      } else if (candidate.type === "artifact" && typeof candidate.artifactId === "string") {
+        parts.push({ type: "artifact", artifactId: candidate.artifactId });
+      }
+    }
+  }
+  if (!artifactIds.length && !parts.length) return null;
   return {
     artifactIds,
     includeText: record.includeText !== false,
+    parts: parts.length ? parts : undefined,
     copyToken: typeof (record as { copyToken?: unknown }).copyToken === "string"
       ? (record as { copyToken: string }).copyToken
       : undefined,
@@ -295,7 +312,7 @@ function normalizeArtifactClipboardPayload(value: unknown): ArtifactClipboardPay
 
 export function stashArtifactsForPaste(input: ArtifactClipboardPayload) {
   const artifactIds = [...new Set(input.artifactIds.map((item) => item.trim()).filter(Boolean))];
-  if (!artifactIds.length) {
+  if (!artifactIds.length && !input.parts?.length) {
     sessionStorage.removeItem(ARTIFACT_CLIPBOARD_KEY);
     return;
   }
@@ -304,6 +321,7 @@ export function stashArtifactsForPaste(input: ArtifactClipboardPayload) {
     JSON.stringify({
       artifactIds,
       includeText: input.includeText,
+      parts: input.parts,
       copyToken: input.copyToken,
       stashedAt: Date.now(),
     } satisfies ArtifactClipboardPayload),
@@ -340,7 +358,7 @@ export function readArtifactClipboardFromDataTransfer(dataTransfer: DataTransfer
   }
 
   const fromHtml = parseArtifactClipboardFromHtml(dataTransfer.getData("text/html"));
-  if (fromHtml?.artifactIds.length) {
+  if (fromHtml) {
     const freshPayload = resolveFreshArtifactClipboardPayload(fromHtml);
     return { ...freshPayload, preferOverClipboardFiles: true };
   }
@@ -355,7 +373,7 @@ export function readArtifactClipboardFromDataTransfer(dataTransfer: DataTransfer
 
 function readRecentStashedArtifactClipboard(): ArtifactClipboardPayload | null {
   const stash = readStashedArtifactClipboard();
-  if (!stash?.artifactIds.length || typeof stash.stashedAt !== "number") return null;
+  if (!stash || (!stash.artifactIds.length && !stash.parts?.length) || typeof stash.stashedAt !== "number") return null;
   if (Date.now() - stash.stashedAt > ARTIFACT_CLIPBOARD_STASH_FALLBACK_MS) return null;
   return stash;
 }
@@ -377,7 +395,10 @@ function resolveFreshArtifactClipboardPayload(payload: ArtifactClipboardPayload)
   if (!payload.copyToken || !fromStash.copyToken || payload.copyToken !== fromStash.copyToken) {
     return fromStash;
   }
-  return payload;
+  return {
+    ...payload,
+    parts: payload.parts ?? fromStash.parts,
+  };
 }
 
 export function parseArtifactClipboardPayload(payload: string): ArtifactClipboardPayload | null {
@@ -414,6 +435,12 @@ function parseArtifactClipboardFromHtml(html: string): ArtifactClipboardPayload 
   if (!html.trim()) return null;
   try {
     const doc = new DOMParser().parseFromString(html, "text/html");
+    const embeddedPayload = doc.querySelector("[data-group-chat-copy-payload]")
+      ?.getAttribute("data-group-chat-copy-payload");
+    if (embeddedPayload) {
+      const parsed = parseArtifactClipboardPayload(embeddedPayload);
+      if (parsed) return parsed;
+    }
     const ids = new Set<string>();
     let copyToken: string | undefined;
     const markedElements = doc.querySelectorAll("[data-artifact-id][data-group-chat-copy-token]");
@@ -432,12 +459,19 @@ function parseArtifactClipboardFromHtml(html: string): ArtifactClipboardPayload 
   }
 }
 
-export async function copyMessagesToClipboard(input: { text: string; artifactIds: string[]; includeText?: boolean }) {
+export type MessageClipboardInput = {
+  text: string;
+  artifactIds: string[];
+  includeText?: boolean;
+  parts?: ArtifactClipboardPayload["parts"];
+};
+
+function buildMessageClipboardData(input: MessageClipboardInput) {
   const artifactIds = [...new Set(input.artifactIds.map((item) => item.trim()).filter(Boolean))];
   const includeText = input.includeText ?? true;
   clearArtifactClipboardStash();
-  const clipboardPayload: ArtifactClipboardPayload | null = artifactIds.length
-    ? { artifactIds, includeText, copyToken: crypto.randomUUID() }
+  const clipboardPayload: ArtifactClipboardPayload | null = artifactIds.length || input.parts?.length
+    ? { artifactIds, includeText, parts: input.parts, copyToken: crypto.randomUUID() }
     : null;
   if (clipboardPayload) {
     stashArtifactsForPaste(clipboardPayload);
@@ -446,10 +480,23 @@ export async function copyMessagesToClipboard(input: { text: string; artifactIds
   const plainText = includeText ? input.text : ARTIFACT_ONLY_CLIPBOARD_PLAIN;
   const payload = clipboardPayload ? JSON.stringify(clipboardPayload) : "";
   const htmlText = clipboardPayload
-    ? `${includeText && input.text ? `<span data-group-chat-copy-text>${escapeClipboardHtmlText(input.text)}</span>` : ""}${artifactIds.map((artifactId) =>
+    ? `<span data-group-chat-copy-payload="${escapeHtmlAttribute(payload)}"></span>${includeText && input.text ? `<span data-group-chat-copy-text>${escapeClipboardHtmlText(input.text)}</span>` : ""}${artifactIds.map((artifactId) =>
         `<span data-artifact-id="${escapeHtmlAttribute(artifactId)}" data-group-chat-copy-token="${escapeHtmlAttribute(clipboardPayload.copyToken ?? "")}">${ARTIFACT_ONLY_CLIPBOARD_PLAIN}</span>`,
       ).join("")}`
     : "";
+  return { htmlText, payload, plainText };
+}
+
+export function copyMessagesToClipboardEvent(event: globalThis.ClipboardEvent, input: MessageClipboardInput) {
+  const data = buildMessageClipboardData(input);
+  event.preventDefault();
+  event.clipboardData?.setData("text/plain", data.plainText);
+  if (data.payload) event.clipboardData?.setData(ARTIFACT_CLIPBOARD_MIME, data.payload);
+  if (data.htmlText) event.clipboardData?.setData("text/html", data.htmlText);
+}
+
+export async function copyMessagesToClipboard(input: MessageClipboardInput) {
+  const { htmlText, payload, plainText } = buildMessageClipboardData(input);
   try {
     if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
       const items: Record<string, Blob> = {

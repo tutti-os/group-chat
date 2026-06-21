@@ -83,3 +83,17 @@ test("message times use compact 24-hour formatting", async () => {
   assert.match(formatted, /^16:38$/);
   assert.doesNotMatch(formatted, /AM|PM/i);
 });
+
+test("conversation timestamps show time today and date for older messages", async () => {
+  const { formatConversationListTimestamp } = await bundleModule(
+    "src/app/formatting.ts",
+    "conversation-time-formatting",
+  );
+  const now = new Date("2026-06-21T20:00:00");
+  const today = formatConversationListTimestamp("2026-06-21T17:39:00", now);
+  const older = formatConversationListTimestamp("2026-06-20T17:39:00", now);
+  assert.match(today, /^17:39$/);
+  assert.doesNotMatch(today, /AM|PM/i);
+  assert.doesNotMatch(older, /:/);
+  assert.match(older, /20/);
+});

@@ -973,9 +973,9 @@ export function Composer(props: {
 
   const resolvePastedArtifacts = (clipboardData: DataTransfer, pastedText: string) => {
     const payload = readArtifactClipboardFromDataTransfer(clipboardData);
-    if (payload?.artifactIds.length) {
+    if (payload && (payload.artifactIds.length || payload.parts?.length)) {
       const artifacts = resolveArtifactsByIds(payload.artifactIds, props.allArtifacts);
-      if (artifacts.length > 0) {
+      if (artifacts.length > 0 || payload.parts?.length) {
         let preferOverClipboardFiles = payload.preferOverClipboardFiles;
         const files = clipboardFiles(clipboardData);
         const onlyClipboardImages = files.length > 0 && files.every((file) => file.type.startsWith("image/"));
@@ -986,38 +986,53 @@ export function Composer(props: {
         return {
           artifacts,
           includeText: payload.includeText,
+          parts: payload.parts,
           preferOverClipboardFiles,
         };
       }
     }
 
-    return { artifacts: [] as Artifact[], includeText: true, preferOverClipboardFiles: false };
+    return { artifacts: [] as Artifact[], includeText: true, parts: undefined, preferOverClipboardFiles: false };
   };
 
   const applyPastedArtifacts = (
     pastedArtifactClipboard: ReturnType<typeof resolvePastedArtifacts>,
     pastedText: string,
   ) => {
+    const insertText = (content: string) => insertComposerPasteAtCaret(
+      content,
+      {
+        getMessageLabel: (messageIdSegment) => formatMessageLinkLabel(
+          messageIdSegment,
+          props.allMessages,
+          props.allParticipants,
+          props.identities,
+          props.userDisplayName,
+        ),
+        getSummaryTask: (taskId) => props.summaryTasks.find((task) => task.id === taskId) ?? null,
+      },
+      composerPasteContext,
+    );
+    if (pastedArtifactClipboard.parts?.length) {
+      const artifactsById = new Map(pastedArtifactClipboard.artifacts.map((artifact) => [artifact.id, artifact]));
+      for (const part of pastedArtifactClipboard.parts) {
+        if (part.type === "text") {
+          if (part.content) insertText(part.content);
+        } else {
+          const artifact = artifactsById.get(part.artifactId);
+          if (artifact) queueExistingArtifacts([artifact]);
+        }
+      }
+      requestAnimationFrame(() => syncEditorText(true));
+      return;
+    }
     if (
       pastedArtifactClipboard.includeText
       && pastedText.trim()
       && !isPlaceholderAttachmentText(pastedText)
       && !isArtifactOnlyClipboardPlainText(pastedText)
     ) {
-      insertComposerPasteAtCaret(
-        pastedText,
-        {
-          getMessageLabel: (messageIdSegment) => formatMessageLinkLabel(
-            messageIdSegment,
-            props.allMessages,
-            props.allParticipants,
-            props.identities,
-            props.userDisplayName,
-          ),
-          getSummaryTask: (taskId) => props.summaryTasks.find((task) => task.id === taskId) ?? null,
-        },
-        composerPasteContext,
-      );
+      insertText(pastedText);
       requestAnimationFrame(() => {
         const editor = editorRef.current;
         if (editor) syncMentionedIdsFromEditor(editor);

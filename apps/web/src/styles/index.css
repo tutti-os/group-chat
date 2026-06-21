@@ -224,6 +224,10 @@
   white-space: nowrap !important;
 }
 
+[data-slot="message-copy-content"] > [data-slot="artifact-block"] + [data-slot="message-block"] {
+  margin-top: 6px;
+}
+
 .message-prose table {
   width: 100%;
   margin: 8px 0;

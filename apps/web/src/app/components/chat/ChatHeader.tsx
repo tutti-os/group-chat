@@ -22,6 +22,7 @@ export function ChatHeader(props: {
   profileButtonRef: RefObject<HTMLButtonElement | null>;
   onToggleProfileMenu: () => void;
   onUpdateRoom: (roomId: string, input: UpdateRoomRequest) => Promise<unknown>;
+  onDeleteRoom: () => void | Promise<void>;
   onRoomPreviewChange?: (roomId: string, input: UpdateRoomRequest) => void;
   onToggleAgents: () => void;
   onToggleFiles: () => void;
@@ -135,6 +136,7 @@ export function ChatHeader(props: {
         <RoomSettingsDialog
           room={props.room}
           onUpdateRoom={props.onUpdateRoom}
+          onDeleteRoom={props.onDeleteRoom}
           onPreviewChange={(input) => props.onRoomPreviewChange?.(props.room.id, input)}
           onClose={() => setSettingsOpen(false)}
         />

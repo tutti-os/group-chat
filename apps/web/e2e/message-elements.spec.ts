@@ -1,5 +1,113 @@
 import { expect, test } from "@playwright/test";
 
+test("preserves app references and message cards copied from the timeline", async ({ context, page, request }) => {
+  const roomBundle = await (await request.post("/api/rooms", { data: { title: "Rich Timeline Copy Room" } })).json();
+  const source = await (await request.post(`/api/conversations/${roomBundle.conversation.id}/messages`, {
+    data: { content: "Original linked message", mentions: [] },
+  })).json();
+  await request.post(`/api/conversations/${roomBundle.conversation.id}/messages`, {
+    data: {
+      content: `[Codex](mention://workspace-app/agent-codex?workspaceId=ws-1) group-chat://message/${source.message.id} group-chat://summary/copied-summary-task`,
+      mentions: [{
+        participantId: "workspace-app:agent-codex",
+        displayNameSnapshot: "Codex",
+        mentionType: "reference",
+        referenceProviderId: "workspace-app",
+        referenceEntityId: "agent-codex",
+        referenceInsert: {
+          kind: "markdown-link",
+          label: "Codex",
+          href: "mention://workspace-app/agent-codex?workspaceId=ws-1",
+        },
+      }],
+    },
+  });
+  await page.goto("/");
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(page.url()).origin });
+  await page.getByRole("button", { name: /Rich Timeline Copy Room/ }).click();
+  const richMessage = page.getByRole("article").filter({ hasText: "Original linked message" }).last();
+  await richMessage.locator('[data-slot="message-copy-content"]').evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  await page.keyboard.press("Meta+C");
+  const clipboardDebug = await page.evaluate(async () => {
+    const items = await navigator.clipboard.read();
+    return Promise.all(items.flatMap((item) => item.types.map(async (type) => ({
+      type,
+      value: await (await item.getType(type)).text(),
+    }))));
+  });
+  expect(JSON.stringify(clipboardDebug)).toContain("data-group-chat-copy-payload");
+  const composer = page.getByRole("textbox", { name: /消息输入框|Message input/ });
+  await composer.click();
+  await page.keyboard.press("Meta+V");
+
+  await expect(composer.locator('[data-mention-display-mode="agent-launcher"], [data-mention-kind="reference"]')).toBeVisible();
+  await expect(composer.locator(`[data-message-link-id*="${source.message.id}"]`)).toBeVisible();
+  await expect(composer.locator('[data-summary-link-id="copied-summary-task"]')).toBeVisible();
+});
+
+test("pastes selected timeline images and text in their original order", async ({ context, page, request }) => {
+  const roomBundle = await (await request.post("/api/rooms", { data: { title: "Timeline Ordered Copy Room" } })).json();
+  const imageBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+  const first = await (await request.post(`/api/conversations/${roomBundle.conversation.id}/artifacts`, {
+    data: { filename: "ordered-first.png", mimeType: "image/png", dataBase64: imageBase64 },
+  })).json();
+  const second = await (await request.post(`/api/conversations/${roomBundle.conversation.id}/artifacts`, {
+    data: { filename: "ordered-second.png", mimeType: "image/png", dataBase64: imageBase64 },
+  })).json();
+  await request.post(`/api/conversations/${roomBundle.conversation.id}/messages`, {
+    data: {
+      content: "甲乙",
+      artifactIds: [first.artifact.id, second.artifact.id],
+      parts: [
+        { type: "artifact", artifactId: first.artifact.id },
+        { type: "text", content: "甲" },
+        { type: "artifact", artifactId: second.artifact.id },
+        { type: "text", content: "乙" },
+      ],
+      mentions: [],
+    },
+  });
+  await page.goto("/");
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(page.url()).origin });
+  await page.getByRole("button", { name: /Timeline Ordered Copy Room/ }).click();
+  const message = page.getByRole("article").filter({ hasText: "甲" });
+  await message.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  await page.keyboard.press("Meta+C");
+  const composer = page.getByRole("textbox", { name: /消息输入框|Message input/ });
+  await composer.click();
+  await page.keyboard.press("Meta+V");
+
+  expect(await composer.evaluate((editor) => {
+    const order: string[] = [];
+    const visit = (node: Node) => {
+      if (node instanceof HTMLElement && node.dataset.uploadItemId) {
+        order.push(`image:${node.title}`);
+        return;
+      }
+      if (node instanceof Text) {
+        const text = (node.textContent ?? "").replaceAll("\u200b", "").trim();
+        if (text) order.push(`text:${text}`);
+        return;
+      }
+      for (const child of node.childNodes) visit(child);
+    };
+    for (const child of editor.childNodes) visit(child);
+    return order;
+  })).toEqual(["image:ordered-first.png", "text:甲", "image:ordered-second.png", "text:乙"]);
+});
+
 test("sends interleaved composer images and text in visual order", async ({ page, request }) => {
   const roomBundle = await (await request.post("/api/rooms", { data: { title: "Interleaved Message Room" } })).json();
   await page.goto("/");
@@ -24,6 +132,16 @@ test("sends interleaved composer images and text in visual order", async ({ page
     { type: "image", content: "" },
     { type: "main_text", content: "第二段" },
   ]);
+  const message = page.getByRole("article").filter({ hasText: "第一段" });
+  await expect(message).toBeVisible();
+  expect(await message.locator('[data-slot="message-copy-content"]').evaluate((content) => {
+    const children = [...content.children] as HTMLElement[];
+    return children.flatMap((child, index) => {
+      const next = children[index + 1];
+      if (child.dataset.slot !== "artifact-block" || next?.dataset.slot !== "message-block") return [];
+      return [next.getBoundingClientRect().top - child.getBoundingClientRect().bottom];
+    });
+  })).toEqual([6, 6]);
 });
 
 test("copies composer images and files across rooms", async ({ context, page, request }) => {

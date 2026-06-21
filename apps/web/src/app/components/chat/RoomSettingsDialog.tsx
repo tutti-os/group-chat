@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ImageUp, X } from "lucide-react";
+import { ImageUp, Trash2, X } from "lucide-react";
 import type { Room, UpdateRoomRequest } from "@group-chat/shared";
 import { isRoomImageAvatar, readRoomAvatarImageFile, ROOM_AVATAR_EMOJIS } from "../../room-avatar.js";
 import { useTranslation } from "../../i18n/index.js";
@@ -8,6 +8,7 @@ import { RoomAvatar } from "../ui/RoomAvatar.js";
 export function RoomSettingsDialog(props: {
   room: Room;
   onUpdateRoom: (roomId: string, input: UpdateRoomRequest) => Promise<unknown>;
+  onDeleteRoom: () => void | Promise<void>;
   onPreviewChange?: (input: UpdateRoomRequest) => void;
   onClose: () => void;
 }) {
@@ -175,18 +176,24 @@ export function RoomSettingsDialog(props: {
             />
           </label>
         </div>
-        <div className={"[display:flex] [justify-content:flex-end] [gap:8px] [padding:0_24px_24px] [&_button]:[display:inline-flex] [&_button]:[align-items:center] [&_button]:[justify-content:center] [&_button]:[height:36px] [&_button]:[border:0] [&_button]:[border-radius:12px] [&_button]:[padding:0_14px] [&_button]:[font-size:13px] [&_button]:[font-weight:650]"}>
-          <button type="button" className={"[color:var(--text)] [background:#00000008] [&:hover]:[background:#00000012]"} onClick={closeDialog}>
-            {t("common.cancel")}
+        <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:12px] [padding:0_24px_24px] [&_button]:[display:inline-flex] [&_button]:[align-items:center] [&_button]:[justify-content:center] [&_button]:[height:36px] [&_button]:[border:0] [&_button]:[border-radius:12px] [&_button]:[padding:0_14px] [&_button]:[font-size:13px] [&_button]:[font-weight:650]"}>
+          <button type="button" className={"[gap:6px] [color:var(--danger)] [background:#dc26260d] [&:hover]:[background:#dc26261a]"} onClick={() => void props.onDeleteRoom()}>
+            <Trash2 size={14} />
+            {t("sidebar.deleteChat")}
           </button>
-          <button
-            type="button"
-            className={"[color:#ffffff] [background:var(--primary)] [&:hover]:[background:#111111ee] [&:disabled]:[opacity:0.55]"}
-            disabled={saving || !title.trim()}
-            onClick={() => void save()}
-          >
-            {saving ? t("common.saving") : t("common.save")}
-          </button>
+          <div className={"[display:flex] [gap:8px]"}>
+            <button type="button" className={"[color:var(--text)] [background:#00000008] [&:hover]:[background:#00000012]"} onClick={closeDialog}>
+              {t("common.cancel")}
+            </button>
+            <button
+              type="button"
+              className={"[color:#ffffff] [background:var(--primary)] [&:hover]:[background:#111111ee] [&:disabled]:[opacity:0.55]"}
+              disabled={saving || !title.trim()}
+              onClick={() => void save()}
+            >
+              {saving ? t("common.saving") : t("common.save")}
+            </button>
+          </div>
         </div>
       </div>
     </section>

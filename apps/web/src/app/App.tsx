@@ -87,8 +87,9 @@ import { defaultIdentityNameForRuntime, listCanonicalRuntimeProfiles, localAgent
 import { localAgentMentionSubtitle } from "./local-agent-mention-options.js";
 import { groupAgentForwardSections } from "./agent-forward-format.js";
 
-const DEFAULT_CONVERSATION_SIDEBAR_WIDTH = 300;
 const MIN_CONVERSATION_SIDEBAR_WIDTH = 240;
+const DEFAULT_CONVERSATION_SIDEBAR_WIDTH = MIN_CONVERSATION_SIDEBAR_WIDTH;
+const CONVERSATION_SIDEBAR_WIDTH_STORAGE_KEY = "group-chat:conversation-sidebar-width";
 const MIN_CHAT_PANE_WIDTH = 460;
 const SPLITTER_WIDTH = 4;
 const DESKTOP_NAV_WIDTH = 60;
@@ -146,7 +147,7 @@ export function App() {
   const [openThinkingMessageId, setOpenThinkingMessageId] = useState<string | null>(null);
   const [mentionRequest, setMentionRequest] = useState<{ participantId: string; seq: number } | null>(null);
   const [composerRequest, setComposerRequest] = useState<ComposerRequest | null>(null);
-  const [conversationSidebarWidth, setConversationSidebarWidth] = useState(DEFAULT_CONVERSATION_SIDEBAR_WIDTH);
+  const [conversationSidebarWidth, setConversationSidebarWidth] = useState(loadConversationSidebarWidth);
   const [resizingConversationSidebar, setResizingConversationSidebar] = useState(false);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(() => state.conversations[0]?.id ?? null);
   const [focusMessageRequest, setFocusMessageRequest] = useState<{ messageId: string; artifactId?: string; seq: number } | null>(null);
@@ -1027,14 +1028,17 @@ export function App() {
       MIN_CONVERSATION_SIDEBAR_WIDTH,
       shellRect.width - navWidth - SPLITTER_WIDTH - MIN_CHAT_PANE_WIDTH,
     );
+    let latestWidth = conversationSidebarWidth;
     const updateWidth = (clientX: number) => {
       const rawWidth = clientX - shellRect.left - navWidth;
-      setConversationSidebarWidth(clamp(rawWidth, MIN_CONVERSATION_SIDEBAR_WIDTH, maxSidebarWidth));
+      latestWidth = clamp(rawWidth, MIN_CONVERSATION_SIDEBAR_WIDTH, maxSidebarWidth);
+      setConversationSidebarWidth(latestWidth);
     };
     const handlePointerMove = (moveEvent: PointerEvent) => {
       updateWidth(moveEvent.clientX);
     };
     const stopResize = () => {
+      saveConversationSidebarWidth(latestWidth);
       setResizingConversationSidebar(false);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
@@ -1362,7 +1366,6 @@ export function App() {
             unreadCounts={unreadCountsByConversation}
             onSelect={setCurrentConversationId}
             onCreateRoom={onCreateRoom}
-            onDeleteRoom={onDeleteRoom}
             onTogglePin={onToggleConversationPin}
           />
 
@@ -1390,6 +1393,7 @@ export function App() {
                   profileButtonRef={mobileProfileButtonRef}
                   onToggleProfileMenu={() => toggleProfileMenu("mobile")}
                   onUpdateRoom={onUpdateRoom}
+                  onDeleteRoom={() => onDeleteRoom(currentRoom, currentConversation)}
                   onRoomPreviewChange={onRoomPreviewChange}
                   onToggleAgents={() => {
                     setFilesPanelOpen(false);
@@ -1706,6 +1710,22 @@ function ReconnectingBanner() {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+function loadConversationSidebarWidth() {
+  if (typeof window === "undefined") return DEFAULT_CONVERSATION_SIDEBAR_WIDTH;
+  const stored = Number(window.localStorage.getItem(CONVERSATION_SIDEBAR_WIDTH_STORAGE_KEY));
+  if (!Number.isFinite(stored) || stored <= 0) return DEFAULT_CONVERSATION_SIDEBAR_WIDTH;
+  const navWidth = window.matchMedia("(max-width: 1080px)").matches ? COMPACT_NAV_WIDTH : DESKTOP_NAV_WIDTH;
+  const maxWidth = Math.max(
+    MIN_CONVERSATION_SIDEBAR_WIDTH,
+    window.innerWidth - navWidth - SPLITTER_WIDTH - MIN_CHAT_PANE_WIDTH,
+  );
+  return clamp(stored, MIN_CONVERSATION_SIDEBAR_WIDTH, maxWidth);
+}
+
+function saveConversationSidebarWidth(width: number) {
+  window.localStorage.setItem(CONVERSATION_SIDEBAR_WIDTH_STORAGE_KEY, String(Math.round(width)));
 }
 
 function visibleActiveRuns(runs: AgentRun[], messagesById: Map<string, Message>) {
