@@ -172,6 +172,7 @@ export function Composer(props: {
   const footerRef = useRef<HTMLElement | null>(null);
   const [mentionMenuStyle, setMentionMenuStyle] = useState<CSSProperties>({ visibility: "hidden" });
   const composerCaretOffsetRef = useRef<number | null>(null);
+  const attachmentPickerCaretRef = useRef<Range | null>(null);
   const lastComposerInputAtRef = useRef(Date.now());
   const composerIdleBreakPendingRef = useRef(false);
   const roomMembers = useMemo(
@@ -846,11 +847,18 @@ export function Composer(props: {
             restoreComposerCaret(editor, mentionSelectionRef.current, composerCaretOffsetRef.current);
             suppressEditorSyncRef.current = true;
             try {
-              let queryRange = mentionQueryRangeRef.current;
+              const queryRange = mentionQueryRangeRef.current;
               if (queryRange && editor.contains(queryRange.startContainer) && !rangeCrossesMentionChip(queryRange)) {
+                const insertPoint = document.createRange();
+                insertPoint.setStart(queryRange.startContainer, queryRange.startOffset);
+                insertPoint.collapse(true);
                 queryRange.deleteContents();
+                const sel = window.getSelection();
+                sel?.removeAllRanges();
+                sel?.addRange(insertPoint);
+              } else {
+                placeCaretAtEditorEnd(editor, { preventScroll: true });
               }
-              placeCaretAtEditorEnd(editor, { preventScroll: true });
               queueExistingArtifacts([artifact]);
               normalizeEditorAfterMentionInsert(editor);
             } finally {
@@ -921,9 +929,16 @@ export function Composer(props: {
         try {
           const queryRange = mentionQueryRangeRef.current;
           if (queryRange && editor.contains(queryRange.startContainer) && !rangeCrossesMentionChip(queryRange)) {
+            const insertPoint = document.createRange();
+            insertPoint.setStart(queryRange.startContainer, queryRange.startOffset);
+            insertPoint.collapse(true);
             queryRange.deleteContents();
+            const sel = window.getSelection();
+            sel?.removeAllRanges();
+            sel?.addRange(insertPoint);
+          } else {
+            placeCaretAtEditorEnd(editor, { preventScroll: true });
           }
-          placeCaretAtEditorEnd(editor, { preventScroll: true });
           queueExistingArtifacts(artifacts);
           normalizeEditorAfterMentionInsert(editor);
         } finally {
@@ -982,6 +997,16 @@ export function Composer(props: {
 
   const queueFiles = (files: FileList | File[] | null) => {
     if (!files?.length) return;
+    const editor = editorRef.current;
+    if (editor && attachmentPickerCaretRef.current) {
+      const savedRange = attachmentPickerCaretRef.current;
+      if (editor.contains(savedRange.startContainer)) {
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(savedRange);
+      }
+    }
+    attachmentPickerCaretRef.current = null;
     const fileList = Array.from(files);
     const queued = fileList.map((file) => {
       const previewUrl = URL.createObjectURL(file);
@@ -1004,10 +1029,34 @@ export function Composer(props: {
     requestAnimationFrame(() => {
       const editor = editorRef.current;
       if (!editor) return;
-      placeCaretAtEditorEnd(editor, { preventScroll: true });
+      const sel = window.getSelection();
+      if (!sel?.rangeCount || !editor.contains(sel.getRangeAt(0).startContainer)) {
+        placeCaretAtEditorEnd(editor, { preventScroll: true });
+      }
+      editor.focus({ preventScroll: true });
       syncEditorText(true);
     });
   };
+
+  useEffect(() => {
+    if (!attachmentPickerCaretRef.current) return;
+    const restoreCaretOnFocus = () => {
+      const editor = editorRef.current;
+      const savedRange = attachmentPickerCaretRef.current;
+      attachmentPickerCaretRef.current = null;
+      if (!editor || !savedRange || !editor.contains(savedRange.startContainer)) return;
+      requestAnimationFrame(() => {
+        editor.focus({ preventScroll: true });
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(savedRange);
+      });
+    };
+    window.addEventListener("focus", restoreCaretOnFocus, { once: true });
+    return () => {
+      window.removeEventListener("focus", restoreCaretOnFocus);
+    };
+  }, [attachmentPickerCaretRef.current]);
 
   const queueExistingArtifacts = (artifacts: Artifact[]) => {
     if (!artifacts.length) return;
@@ -1681,13 +1730,30 @@ export function Composer(props: {
           if (event.target === event.currentTarget) editorRef.current?.focus();
         }}
       >
-        <label className={"[display:inline-grid] [place-items:center] [border:0] [width:40px] [height:40px] [border-radius:999px] [color:#17171799] [background:transparent] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000008] [&_input]:[display:none] max-[760px]:[width:34px] max-[760px]:[height:34px]"} title={t("composer.attachFiles")}>
+        <label
+          className={"[display:inline-grid] [place-items:center] [border:0] [width:40px] [height:40px] [border-radius:999px] [color:#17171799] [background:transparent] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000008] [&_input]:[display:none] max-[760px]:[width:34px] max-[760px]:[height:34px]"}
+          title={t("composer.attachFiles")}
+          onMouseDown={() => {
+            const editor = editorRef.current;
+            if (!editor) return;
+            const sel = window.getSelection();
+            if (sel?.rangeCount && editor.contains(sel.getRangeAt(0).startContainer)) {
+              attachmentPickerCaretRef.current = sel.getRangeAt(0).cloneRange();
+            } else {
+              attachmentPickerCaretRef.current = null;
+            }
+          }}
+        >
           <Paperclip size={18} />
           <input
             type="file"
             multiple
             onChange={(event) => {
-              queueFiles(event.target.files);
+              if (event.target.files && event.target.files.length) {
+                queueFiles(event.target.files);
+              } else {
+                attachmentPickerCaretRef.current = null;
+              }
               event.currentTarget.value = "";
               focusComposerAfterAttachmentInsert();
             }}
@@ -2132,7 +2198,7 @@ export function Composer(props: {
                 >
                   <strong className={"[overflow:hidden] [font-size:12px] [font-weight:500] [line-height:16px] [text-overflow:ellipsis] [white-space:nowrap]"}>{option.label}</strong>
                   <span className={"[overflow:hidden] [color:var(--muted)] [font-size:11px] [line-height:14px] [text-overflow:ellipsis] [white-space:nowrap]"}>
-                    {option.subtitle}
+                    {option.runtimeProfile.provider}
                   </span>
                 </button>
               </div>
