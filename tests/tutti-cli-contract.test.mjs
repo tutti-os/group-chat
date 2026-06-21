@@ -4,6 +4,7 @@ import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -32,6 +33,7 @@ test("Tutti CLI handlers expose public conversation data only", async (t) => {
     dataBase64: "UHVibGljIGFydGlmYWN0Cg==",
   });
   assert.equal(publicArtifact.status, 200);
+  assert.match(publicArtifact.body.artifact.contentHash, /^[a-f0-9]{64}$/);
 
   const publicMessage = await postJson(server.baseUrl, `/api/conversations/${conversationId}/messages`, {
     artifactIds: [publicArtifact.body.artifact.id],
@@ -81,6 +83,54 @@ test("Tutti CLI handlers expose public conversation data only", async (t) => {
   );
   assert.equal(artifacts.body.value.warnings[0].omittedWhisperArtifactCount, 1);
 
+  const duplicatePublicArtifact = await postJson(server.baseUrl, `/api/conversations/${conversationId}/artifacts`, {
+    filename: "public-copy.txt",
+    mimeType: "text/plain",
+    dataBase64: "UHVibGljIGFydGlmYWN0Cg==",
+  });
+  assert.equal(duplicatePublicArtifact.status, 200);
+  assert.notEqual(duplicatePublicArtifact.body.artifact.localPath, publicArtifact.body.artifact.localPath);
+  assert.equal(duplicatePublicArtifact.body.artifact.contentHash, publicArtifact.body.artifact.contentHash);
+  const repeatedPublicMessage = await postJson(server.baseUrl, `/api/conversations/${conversationId}/messages`, {
+    artifactIds: [duplicatePublicArtifact.body.artifact.id],
+    content: "same public file sent again",
+    mentions: [],
+    visibility: "public",
+  });
+  assert.equal(repeatedPublicMessage.status, 200);
+  assert.equal(repeatedPublicMessage.body.artifacts[0].id, duplicatePublicArtifact.body.artifact.id);
+
+  const imageArtifact = await postJson(server.baseUrl, `/api/conversations/${conversationId}/artifacts`, {
+    filename: "pixel.png",
+    mimeType: "image/png",
+    dataBase64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2mQAAAABJRU5ErkJggg==",
+  });
+  assert.equal(imageArtifact.status, 200);
+  assert.match(imageArtifact.body.artifact.contentHash, /^[a-f0-9]{64}$/);
+  const imageMessage = await postJson(server.baseUrl, `/api/conversations/${conversationId}/messages`, {
+    artifactIds: [imageArtifact.body.artifact.id],
+    content: "public image",
+    mentions: [],
+    visibility: "public",
+  });
+  assert.equal(imageMessage.status, 200);
+  const duplicateImageArtifact = await postJson(server.baseUrl, `/api/conversations/${conversationId}/artifacts`, {
+    filename: "pixel-copy.png",
+    mimeType: "image/png",
+    dataBase64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2mQAAAABJRU5ErkJggg==",
+  });
+  assert.equal(duplicateImageArtifact.status, 200);
+  assert.notEqual(duplicateImageArtifact.body.artifact.localPath, imageArtifact.body.artifact.localPath);
+  assert.equal(duplicateImageArtifact.body.artifact.contentHash, imageArtifact.body.artifact.contentHash);
+  const repeatedImageMessage = await postJson(server.baseUrl, `/api/conversations/${conversationId}/messages`, {
+    artifactIds: [duplicateImageArtifact.body.artifact.id],
+    content: "same public image sent again",
+    mentions: [],
+    visibility: "public",
+  });
+  assert.equal(repeatedImageMessage.status, 200);
+  assert.equal(repeatedImageMessage.body.artifacts[0].localPath, duplicateImageArtifact.body.artifact.localPath);
+
   const emptyRecentRoom = await postJson(server.baseUrl, "/api/rooms", {
     title: "Empty recent room",
   });
@@ -107,12 +157,53 @@ test("Tutti CLI handlers expose public conversation data only", async (t) => {
   assert.equal(copiedArtifact.conversationId, attachmentCopyRoom.body.conversation.id);
   assert.equal(copiedArtifact.roomId, attachmentCopyRoom.body.room.id);
 
+  const repeatedCrossRoomCopy = await postJson(
+    server.baseUrl,
+    `/api/conversations/${attachmentCopyRoom.body.conversation.id}/messages`,
+    {
+      artifactIds: [publicArtifact.body.artifact.id],
+      content: "same cross-room attachment copied again",
+      mentions: [],
+      visibility: "public",
+    },
+  );
+  assert.equal(repeatedCrossRoomCopy.status, 200);
+  assert.equal(repeatedCrossRoomCopy.body.artifacts[0].localPath, publicArtifact.body.artifact.localPath);
+
+  const independentlyUploadedCrossRoomArtifact = await postJson(
+    server.baseUrl,
+    `/api/conversations/${attachmentCopyRoom.body.conversation.id}/artifacts`,
+    {
+      filename: "public-cross-room.txt",
+      mimeType: "text/plain",
+      dataBase64: "UHVibGljIGFydGlmYWN0Cg==",
+    },
+  );
+  assert.equal(independentlyUploadedCrossRoomArtifact.status, 200);
+  assert.notEqual(independentlyUploadedCrossRoomArtifact.body.artifact.localPath, publicArtifact.body.artifact.localPath);
+  assert.equal(independentlyUploadedCrossRoomArtifact.body.artifact.contentHash, publicArtifact.body.artifact.contentHash);
+  const independentlyUploadedCrossRoomMessage = await postJson(
+    server.baseUrl,
+    `/api/conversations/${attachmentCopyRoom.body.conversation.id}/messages`,
+    {
+      artifactIds: [independentlyUploadedCrossRoomArtifact.body.artifact.id],
+      content: "same bytes uploaded independently in another room",
+      mentions: [],
+      visibility: "public",
+    },
+  );
+  assert.equal(independentlyUploadedCrossRoomMessage.status, 200);
+
   const snapshotAfterCopy = await getJson(server.baseUrl, "/api/bootstrap");
   assert.equal(snapshotAfterCopy.status, 200);
   const originalArtifactAfterCopy = snapshotAfterCopy.body.artifacts.find(
     (artifact) => artifact.id === publicArtifact.body.artifact.id,
   );
   assert.equal(originalArtifactAfterCopy.messageId, publicMessage.body.message.id);
+
+  const legacyDb = new DatabaseSync(server.dbPath);
+  legacyDb.exec("UPDATE artifacts SET content_hash = NULL");
+  legacyDb.close();
 
   const rootReferences = await postJson(server.baseUrl, "/tutti/references/list", {
     limit: 50,
@@ -123,7 +214,12 @@ test("Tutti CLI handlers expose public conversation data only", async (t) => {
     (item) => item.type === "group" && item.id === list.body.value.conversations[0].roomId,
   );
   assert.ok(roomGroup);
-  assert.equal(roomGroup.referenceCount, 1);
+  assert.equal(roomGroup.referenceCount, 2);
+  const attachmentCopyRoomGroup = rootReferences.body.items.find(
+    (item) => item.type === "group" && item.id === attachmentCopyRoom.body.room.id,
+  );
+  assert.ok(attachmentCopyRoomGroup);
+  assert.equal(attachmentCopyRoomGroup.referenceCount, 1);
   const emptyRoomGroup = rootReferences.body.items.find(
     (item) => item.type === "group" && item.id === emptyRecentRoom.body.room.id,
   );
@@ -138,14 +234,31 @@ test("Tutti CLI handlers expose public conversation data only", async (t) => {
     kinds: ["file"],
   });
   assert.equal(references.status, 200);
-  assert.deepEqual(
-    references.body.items.map((item) => item.reference.displayName),
-    ["public.txt"],
-  );
+  assert.equal(references.body.items.length, 1);
   assert.equal(references.body.items[0].type, "reference");
   assert.equal(references.body.items[0].reference.kind, "file");
   assert.equal(references.body.items[0].reference.location.type, "app-data-relative");
   assert.match(references.body.items[0].reference.location.path, /^rooms\/[^/]+\/uploads\/[^/]+\.txt$/);
+
+  const imageReferences = await postJson(server.baseUrl, "/tutti/references/list", {
+    parentGroupId: roomGroup.id,
+    filterText: "pixel",
+    limit: 5,
+    kinds: ["file"],
+  });
+  assert.equal(imageReferences.status, 200);
+  assert.equal(imageReferences.body.items.length, 1);
+  assert.equal(imageReferences.body.items[0].reference.mimeType, "image/png");
+  assert.match(imageReferences.body.items[0].reference.previewUrl, /^\/local-assets\//);
+
+  const copiedRoomReferences = await postJson(server.baseUrl, "/tutti/references/list", {
+    parentGroupId: attachmentCopyRoomGroup.id,
+    filterText: "public",
+    limit: 5,
+    kinds: ["file"],
+  });
+  assert.equal(copiedRoomReferences.status, 200);
+  assert.equal(copiedRoomReferences.body.items.length, 1);
 
   const bodyOnlyMessage = await postJson(server.baseUrl, `/api/conversations/${conversationId}/messages`, {
     content: "body-only-reference-search-token",
@@ -188,6 +301,7 @@ test("Tutti CLI handlers expose public conversation data only", async (t) => {
 async function startServer(t) {
   const home = await mkdtemp(path.join(os.tmpdir(), "group-chat-tutti-cli-test-"));
   const port = 8900 + Math.floor(Math.random() * 800);
+  const usesProcessGroup = process.platform !== "win32";
   const child = spawn("pnpm", ["--filter", "@group-chat/server", "exec", "tsx", "src/main.ts"], {
     cwd: rootDir,
     env: {
@@ -197,6 +311,7 @@ async function startServer(t) {
       PORT: String(port),
     },
     stdio: ["ignore", "pipe", "pipe"],
+    detached: usesProcessGroup,
   });
   let output = "";
   child.stdout.on("data", (chunk) => {
@@ -208,8 +323,12 @@ async function startServer(t) {
 
   t.after(async () => {
     if (child.exitCode === null) {
-      child.kill("SIGINT");
+      signalChildProcess(child, "SIGINT", usesProcessGroup);
       await Promise.race([once(child, "exit"), delay(3000)]);
+    }
+    signalChildProcess(child, "SIGKILL", usesProcessGroup);
+    if (child.exitCode === null) {
+      await Promise.race([once(child, "exit"), delay(1000)]);
     }
     await rm(home, { recursive: true, force: true });
   });
@@ -221,13 +340,25 @@ async function startServer(t) {
     }
     try {
       const response = await fetch(`${baseUrl}/api/health`);
-      if (response.ok) return { baseUrl };
+      if (response.ok) return { baseUrl, dbPath: path.join(home, "data", "group-chat.db") };
     } catch {
       // Keep polling until the Fastify listener is ready.
     }
     await delay(100);
   }
   throw new Error(`server did not become healthy\n${output}`);
+}
+
+function signalChildProcess(child, signal, usesProcessGroup) {
+  try {
+    if (usesProcessGroup) {
+      process.kill(-child.pid, signal);
+    } else {
+      child.kill(signal);
+    }
+  } catch (error) {
+    if (error?.code !== "ESRCH") throw error;
+  }
 }
 
 async function postJson(baseUrl, pathName, body) {

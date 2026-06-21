@@ -151,6 +151,7 @@ function migrate(database: DatabaseSync) {
       filename TEXT NOT NULL,
       mime_type TEXT NOT NULL,
       size_bytes INTEGER NOT NULL,
+      content_hash TEXT,
       local_path TEXT NOT NULL,
       public_url TEXT NOT NULL,
       text_preview TEXT,
@@ -275,6 +276,7 @@ function migrate(database: DatabaseSync) {
   ensureColumn(database, "rooms", "avatar", "TEXT");
   ensureColumn(database, "identities", "default_listen_mode", "TEXT NOT NULL DEFAULT 'passive'");
   ensureColumn(database, "identities", "default_reasoning_effort", "TEXT");
+  ensureColumn(database, "artifacts", "content_hash", "TEXT");
   database.exec(
     "CREATE INDEX IF NOT EXISTS idx_agent_runs_trigger_status_created ON agent_runs(trigger_message_id, status, created_at)",
   );

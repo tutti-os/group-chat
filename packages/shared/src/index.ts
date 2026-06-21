@@ -220,6 +220,7 @@ export interface Artifact {
   filename: string;
   mimeType: string;
   sizeBytes: number;
+  contentHash: string | null;
   localPath: string;
   publicUrl: string;
   textPreview: string | null;

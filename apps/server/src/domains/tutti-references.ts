@@ -17,6 +17,7 @@ import type {
 } from "@group-chat/shared";
 import { resolveArtifactLinkedMessageId, isVisibleGroupChatFile } from "@group-chat/shared";
 import { appPaths } from "../local/paths.js";
+import { sha256ForFile } from "./artifact-content-hash.js";
 import { matchesFilterCategories, normalizeFilterCategoryIds } from "./reference-filter-categories.js";
 
 interface ReferenceListInput {
@@ -159,7 +160,7 @@ function buildFileReferenceEntries(snapshot: ChatSnapshot): AppFileReferenceEntr
   const runsById = new Map(snapshot.agentRuns.map((run) => [run.id, run]));
   const conversationsById = new Map(snapshot.conversations.map((conversation) => [conversation.id, conversation]));
   const roomsById = new Map(snapshot.rooms.map((room) => [room.id, room]));
-  return snapshot.artifacts
+  const entries = snapshot.artifacts
     .map((artifact) => {
       if (!isVisibleGroupChatFile(artifact, snapshot.messages, snapshot.messageBlocks, snapshot.agentRuns)) return null;
       const linkedMessageId = resolveArtifactLinkedMessageId(artifact, snapshot.agentRuns, snapshot.messages);
@@ -173,6 +174,26 @@ function buildFileReferenceEntries(snapshot: ChatSnapshot): AppFileReferenceEntr
       );
     })
     .filter((entry): entry is AppFileReferenceEntry => entry !== null);
+  return dedupeRoomFileReferenceEntries(entries);
+}
+
+function dedupeRoomFileReferenceEntries(entries: AppFileReferenceEntry[]) {
+  const latestByIdentity = new Map<string, AppFileReferenceEntry>();
+  for (const entry of entries) {
+    const key = `${entry.artifact.roomId}\0${fileReferenceContentIdentity(entry)}`;
+    const current = latestByIdentity.get(key);
+    if (!current || fileReferenceSortMs(entry) >= fileReferenceSortMs(current)) {
+      latestByIdentity.set(key, entry);
+    }
+  }
+  return [...latestByIdentity.values()];
+}
+
+function fileReferenceContentIdentity(entry: AppFileReferenceEntry) {
+  const contentHash = entry.artifact.contentHash?.trim() || sha256ForFile(entry.artifact.localPath);
+  if (contentHash) return `sha256:${contentHash}`;
+  const location = entry.reference.location;
+  return `location:${location.type}:${location.path}`;
 }
 
 export function isReferenceListError(output: unknown): output is ReferenceListError {

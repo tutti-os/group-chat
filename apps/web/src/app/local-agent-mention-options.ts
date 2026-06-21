@@ -1,5 +1,6 @@
 import type { Identity, LocalAgentProviderStatus, Participant, RuntimeProfile } from "@group-chat/shared";
 import { localAgentLauncherAppId } from "./agent-launcher-mentions.js";
+import { isAgentLauncherAvailable } from "./agent-launcher-availability.js";
 import { defaultIdentityNameForRuntime, listCanonicalRuntimeProfiles, localAgentStatus } from "./runtime.js";
 import type { TuttiAtQueryResult } from "./tutti-bridge.js";
 import { readCachedTuttiWorkspaceId } from "./tutti-bridge.js";
@@ -86,6 +87,7 @@ export function buildLocalAgentMentionOptions(
   identities: Identity[],
   query: string | null,
   availableLauncherAppIds: ReadonlySet<string> = new Set(),
+  agentGuiBridgeAvailable = false,
 ): LocalAgentMentionOption[] {
   if (query === null) return [];
   const normalizedQuery = query.toLowerCase();
@@ -95,7 +97,12 @@ export function buildLocalAgentMentionOptions(
     if (profile.kind !== "local-agent") continue;
     const status = localAgentStatus(profile, localAgentProviders);
     const launcherAppId = localAgentLauncherAppId(profile.provider);
-    if (launcherAppId && !availableLauncherAppIds.has(launcherAppId)) continue;
+    if (launcherAppId && !isAgentLauncherAvailable(
+      launcherAppId,
+      availableLauncherAppIds,
+      status?.available === true,
+      agentGuiBridgeAvailable,
+    )) continue;
     if (!launcherAppId && !status?.available) continue;
 
     const label = status?.displayName?.trim() || defaultIdentityNameForRuntime(profile, localAgentProviders);

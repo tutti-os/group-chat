@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AppWindow, AtSign, Bot, Ear, FileOutput, FileText, LayoutList, LoaderCircle, Paperclip, Send, Square, Video, X } from "lucide-react";
+import { AppWindow, AtSign, Bot, Check, Ear, FileOutput, FileText, LayoutList, LoaderCircle, Paperclip, Plus, Send, Square, Video, X } from "lucide-react";
 import type { AgentRun, Artifact, Conversation, Identity, LocalAgentProviderStatus, MentionTarget, Message, Participant, Room, RuntimeProfile, TuttiAtProviderId } from "@group-chat/shared";
 import { resolveArtifactLinkedMessageId } from "@group-chat/shared";
 import { cancelRun, sendMessage, updateMessage, uploadArtifact } from "../../../api/client.js";
@@ -50,7 +50,7 @@ import {
   type TuttiAtQueryResult,
   type TuttiAtRoomFileMeta,
 } from "../../tutti-at-mentions.js";
-import { serializeReferenceMentionChip, parseReferenceMentionHref, isReferenceMentionHref } from "../../reference-mentions.js";
+import { serializeReferenceMentionChip } from "../../reference-mentions.js";
 import { buildReferencePasteTarget, normalizeComposerPasteText, splitComposerPasteContent, type ComposerPasteContext } from "../../composer-paste-content.js";
 import { createSummaryLinkChipElement } from "../../summary-link-card.js";
 import { mentionTabProviders } from "../../mention-panel-tabs.js";
@@ -142,6 +142,8 @@ export function Composer(props: {
   );
   const [activeMentionTab, setActiveMentionTab] = useState<MentionPanelTab>("members");
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
+  const [fileMultiSelectMode, setFileMultiSelectMode] = useState(false);
+  const [selectedFileMentionKeys, setSelectedFileMentionKeys] = useState<Set<string>>(() => new Set());
   const [uploadItems, setUploadItems] = useState<UploadItem[]>([]);
   const [selectedUploadItemIds, setSelectedUploadItemIds] = useState<Set<string>>(new Set());
   const [preview, setPreview] = useState<AttachmentPreview | null>(null);
@@ -202,6 +204,7 @@ export function Composer(props: {
         props.identities,
         mentionQuery,
         availableAgentLauncherAppIds,
+        Boolean(window.tuttiExternal?.workspace?.openFeature),
       ),
     [props.runtimeProfiles, props.localAgentProviders, roomMembers, props.identities, mentionQuery, availableAgentLauncherAppIds],
   );
@@ -262,6 +265,7 @@ export function Composer(props: {
     return {
       members: [
         ...(allOption ? [allOption] : []),
+        ...localAgentMentionOptions,
         ...groupAgentMentionOptions,
         ...realMemberOptions,
       ],
@@ -832,26 +836,6 @@ export function Composer(props: {
     if (option.kind === "all") {
       insertAllMention();
     } else if (option.kind === "reference") {
-      if (option.providerId === "file" || option.providerId === "agent-generated-file") {
-        const artifactId = option.item.itemId;
-        const artifact = props.artifacts.find((item) => item.id === artifactId);
-        if (artifact) {
-          const queryRange = mentionQueryRangeRef.current;
-          if (queryRange && editor && editor.contains(queryRange.startContainer)) {
-            suppressEditorSyncRef.current = true;
-            try {
-              queryRange.deleteContents();
-            } finally {
-              suppressEditorSyncRef.current = false;
-            }
-          }
-          queueExistingArtifacts([artifact]);
-          setMentionQuery(null);
-          mentionSelectionRef.current = null;
-          mentionQueryRangeRef.current = null;
-          return;
-        }
-      }
       const mentionId = tuttiAtMentionKey(option.providerId, option.item.itemId);
       insertMentionChipAtActiveQuery(option.label, mentionId, option.item);
     } else if (option.kind === "local-agent") {
@@ -861,6 +845,70 @@ export function Composer(props: {
       insertMention(option.participant);
     }
     setMentionQuery(null);
+  };
+
+  const toggleFileMentionSelect = (option: MentionOption) => {
+    if (option.kind !== "reference") return;
+    const key = tuttiAtMentionKey(option.providerId, option.item.itemId);
+    setSelectedFileMentionKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleFileMultiSelect = () => {
+    setFileMultiSelectMode((current) => {
+      const next = !current;
+      if (!next) setSelectedFileMentionKeys(new Set());
+      return next;
+    });
+  };
+
+  const handleConfirmFileMultiSelect = () => {
+    if (selectedFileMentionKeys.size === 0) return;
+    const fileOptions = mentionOptionsByTab.files ?? [];
+    const selectedOptions = fileOptions.filter((option) => {
+      if (option.kind !== "reference") return false;
+      return selectedFileMentionKeys.has(tuttiAtMentionKey(option.providerId, option.item.itemId));
+    });
+    const artifacts: Artifact[] = [];
+    for (const option of selectedOptions) {
+      if (option.kind !== "reference") continue;
+      const artifactId = option.item.roomFile?.artifactId ?? option.item.itemId;
+      const artifact = props.allArtifacts.find((item) => item.id === artifactId);
+      if (artifact) artifacts.push(artifact);
+    }
+    if (artifacts.length) {
+      const editor = editorRef.current;
+      if (editor) {
+        editor.focus({ preventScroll: true });
+        restoreComposerCaret(editor, mentionSelectionRef.current, composerCaretOffsetRef.current);
+        suppressEditorSyncRef.current = true;
+        try {
+          const queryRange = mentionQueryRangeRef.current;
+          if (queryRange && editor.contains(queryRange.startContainer) && !rangeCrossesMentionChip(queryRange)) {
+            queryRange.deleteContents();
+          }
+          placeCaretAtEditorEnd(editor, { preventScroll: true });
+          queueExistingArtifacts(artifacts);
+          normalizeEditorAfterMentionInsert(editor);
+        } finally {
+          suppressEditorSyncRef.current = false;
+        }
+        setText(editorText(editor));
+        syncMentionedIdsFromEditor(editor);
+        resizeComposerEditor(editor);
+      }
+    }
+    setFileMultiSelectMode(false);
+    setSelectedFileMentionKeys(new Set());
+    setMentionQuery(null);
+    mentionQueryRangeRef.current = null;
   };
 
   const insertWhisperMention = (participant: Participant) => {
@@ -1205,33 +1253,6 @@ export function Composer(props: {
 
     if (!pastedText.trim() || isArtifactOnlyClipboardPlainText(pastedText)) return;
     event.preventDefault();
-    const fileRefArtifacts = extractFileReferenceArtifactsFromPasteText(pastedText, props.allArtifacts);
-    if (fileRefArtifacts.length > 0) {
-      const textWithoutFileRefs = stripFileReferenceLinks(pastedText);
-      if (textWithoutFileRefs.trim() && !isPlaceholderAttachmentText(textWithoutFileRefs)) {
-        insertComposerPasteAtCaret(
-          textWithoutFileRefs,
-          {
-            getMessageLabel: (messageIdSegment) => formatMessageLinkLabel(
-              messageIdSegment,
-              props.allMessages,
-              props.allParticipants,
-              props.identities,
-              props.userDisplayName,
-            ),
-            getSummaryTask: (taskId) => props.summaryTasks.find((task) => task.id === taskId) ?? null,
-          },
-          composerPasteContext,
-        );
-      }
-      queueExistingArtifacts(fileRefArtifacts);
-      requestAnimationFrame(() => {
-        const editor = editorRef.current;
-        if (editor) syncMentionedIdsFromEditor(editor);
-        syncEditorText(true);
-      });
-      return;
-    }
     insertComposerPasteAtCaret(
       pastedText,
       {
@@ -1399,6 +1420,8 @@ export function Composer(props: {
     setExternalMentionsLoading(false);
     setActiveMentionIndex(0);
     setActiveMentionTab("members");
+    setFileMultiSelectMode(false);
+    setSelectedFileMentionKeys(new Set());
     mentionSelectionRef.current = null;
     mentionQueryRangeRef.current = null;
     composerCaretOffsetRef.current = null;
@@ -1882,12 +1905,12 @@ export function Composer(props: {
             <div
               ref={mentionMenuRef}
               style={mentionMenuStyle}
-              className={"[display:grid] [grid-template-rows:auto_minmax(0,_1fr)] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:18px] [background:var(--panel)] [box-shadow:0_14px_42px_rgb(0_0_0_/_12%)]"}
+              className={`[overflow:hidden] [border:1px_solid_var(--border)] [border-radius:18px] [background:var(--panel)] [box-shadow:0_14px_42px_rgb(0_0_0_/_12%)] ${fileMultiSelectMode && activeMentionTab === "files" ? "[display:grid] [grid-template-rows:auto_minmax(0,_1fr)_auto]" : "[display:grid] [grid-template-rows:auto_minmax(0,_1fr)]"}`}
               role="listbox"
               aria-label={t("composer.mentionSuggestions")}
             >
               <div
-                className={"[display:flex] [gap:4px] [overflow-x:auto] [border-bottom:1px_solid_var(--border)] [padding:6px_6px_0] [scrollbar-width:none] [&::-webkit-scrollbar]:[display:none]"}
+                className={"[display:flex] [align-items:center] [gap:4px] [overflow-x:auto] [border-bottom:1px_solid_var(--border)] [padding:6px_6px_0] [scrollbar-width:none] [&::-webkit-scrollbar]:[display:none]"}
                 role="tablist"
                 aria-label={t("composer.mentionSuggestions")}
               >
@@ -1905,6 +1928,18 @@ export function Composer(props: {
                     {t(mentionTabI18nKey(tab))}
                   </button>
                 ))}
+                {activeMentionTab === "files" ? (
+                  <button
+                    type="button"
+                    className={`[flex:0_0_auto] [margin-left:auto] [display:inline-grid] [width:28px] [height:28px] [place-items:center] [border:0] [border-radius:8px] [&:focus-visible]:[outline:none] ${fileMultiSelectMode ? "[color:#ffffff] [background:#171717]" : "[color:var(--muted)] [background:transparent] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000008]"}`}
+                    aria-label={fileMultiSelectMode ? t("files.exitMultiSelect") : t("files.enterMultiSelect")}
+                    title={fileMultiSelectMode ? t("files.exitMultiSelect") : t("files.enterMultiSelect")}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={handleToggleFileMultiSelect}
+                  >
+                    {fileMultiSelectMode ? <Check size={14} /> : <Plus size={14} />}
+                  </button>
+                ) : null}
               </div>
               <div ref={mentionMenuListRef} className={"[overflow-y:auto] [overflow-anchor:none] [padding:6px]"}>
           {referenceTabLoading ? (
@@ -1997,14 +2032,32 @@ export function Composer(props: {
                 </span>
               </button>
             ) : option.kind === "reference" ? (
+              (() => {
+                const isFileOption = option.providerId === "file" || option.providerId === "agent-generated-file";
+                const mentionKey = tuttiAtMentionKey(option.providerId, option.item.itemId);
+                const isFileSelected = isFileOption && fileMultiSelectMode && selectedFileMentionKeys.has(mentionKey);
+                const handleFileClick = () => {
+                  if (isFileOption && fileMultiSelectMode) {
+                    toggleFileMentionSelect(option);
+                  } else {
+                    saveMentionSelection();
+                    selectMentionOption(option);
+                  }
+                };
+                return (
               <div
                 key={option.key}
                 role="option"
                 aria-selected={index === activeMentionIndex}
                 data-active={index === activeMentionIndex || undefined}
-                className={"[display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:9px] [width:100%] [min-width:0] [min-height:38px] [border-radius:12px] [padding:0_8px] [color:var(--text)] [transition:background-color_0.12s_ease] [&[data-active=true]]:[background:#00000014] [&:hover]:[background:#00000014]"}
+                className={`[display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:9px] [width:100%] [min-width:0] [min-height:38px] [border-radius:12px] [padding:0_8px] [color:var(--text)] [transition:background-color_0.12s_ease] [&[data-active=true]]:[background:#00000014] [&:hover]:[background:#00000014] ${isFileSelected ? "[background:#eff6ff] [&[data-active=true]]:[background:#dbeafe] [&:hover]:[background:#dbeafe]" : ""}`}
                 onMouseEnter={() => setActiveMentionIndex(index)}
               >
+                {isFileOption && fileMultiSelectMode ? (
+                  <span className={`[display:grid] [width:32px] [height:32px] [place-items:center] [border-radius:999px] ${isFileSelected ? "[background:#3b82f6]" : "[background:#f3f4f6]"}`}>
+                    {isFileSelected ? <Check size={14} className={"[color:#ffffff]"} /> : <FileText size={14} className={"[color:var(--muted)]"} />}
+                  </span>
+                ) : (
                 <MentionReferenceFileIcon
                   providerId={option.providerId}
                   label={option.label}
@@ -2012,13 +2065,13 @@ export function Composer(props: {
                   thumbnailUrl={option.thumbnailUrl}
                   onJump={option.item.roomFile ? () => focusRoomFileFromMention(option.item.roomFile!) : undefined}
                 />
+                )}
                 <button
                   type="button"
                   className={"[display:grid] [min-width:0] [gap:1px] [width:100%] [border:0] [padding:0] [color:inherit] [text-align:left] [background:transparent] [&:focus-visible]:[outline:none]"}
                   onMouseDown={(event) => {
                     event.preventDefault();
-                    saveMentionSelection();
-                    selectMentionOption(option);
+                    handleFileClick();
                   }}
                 >
                   <strong className={"[overflow:hidden] [font-size:12px] [font-weight:500] [line-height:16px] [text-overflow:ellipsis] [white-space:nowrap]"}>{option.label}</strong>
@@ -2027,6 +2080,8 @@ export function Composer(props: {
                   </span>
                 </button>
               </div>
+                );
+              })()
             ) : option.kind === "local-agent" ? (
               <div
                 key={option.key}
@@ -2106,6 +2161,30 @@ export function Composer(props: {
             });
           })()}
               </div>
+              {fileMultiSelectMode && activeMentionTab === "files" ? (
+                <div className={"[display:flex] [align-items:center] [justify-content:flex-end] [gap:8px] [padding:8px_10px] [border-top:1px_solid_var(--border)] [background:var(--panel)]"}>
+                  <span className={"[margin-right:auto] [color:var(--muted)] [font-size:11px] [font-weight:500]"}>
+                    {t("files.selectedCount", { count: selectedFileMentionKeys.size })}
+                  </span>
+                  <button
+                    type="button"
+                    className={"[display:inline-flex] [height:30px] [align-items:center] [border:1px_solid_var(--border)] [border-radius:8px] [padding:0_12px] [font-size:12px] [font-weight:600] [color:var(--text)] [background:transparent] [&:hover]:[background:#00000008] [&:focus-visible]:[outline:none]"}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={handleToggleFileMultiSelect}
+                  >
+                    {t("files.cancel")}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={selectedFileMentionKeys.size === 0}
+                    className={"[display:inline-flex] [height:30px] [align-items:center] [gap:5px] [border:0] [border-radius:8px] [padding:0_12px] [font-size:12px] [font-weight:700] [color:#ffffff] [background:#171717] [&:hover:not(:disabled)]:[background:#2a2a2a] [&:focus-visible]:[outline:none] disabled:[opacity:0.4] disabled:[cursor:not-allowed]"}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={handleConfirmFileMultiSelect}
+                  >
+                    {t("files.confirmInsert", { count: selectedFileMentionKeys.size })}
+                  </button>
+                </div>
+              ) : null}
             </div>,
             document.body,
           )
@@ -3699,25 +3778,4 @@ function buildParticipantMentionOptions(
     });
   }
   return results;
-}
-
-const FILE_REFERENCE_LINK_PATTERN = /\[([^\]]+)\]\(group-chat:\/\/reference\/(?:file|agent-generated-file)\/([^)]+)\)/g;
-
-function extractFileReferenceArtifactsFromPasteText(text: string, artifacts: Artifact[]): Artifact[] {
-  const artifactsById = new Map(artifacts.map((item) => [item.id, item]));
-  const result: Artifact[] = [];
-  const seen = new Set<string>();
-  for (const match of text.matchAll(FILE_REFERENCE_LINK_PATTERN)) {
-    const entityId = match[2]!;
-    const artifact = artifactsById.get(entityId);
-    if (artifact && !seen.has(artifact.id)) {
-      seen.add(artifact.id);
-      result.push(artifact);
-    }
-  }
-  return result;
-}
-
-function stripFileReferenceLinks(text: string): string {
-  return text.replace(FILE_REFERENCE_LINK_PATTERN, "").trim();
 }

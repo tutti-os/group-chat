@@ -369,12 +369,19 @@ async function queryLocalRoomFileReferences(
 
 function mapLocalFileReferences(response: AppReferenceListResponse): TuttiAtQueryResult[] {
   const items: TuttiAtQueryResult[] = [];
+  const seenLocations = new Set<string>();
   for (const item of response.items) {
     if (item.type !== "reference" || item.reference.kind !== "file") continue;
     const path = item.reference.location.path;
+    const locationKey = `${item.reference.location.type}\0${path}`;
+    if (seenLocations.has(locationKey)) continue;
+    seenLocations.add(locationKey);
     const label = item.reference.displayName?.trim() || path.split("/").pop() || path;
     const mimeType = item.reference.mimeType ?? "";
-    const previewUrl = item.reference.previewUrl ?? null;
+    const previewUrl = item.reference.previewUrl?.trim()
+      || (mimeType.startsWith("image/") && item.reference.artifactId
+        ? `/local-assets/${encodeURIComponent(item.reference.artifactId)}`
+        : null);
     const roomFile = item.reference.artifactId
       ? {
           artifactId: item.reference.artifactId,

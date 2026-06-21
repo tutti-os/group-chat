@@ -36,6 +36,7 @@ import {
 } from "@group-chat/shared";
 import { getDb, json, parseJson } from "../db/database.js";
 import { ensureRoomDirs, roomArtifactRoot } from "../local/paths.js";
+import { sha256ForBytes } from "./artifact-content-hash.js";
 
 export interface PendingReplyQueueItem {
   id: string;
@@ -961,6 +962,7 @@ export class ChatRepository {
     const filename = availableUploadFilename(uploadRoot, input.filename);
     const localPath = join(uploadRoot, filename);
     const bytes = Buffer.from(input.dataBase64, "base64");
+    const contentHash = sha256ForBytes(bytes);
     writeFileSync(localPath, bytes);
     const textPreview = buildTextPreview(localPath, input.mimeType);
     const publicUrl = `/local-assets/${id}`;
@@ -968,8 +970,8 @@ export class ChatRepository {
     getDb()
       .prepare(
         `INSERT INTO artifacts
-         (id, room_id, conversation_id, message_id, source_run_id, kind, filename, mime_type, size_bytes, local_path, public_url, text_preview, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, room_id, conversation_id, message_id, source_run_id, kind, filename, mime_type, size_bytes, content_hash, local_path, public_url, text_preview, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -981,6 +983,7 @@ export class ChatRepository {
         filename,
         input.mimeType,
         bytes.length,
+        contentHash,
         localPath,
         publicUrl,
         textPreview,
@@ -1009,8 +1012,8 @@ export class ChatRepository {
     getDb()
       .prepare(
         `INSERT INTO artifacts
-         (id, room_id, conversation_id, message_id, source_run_id, kind, filename, mime_type, size_bytes, local_path, public_url, text_preview, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, room_id, conversation_id, message_id, source_run_id, kind, filename, mime_type, size_bytes, content_hash, local_path, public_url, text_preview, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -1022,6 +1025,7 @@ export class ChatRepository {
         artifact.filename,
         artifact.mimeType,
         artifact.sizeBytes,
+        artifact.contentHash,
         artifact.localPath,
         `/local-assets/${id}`,
         artifact.textPreview,
@@ -1341,6 +1345,7 @@ function rowToArtifact(row: any): Artifact {
     filename: row.filename,
     mimeType: row.mime_type,
     sizeBytes: row.size_bytes,
+    contentHash: row.content_hash ?? null,
     localPath: row.local_path,
     publicUrl: row.public_url,
     textPreview: row.text_preview,
