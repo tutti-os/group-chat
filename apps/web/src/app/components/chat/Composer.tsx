@@ -836,6 +836,35 @@ export function Composer(props: {
     if (option.kind === "all") {
       insertAllMention();
     } else if (option.kind === "reference") {
+      const isFileRef = option.providerId === "file" || option.providerId === "agent-generated-file";
+      if (isFileRef) {
+        const artifactId = option.item.roomFile?.artifactId ?? option.item.itemId;
+        const artifact = props.allArtifacts.find((item) => item.id === artifactId);
+        if (artifact) {
+          if (editor) {
+            editor.focus({ preventScroll: true });
+            restoreComposerCaret(editor, mentionSelectionRef.current, composerCaretOffsetRef.current);
+            suppressEditorSyncRef.current = true;
+            try {
+              let queryRange = mentionQueryRangeRef.current;
+              if (queryRange && editor.contains(queryRange.startContainer) && !rangeCrossesMentionChip(queryRange)) {
+                queryRange.deleteContents();
+              }
+              placeCaretAtEditorEnd(editor, { preventScroll: true });
+              queueExistingArtifacts([artifact]);
+              normalizeEditorAfterMentionInsert(editor);
+            } finally {
+              suppressEditorSyncRef.current = false;
+            }
+            setText(editorText(editor));
+            syncMentionedIdsFromEditor(editor);
+            resizeComposerEditor(editor);
+          }
+          setMentionQuery(null);
+          mentionQueryRangeRef.current = null;
+          return;
+        }
+      }
       const mentionId = tuttiAtMentionKey(option.providerId, option.item.itemId);
       insertMentionChipAtActiveQuery(option.label, mentionId, option.item);
     } else if (option.kind === "local-agent") {
