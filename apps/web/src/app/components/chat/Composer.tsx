@@ -3630,6 +3630,18 @@ function serializeComposerMessageParts(
       if (artifact) parts.push({ type: "artifact", artifactId: artifact.id });
       return;
     }
+    if (node instanceof HTMLElement && typeof node.dataset.messageLinkId === "string") {
+      text += formatMessageLink(...parseMessageLinkIds(node.dataset.messageLinkId));
+      return;
+    }
+    if (node instanceof HTMLElement && typeof node.dataset.summaryLinkId === "string") {
+      text += formatSummaryLink(node.dataset.summaryLinkId);
+      return;
+    }
+    if (node instanceof HTMLElement && node.dataset.mentionChip === "true") {
+      text += serializeReferenceMentionChip(node);
+      return;
+    }
     if (node instanceof Text) {
       text += node.textContent ?? "";
       return;
