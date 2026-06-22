@@ -1065,7 +1065,7 @@ export function Composer(props: {
       filename: artifact.filename,
       mimeType: artifact.mimeType,
       sizeBytes: artifact.sizeBytes,
-      previewUrl: artifact.mimeType.startsWith("image/") ? artifact.publicUrl : null,
+      previewUrl: isPreviewableComposerMedia(artifact.mimeType, artifact.filename) ? artifact.publicUrl : null,
       status: "uploaded" as const,
       file: new File([], artifact.filename, { type: artifact.mimeType }),
       artifact,
@@ -1081,7 +1081,7 @@ export function Composer(props: {
       .map((item): UploadItem => {
         const previewUrl = item.artifact
           ? item.previewUrl
-          : item.mimeType.startsWith("image/")
+          : isPreviewableComposerMedia(item.mimeType, item.filename)
             ? URL.createObjectURL(item.file)
             : null;
         if (previewUrl && !item.artifact) previewUrlsRef.current.add(previewUrl);
@@ -1421,7 +1421,7 @@ export function Composer(props: {
     if (item.artifact && revealArtifactInTuttiFileManager(item.artifact)) {
       return;
     }
-    if (item.mimeType.startsWith("image/") && item.previewUrl) {
+    if (isPreviewableComposerMedia(item.mimeType, item.filename) && item.previewUrl) {
       setPreview({ title: item.filename, mimeType: item.mimeType, url: item.previewUrl });
       return;
     }
@@ -2640,7 +2640,7 @@ function needsLeadingSpaceBeforeMentionRange(range: Range): boolean {
     }
     let previous: Node | null = startContainer.previousSibling;
     while (previous) {
-      if (isMentionChip(previous)) return true;
+      if (isAtomicEditorChip(previous)) return true;
       if (previous.nodeType === Node.TEXT_NODE) {
         const value = previous.textContent ?? "";
         return value.length > 0 && !/\s$/.test(value);
@@ -2776,7 +2776,7 @@ function needsLeadingSpaceBeforeCaret(range: Range, editor: HTMLDivElement): boo
     }
     let previous: Node | null = startContainer.previousSibling;
     while (previous) {
-      if (isMentionChip(previous)) return true;
+      if (isAtomicEditorChip(previous)) return true;
       if (previous.nodeType === Node.TEXT_NODE) {
         const value = previous.textContent ?? "";
         return value.length > 0 && !/\s$/.test(value);
@@ -2786,7 +2786,7 @@ function needsLeadingSpaceBeforeCaret(range: Range, editor: HTMLDivElement): boo
   }
   if (startContainer === editor && startOffset > 0) {
     const previous = editor.childNodes.item(startOffset - 1);
-    if (previous && isMentionChip(previous)) return true;
+    if (previous && isAtomicEditorChip(previous)) return true;
     if (previous?.nodeType === Node.TEXT_NODE) {
       const value = previous.textContent ?? "";
       return value.length > 0 && !/\s$/.test(value);
@@ -3353,18 +3353,30 @@ function insertComposerPasteAtCaret(
   range.deleteContents();
   const fragment = document.createDocumentFragment();
   const inserted: Node[] = [];
+  let previousWasChip = false;
   for (const segment of segments) {
     if (segment.kind === "text") {
       if (!segment.text) continue;
       const textNode = document.createTextNode(segment.text);
       fragment.append(textNode);
       inserted.push(textNode);
+      previousWasChip = false;
       continue;
+    }
+    const isChipSegment = segment.kind === "message"
+      || segment.kind === "summary"
+      || segment.kind === "participant"
+      || segment.kind === "reference";
+    if (isChipSegment && previousWasChip) {
+      const spacer = document.createTextNode(" ");
+      fragment.append(spacer);
+      inserted.push(spacer);
     }
     if (segment.kind === "message") {
       const linkChip = createMessageLinkChip(segment.id, labels.getMessageLabel(segment.id));
       fragment.append(linkChip);
       inserted.push(linkChip);
+      previousWasChip = true;
       continue;
     }
     if (segment.kind === "summary") {
@@ -3372,12 +3384,14 @@ function insertComposerPasteAtCaret(
       const linkChip = createSummaryLinkChipElement(segment.id, task);
       fragment.append(linkChip);
       inserted.push(linkChip);
+      previousWasChip = true;
       continue;
     }
     if (segment.kind === "participant") {
       const chip = createMentionChip(segment.label, segment.participantId);
       fragment.append(chip);
       inserted.push(chip);
+      previousWasChip = true;
       continue;
     }
     const referenceTarget = buildReferencePasteTarget(segment.href, segment.label);
@@ -3389,11 +3403,13 @@ function insertComposerPasteAtCaret(
       );
       fragment.append(chip);
       inserted.push(chip);
+      previousWasChip = true;
       continue;
     }
     const fallbackText = document.createTextNode(segment.label);
     fragment.append(fallbackText);
     inserted.push(fallbackText);
+    previousWasChip = false;
   }
   if (!inserted.length) return;
   const trailingText = document.createTextNode("");
@@ -3412,10 +3428,17 @@ function insertSummaryLinkAtCaret(taskId: string, task: BackgroundTask | null) {
   const range = selection.getRangeAt(0);
   range.deleteContents();
   const chip = createSummaryLinkChipElement(taskId, task);
-  range.insertNode(chip);
-  const trailingText = document.createTextNode("");
-  chip.after(trailingText);
-  range.setStartAfter(trailingText);
+  const fragment = document.createDocumentFragment();
+  const editor = range.startContainer.parentElement;
+  const editorContainer = editor?.closest("[contenteditable='true']") as HTMLDivElement | null;
+  if (editorContainer && needsLeadingSpaceBeforeCaret(range, editorContainer)) {
+    fragment.append(document.createTextNode(" "));
+  }
+  fragment.append(chip);
+  const trailingSpace = document.createTextNode(" ");
+  fragment.append(trailingSpace);
+  range.insertNode(fragment);
+  range.setStart(trailingSpace, 0);
   range.collapse(true);
   selection.removeAllRanges();
   selection.addRange(range);
@@ -3463,7 +3486,9 @@ function insertUploadItemsAtCaret(editor: HTMLDivElement | null, items: UploadIt
   }
   const fragment = document.createDocumentFragment();
   let lastCaretAnchor: HTMLElement | null = null;
-  for (const item of items) {
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]!;
+    if (i > 0) fragment.append(document.createTextNode(" "));
     const chip = createUploadItemChip(item);
     const caretAnchor = createUploadCaretAnchor();
     fragment.append(chip, caretAnchor);
@@ -3498,6 +3523,9 @@ function normalizeUploadCaretRange(range: Range) {
 }
 
 function createUploadItemChip(item: UploadItem) {
+  const isImage = item.mimeType.startsWith("image/");
+  const isVideo = getArtifactCategory({ mimeType: item.mimeType, filename: item.filename } as Artifact) === "video";
+  const isMedia = (isImage || isVideo) && Boolean(item.previewUrl);
   const chip = document.createElement("span");
   chip.contentEditable = "false";
   chip.dataset.uploadItemId = item.id;
@@ -3506,17 +3534,34 @@ function createUploadItemChip(item: UploadItem) {
   chip.setAttribute("tabindex", "0");
   chip.setAttribute("aria-label", t("composer.previewFile", { filename: item.filename }));
   chip.title = item.filename;
-  chip.className = item.mimeType.startsWith("image/") && item.previewUrl
-    ? "group [position:relative] [display:inline-grid] [width:58px] [height:44px] [margin:2px_3px] [overflow:hidden] [vertical-align:bottom] [border:1px_solid_var(--border)] [border-radius:10px] [background:#00000008] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] [outline:none] [&[data-selected]]:[border-color:var(--primary)] [&[data-selected]]:[box-shadow:0_0_0_3px_#2563eb33] [&[data-error]]:[border-color:var(--danger)]"
+  chip.className = isMedia
+    ? `group [position:relative] [display:inline-grid] ${isVideo ? "[width:96px] [height:56px]" : "[width:58px] [height:44px]"} [margin:2px_3px] [overflow:hidden] [vertical-align:bottom] [border:1px_solid_var(--border)] [border-radius:10px] [background:#101114] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] [outline:none] [&[data-selected]]:[border-color:var(--primary)] [&[data-selected]]:[box-shadow:0_0_0_3px_#2563eb33] [&[data-error]]:[border-color:var(--danger)]`
     : "group [position:relative] [display:inline-flex] [max-width:220px] [height:32px] [margin:2px_3px] [align-items:center] [gap:7px] [vertical-align:bottom] [border:1px_solid_var(--border)] [border-radius:10px] [padding:4px_24px_4px_8px] [background:var(--panel)] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] [outline:none] [&[data-selected]]:[border-color:var(--primary)] [&[data-selected]]:[box-shadow:0_0_0_3px_#2563eb33] [&[data-error]]:[border-color:var(--danger)]";
 
-  if (item.mimeType.startsWith("image/") && item.previewUrl) {
+  if (isImage && item.previewUrl) {
     const image = document.createElement("img");
     image.src = item.previewUrl;
     image.alt = "";
     image.draggable = false;
     image.className = "[width:100%] [height:100%] [object-fit:cover]";
     chip.append(image);
+  } else if (isVideo && item.previewUrl) {
+    const video = document.createElement("video");
+    video.src = item.previewUrl;
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    video.tabIndex = -1;
+    video.setAttribute("aria-hidden", "true");
+    video.className = "[width:100%] [height:100%] [object-fit:cover]";
+    chip.append(video);
+
+    const videoBadge = document.createElement("span");
+    videoBadge.dataset.uploadVideoBadge = "true";
+    videoBadge.setAttribute("aria-hidden", "true");
+    videoBadge.textContent = "▶";
+    videoBadge.className = "[position:absolute] [left:6px] [bottom:5px] [display:grid] [width:20px] [height:20px] [place-items:center] [border-radius:999px] [padding-left:1px] [color:#fff] [background:rgb(0_0_0_/_58%)] [font-size:9px] [line-height:1] [pointer-events:none]";
+    chip.append(videoBadge);
   } else {
     const label = document.createElement("span");
     label.className = "[min-width:0] [overflow:hidden] [font-size:12px] [font-weight:650] [line-height:16px] [text-overflow:ellipsis] [white-space:nowrap]";
@@ -3525,6 +3570,18 @@ function createUploadItemChip(item: UploadItem) {
     size.className = "[flex:0_0_auto] [color:var(--muted)] [font-size:11px] [line-height:14px]";
     size.textContent = formatBytes(item.sizeBytes);
     chip.append(label, size);
+  }
+
+  if (isMedia) {
+    const progress = document.createElement("span");
+    progress.dataset.uploadProgress = "true";
+    progress.hidden = item.status !== "uploading";
+    progress.setAttribute("aria-hidden", "true");
+    progress.className = "[position:absolute] [inset:0] [display:grid] [place-items:center] [background:rgb(0_0_0_/_38%)] [pointer-events:none] [&[hidden]]:[display:none]";
+    const spinner = document.createElement("span");
+    spinner.className = "[width:20px] [height:20px] [border:2px_solid_rgb(255_255_255_/_42%)] [border-top-color:#fff] [border-radius:999px] animate-spin";
+    progress.append(spinner);
+    chip.append(progress);
   }
 
   const remove = document.createElement("span");
@@ -3583,6 +3640,10 @@ function syncUploadItemChips(editor: HTMLDivElement | null, items: UploadItem[])
     } else {
       chip.dataset.uploadStatus = item.status;
       chip.toggleAttribute("data-error", item.status === "error");
+      if (item.status === "uploading") chip.setAttribute("aria-busy", "true");
+      else chip.removeAttribute("aria-busy");
+      const progress = chip.querySelector<HTMLElement>("[data-upload-progress]");
+      if (progress) progress.hidden = item.status !== "uploading";
       itemsById.delete(itemId);
       ensureUploadCaretAnchorAfter(chip);
     }
@@ -3728,6 +3789,11 @@ interface UploadItem {
   file: File;
   artifact?: Artifact;
   error?: string;
+}
+
+function isPreviewableComposerMedia(mimeType: string, filename: string) {
+  return mimeType.startsWith("image/")
+    || getArtifactCategory({ mimeType, filename } as Artifact) === "video";
 }
 
 interface ComposerQuote {

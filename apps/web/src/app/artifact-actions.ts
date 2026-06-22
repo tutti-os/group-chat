@@ -29,11 +29,24 @@ export function filterGroupChatFiles(
   agentRuns: AgentRun[],
   conversationId?: string,
 ) {
-  return artifacts.filter(
+  const visible = artifacts.filter(
     (artifact) =>
       (!conversationId || artifact.conversationId === conversationId)
       && isVisibleGroupChatFile(artifact, messages, blocks, agentRuns),
   );
+  const latestByContent = new Map<string, Artifact>();
+  for (const artifact of visible) {
+    const key = artifact.contentHash?.trim()
+      ? `sha256:${artifact.contentHash.trim()}`
+      : artifact.localPath
+        ? `path:${artifact.localPath}`
+        : `id:${artifact.id}`;
+    const current = latestByContent.get(key);
+    if (!current || artifact.createdAt.localeCompare(current.createdAt) >= 0) {
+      latestByContent.set(key, artifact);
+    }
+  }
+  return [...latestByContent.values()];
 }
 
 export function resolveArtifactPublicUrl(publicUrl: string) {

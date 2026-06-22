@@ -74,6 +74,60 @@ test("file references remain structured when forwarding to Tutti Agent", async (
   assert.equal(formatMessageBodyForAgentForward(content), content);
 });
 
+test("group files collapse repeated artifact aliases by content hash", async () => {
+  const { filterGroupChatFiles } = await bundleModule(
+    "src/app/artifact-actions.ts",
+    "artifact-actions-dedupe",
+  );
+  const messages = [
+    message({ id: "message-1" }),
+    message({ id: "message-2", createdAt: "2026-01-01T00:01:00.000Z" }),
+  ];
+  const blocks = [
+    { ...block("video-1", "file", "", 0), messageId: "message-1", metadata: { artifactId: "video-1" } },
+    { ...block("video-2", "file", "", 0), messageId: "message-2", metadata: { artifactId: "video-2" } },
+  ];
+  const artifacts = [
+    {
+      id: "video-1",
+      roomId: "room-1",
+      conversationId: "conversation-1",
+      messageId: "message-1",
+      sourceRunId: null,
+      kind: "upload",
+      filename: "video.mp4",
+      mimeType: "video/mp4",
+      sizeBytes: 10,
+      contentHash: "same-video-hash",
+      localPath: "/tmp/video.mp4",
+      publicUrl: "/local-assets/video-1",
+      textPreview: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    },
+    {
+      id: "video-2",
+      roomId: "room-1",
+      conversationId: "conversation-1",
+      messageId: "message-2",
+      sourceRunId: null,
+      kind: "upload",
+      filename: "video-copy.mp4",
+      mimeType: "video/mp4",
+      sizeBytes: 10,
+      contentHash: "same-video-hash",
+      localPath: "/tmp/video-copy.mp4",
+      publicUrl: "/local-assets/video-2",
+      textPreview: null,
+      createdAt: "2026-01-01T00:01:00.000Z",
+    },
+  ];
+
+  assert.deepEqual(
+    filterGroupChatFiles(artifacts, messages, blocks, [], "conversation-1").map((artifact) => artifact.id),
+    ["video-2"],
+  );
+});
+
 test("message times use compact 24-hour formatting", async () => {
   const { formatMessageTime } = await bundleModule(
     "src/app/formatting.ts",

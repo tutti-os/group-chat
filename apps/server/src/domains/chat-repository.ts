@@ -999,14 +999,29 @@ export class ChatRepository {
     if (!message) return null;
     const conversation = this.getConversation(message.conversationId);
     if (!conversation) return null;
-    if (
-      (!artifact.messageId || artifact.messageId === messageId)
-      && artifact.conversationId === conversation.id
-      && artifact.roomId === conversation.roomId
-    ) {
-      getDb().prepare(`UPDATE artifacts SET message_id = ? WHERE id = ?`).run(messageId, artifactId);
+    if (artifact.conversationId === conversation.id && artifact.roomId === conversation.roomId) {
+      if (!artifact.messageId) {
+        getDb().prepare(`UPDATE artifacts SET message_id = ? WHERE id = ?`).run(messageId, artifactId);
+      }
       return this.getArtifact(artifactId);
     }
+    const existingAlias = getDb()
+      .prepare(
+        `SELECT * FROM artifacts
+         WHERE conversation_id = ?
+           AND room_id = ?
+           AND (local_path = ? OR (? IS NOT NULL AND content_hash = ?))
+         ORDER BY created_at ASC
+         LIMIT 1`,
+      )
+      .get(
+        conversation.id,
+        conversation.roomId,
+        artifact.localPath,
+        artifact.contentHash,
+        artifact.contentHash,
+      ) as any;
+    if (existingAlias) return rowToArtifact(existingAlias);
     const id = nanoid();
     const now = new Date().toISOString();
     getDb()

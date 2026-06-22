@@ -5,7 +5,7 @@ import remarkGfm from "remark-gfm";
 import { Braces, BrainCircuit, CheckSquare, ChevronDown, ChevronRight, ChevronsDown, Copy, Edit3, Ear, FileText, MoreHorizontal, Reply, RotateCcw, SendHorizontal, Terminal, Trash2, Wrench, X } from "lucide-react";
 import type { Artifact, AgentRun, AgentRunEvent, Conversation, Identity, Message, MessageBlock, Participant, Room, RuntimeProfile } from "@group-chat/shared";
 import { isLocalUserMessage, resolveMessageVisibility, enrichAssistantContentWithWorkspaceResourceLinks, resolveTriggerUserMentions } from "@group-chat/shared";
-import { revealArtifactInTuttiFileManager } from "../../artifact-actions.js";
+import { getArtifactCategory, revealArtifactInTuttiFileManager } from "../../artifact-actions.js";
 import { enrichMessageContentForCopy } from "../../composer-paste-content.js";
 import { formatBytes, formatMessageStatus, formatMessageTime } from "../../formatting.js";
 import { TuttiMessageLinkIcon } from "../../tutti-reference-icons.js";
@@ -624,6 +624,34 @@ export function MessageTimeline(props: {
     document.addEventListener("copy", handleCopy);
     return () => document.removeEventListener("copy", handleCopy);
   });
+
+  useEffect(() => {
+    const syncArtifactSelectionHighlight = () => {
+      const container = scrollRef.current;
+      if (!container) return;
+      const selection = window.getSelection();
+      const range = selection?.rangeCount && !selection.isCollapsed ? selection.getRangeAt(0) : null;
+      const isTimelineSelection = Boolean(
+        range
+        && container.contains(range.commonAncestorContainer)
+        && selectionIntersectsTimelineCopyContent(range, container),
+      );
+      for (const artifactBlock of container.querySelectorAll<HTMLElement>(
+        '[data-slot="artifact-block"][data-artifact-id]',
+      )) {
+        artifactBlock.toggleAttribute(
+          "data-copy-selected",
+          Boolean(range && isTimelineSelection && selectionIntersectsNode(range, artifactBlock)),
+        );
+      }
+    };
+    document.addEventListener("selectionchange", syncArtifactSelectionHighlight);
+    return () => {
+      document.removeEventListener("selectionchange", syncArtifactSelectionHighlight);
+      scrollRef.current?.querySelectorAll<HTMLElement>("[data-copy-selected]")
+        .forEach((element) => element.removeAttribute("data-copy-selected"));
+    };
+  }, []);
 
   const copyMessageLink = async (messageIds: string | string[], position: CopyTipPosition) => {
     const ids = Array.isArray(messageIds) ? messageIds : [messageIds];
@@ -3516,13 +3544,14 @@ function formatToolBlockStatus(block: MessageBlock) {
 
 export function ArtifactBlock(props: { artifact: Artifact; onOpen: () => void }) {
   const isImage = props.artifact.mimeType.startsWith("image/");
+  const isVideo = getArtifactCategory(props.artifact) === "video";
   if (isImage) {
     return (
       <button
         type="button"
         data-slot="artifact-block"
         data-artifact-id={props.artifact.id}
-        className={"[display:block] [width:min(180px,_100%)] [height:120px] [margin-top:6px] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:10px] [padding:0] [background:var(--panel)] [cursor:pointer] [transition:box-shadow_0.2s_ease] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15]"}
+        className={"[position:relative] [display:block] [width:min(180px,_100%)] [height:120px] [margin-top:6px] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:10px] [padding:0] [background:var(--panel)] [cursor:pointer] [transition:box-shadow_0.2s_ease] after:[content:''] after:[position:absolute] after:[inset:0] after:[background:transparent] after:[pointer-events:none] [&[data-copy-selected]]:[box-shadow:0_0_0_2px_#2563eb] [&[data-copy-selected]]:after:[background:rgb(37_99_235_/_22%)] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15]"}
         onClick={props.onOpen}
         aria-label={props.artifact.filename}
         title={t("messageActions.revealInFileManager")}
@@ -3537,12 +3566,32 @@ export function ArtifactBlock(props: { artifact: Artifact; onOpen: () => void })
     );
   }
 
+  if (isVideo) {
+    return (
+      <div
+        data-slot="artifact-block"
+        data-artifact-id={props.artifact.id}
+        className={"[position:relative] [display:block] [width:min(320px,_100%)] [margin-top:6px] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:12px] [background:#101114] [box-shadow:0_1px_3px_rgb(0_0_0_/_8%)] [transition:box-shadow_0.12s_ease] after:[content:''] after:[position:absolute] after:[inset:0] after:[background:transparent] after:[pointer-events:none] [&[data-copy-selected]]:[box-shadow:0_0_0_2px_#2563eb] [&[data-copy-selected]]:after:[background:rgb(37_99_235_/_22%)] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15]"}
+      >
+        <video
+          className={"[display:block] [width:100%] [max-height:240px] [aspect-ratio:16/9] [object-fit:contain] [background:#101114]"}
+          src={props.artifact.publicUrl}
+          controls
+          playsInline
+          preload="metadata"
+          aria-label={props.artifact.filename}
+          data-artifact-id={props.artifact.id}
+        />
+      </div>
+    );
+  }
+
   return (
     <button
       type="button"
       data-slot="artifact-block"
       data-artifact-id={props.artifact.id}
-      className={"[display:grid] [width:min(300px,_100%)] [min-height:40px] [grid-template-columns:28px_minmax(0,_1fr)] [align-items:center] [gap:9px] [margin-top:6px] [border:1px_solid_var(--border)] [border-radius:10px] [padding:6px_10px] [color:var(--text)] [background:#ffffff] [cursor:pointer] [box-shadow:0_1px_2px_rgb(0_0_0_/_3%)] [transition:border-color_0.12s_ease,_background-color_0.12s_ease,_box-shadow_0.12s_ease] hover:[border-color:#d4d4d8] hover:[background:#fbfbfc] hover:[box-shadow:0_3px_10px_rgb(0_0_0_/_5%)] focus-visible:[outline:none] focus-visible:[border-color:var(--border-strong)] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-flash=true]]:[border-color:#facc15]"}
+      className={"[display:grid] [width:min(300px,_100%)] [min-height:40px] [grid-template-columns:28px_minmax(0,_1fr)] [align-items:center] [gap:9px] [margin-top:6px] [border:1px_solid_var(--border)] [border-radius:10px] [padding:6px_10px] [color:var(--text)] [background:#ffffff] [cursor:pointer] [box-shadow:0_1px_2px_rgb(0_0_0_/_3%)] [transition:border-color_0.12s_ease,_background-color_0.12s_ease,_box-shadow_0.12s_ease] hover:[border-color:#d4d4d8] hover:[background:#fbfbfc] hover:[box-shadow:0_3px_10px_rgb(0_0_0_/_5%)] focus-visible:[outline:none] focus-visible:[border-color:var(--border-strong)] [&[data-copy-selected]]:[border-color:#2563eb] [&[data-copy-selected]]:[background:#dbeafe] [&[data-copy-selected]]:[box-shadow:0_0_0_2px_rgb(37_99_235_/_22%)] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-flash=true]]:[border-color:#facc15]"}
       onClick={props.onOpen}
       title={t("messageActions.revealInFileManager")}
     >

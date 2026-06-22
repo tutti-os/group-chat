@@ -72,6 +72,16 @@ test("Tutti CLI handlers expose public conversation data only", async (t) => {
   assert.equal(detail.body.value.warnings[0].omittedWhisperMessageCount, 1);
   assert.equal(detail.body.value.warnings[0].omittedWhisperArtifactCount, 1);
 
+  const repeatedOriginalArtifactMessage = await postJson(server.baseUrl, `/api/conversations/${conversationId}/messages`, {
+    artifactIds: [publicArtifact.body.artifact.id],
+    content: "same artifact link sent again",
+    mentions: [],
+    visibility: "public",
+  });
+  assert.equal(repeatedOriginalArtifactMessage.status, 200);
+  assert.equal(repeatedOriginalArtifactMessage.body.artifacts[0].id, publicArtifact.body.artifact.id);
+  assert.equal(repeatedOriginalArtifactMessage.body.artifacts[0].localPath, publicArtifact.body.artifact.localPath);
+
   const artifacts = await postJson(server.baseUrl, "/tutti/cli/artifacts/list", {
     input: { "conversation-id": conversationId },
     outputMode: "json",
@@ -168,6 +178,7 @@ test("Tutti CLI handlers expose public conversation data only", async (t) => {
     },
   );
   assert.equal(repeatedCrossRoomCopy.status, 200);
+  assert.equal(repeatedCrossRoomCopy.body.artifacts[0].id, copiedArtifact.id);
   assert.equal(repeatedCrossRoomCopy.body.artifacts[0].localPath, publicArtifact.body.artifact.localPath);
 
   const independentlyUploadedCrossRoomArtifact = await postJson(

@@ -444,6 +444,78 @@ test("keeps an image pasted at the end visually after existing text", async ({ p
   await previewDialog.getByRole("button", { name: /关闭预览|Close preview/ }).click();
 });
 
+test("copies and resends a selected video through the same artifact link", async ({ context, page, request }) => {
+  const roomBundle = await (await request.post("/api/rooms", { data: { title: "Pasted Video Room" } })).json();
+  await page.goto("/");
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(page.url()).origin });
+  await page.getByRole("button", { name: /Pasted Video Room/ }).click();
+
+  const composer = page.getByRole("textbox", { name: /消息输入框|Message input/ });
+  await composer.evaluate((editor) => {
+    const clipboardData = new DataTransfer();
+    clipboardData.items.add(new File([new Uint8Array([26, 69, 223, 163])], "pasted-video.webm", { type: "video/webm" }));
+    editor.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData }));
+  });
+
+  const videoChip = composer.locator('[data-upload-mime-type="video/webm"]');
+  await expect(videoChip).toBeVisible();
+  await expect(videoChip.locator("video")).toHaveAttribute("src", /^blob:/);
+  await expect(videoChip.locator("[data-upload-progress]")).toBeHidden();
+
+  await page.route("**/api/conversations/*/artifacts", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    await route.continue();
+  });
+  await page.getByLabel(/Send message|发送消息/).click();
+  await expect(videoChip).toHaveAttribute("aria-busy", "true");
+  await expect(videoChip.locator("[data-upload-progress]")).toBeVisible();
+
+  const firstTimelineVideo = page.locator('article [data-slot="artifact-block"] video[aria-label="pasted-video.webm"]');
+  await expect(firstTimelineVideo).toBeVisible();
+  await expect(firstTimelineVideo).toHaveAttribute("controls", "");
+  const artifactBlock = firstTimelineVideo.locator('xpath=ancestor::*[@data-slot="artifact-block"]');
+  const artifactId = await artifactBlock.getAttribute("data-artifact-id");
+  expect(artifactId).toBeTruthy();
+
+  const copyContent = firstTimelineVideo.locator('xpath=ancestor::*[@data-slot="message-copy-content"]');
+  await copyContent.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    document.dispatchEvent(new Event("selectionchange"));
+  });
+  await expect(artifactBlock).toHaveAttribute("data-copy-selected", "");
+  await page.keyboard.press("Meta+C");
+
+  await composer.click();
+  await page.keyboard.press("Meta+V");
+  const copiedVideoChip = composer.locator('[data-upload-mime-type="video/webm"]');
+  await expect(copiedVideoChip).toBeVisible();
+  await expect(copiedVideoChip.locator("video")).toHaveAttribute("src", /\/local-assets\//);
+
+  const resendRequestPromise = page.waitForRequest((incoming) =>
+    incoming.method() === "POST"
+    && incoming.url().endsWith(`/api/conversations/${roomBundle.conversation.id}/messages`),
+  );
+  await page.getByLabel(/Send message|发送消息/).click();
+  const resendRequest = await resendRequestPromise;
+  const resendBody = JSON.parse(resendRequest.postData() ?? "{}") as {
+    artifactIds?: string[];
+    parts?: Array<{ type: string; artifactId?: string }>;
+  };
+  expect([
+    ...(resendBody.artifactIds ?? []),
+    ...(resendBody.parts ?? []).map((part) => part.artifactId).filter(Boolean),
+  ]).toContain(artifactId);
+
+  await expect(page.locator(`article [data-slot="artifact-block"][data-artifact-id="${artifactId}"] video`)).toHaveCount(2);
+  await page.getByLabel(/View group files|查看群内文件/).click();
+  const filesPanel = page.locator("aside").filter({ has: page.getByRole("heading", { name: /群内文件|Group files/ }) });
+  await expect(filesPanel.getByText("pasted-video.webm", { exact: true })).toHaveCount(1);
+});
+
 test("preserves message cards and attachments through copy, paste, send, and navigation", async ({ context, page, request }) => {
   const sourceBundle = await (await request.post("/api/rooms", { data: { title: "Element Source Room" } })).json();
   const targetBundle = await (await request.post("/api/rooms", { data: { title: "Element Target Room" } })).json();

@@ -232,17 +232,18 @@ export function isGroupChatFile(
   messages: Array<Pick<Message, "id" | "status" | "visibility">>,
   blocks: Array<Pick<MessageBlock, "messageId" | "type" | "metadata">>,
 ): boolean {
-  if (!artifact.messageId) return false;
-  const message = messages.find((item) => item.id === artifact.messageId);
-  if (!message) return false;
-  if (message.status === "deleted" || message.status === "recalled") return false;
-  if (message.visibility === "whisper") return false;
-  return blocks.some(
-    (block) =>
-      block.messageId === artifact.messageId
-      && (block.type === "image" || block.type === "file")
-      && block.metadata?.artifactId === artifact.id,
-  );
+  return blocks.some((block) => {
+    if ((block.type !== "image" && block.type !== "file") || block.metadata?.artifactId !== artifact.id) {
+      return false;
+    }
+    const message = messages.find((item) => item.id === block.messageId);
+    return Boolean(
+      message
+      && message.status !== "deleted"
+      && message.status !== "recalled"
+      && message.visibility !== "whisper",
+    );
+  });
 }
 
 export function isAgentGroupChatFile(
