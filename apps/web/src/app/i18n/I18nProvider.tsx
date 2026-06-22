@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
   normalizeLocale,
   readAppContextLocaleAsync,
@@ -11,15 +11,22 @@ import { ensureLocaleMessages } from "./messages.js";
 import { getI18nSnapshot, setCurrentLocale, subscribeI18n, translate } from "./translate.js";
 
 export function I18nProvider(props: { children: ReactNode }) {
+  const [ready, setReady] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
 
     async function applyLocale(value: unknown) {
       const locale = normalizeLocale(value) ?? resolveFallbackLocale();
-      await ensureLocaleMessages(locale);
+      try {
+        await ensureLocaleMessages(locale);
+      } catch {
+        await ensureLocaleMessages("en");
+      }
       if (cancelled) return;
       setCurrentLocale(locale);
       document.documentElement.lang = locale;
+      setReady(true);
     }
 
     void (async () => {
@@ -39,6 +46,15 @@ export function I18nProvider(props: { children: ReactNode }) {
       unsubscribe();
     };
   }, []);
+
+  if (!ready) {
+    const fallbackLocale = resolveFallbackLocale();
+    return (
+      <div className={"[display:grid] [min-height:100vh] [place-items:center] [background:var(--app-bg)] [color:var(--muted)] [font-size:14px] [font-weight:650]"}>
+        {fallbackLocale === "zh-CN" ? "正在加载 group-chat..." : "Loading group-chat..."}
+      </div>
+    );
+  }
 
   return props.children;
 }

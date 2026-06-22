@@ -1333,14 +1333,14 @@ export function App() {
     previousConversationIdRef.current = currentConversationId;
   }, [currentConversationId, markConversationRead, state.messages, state.ready]);
 
-  if (!state.ready) {
-    return <div className={"[display:grid] [height:100vh] [place-items:center] [color:var(--muted)] [font-size:13px]"}>{t("app.loading")}</div>;
-  }
-
   const shellStyle = {
     "--conversation-sidebar-width": `${conversationSidebarWidth}px`,
     "--chat-pane-min-width": `${MIN_CHAT_PANE_WIDTH}px`,
   } as CSSProperties;
+
+  if (!state.ready) {
+    return <AppLoadingSkeleton shellStyle={shellStyle} />;
+  }
 
   return (
     <div
@@ -1737,6 +1737,98 @@ function ReconnectingBanner() {
       <Loader2 size={13} className={"animate-spin"} aria-hidden />
       <span>{t("app.reconnecting")}</span>
     </div>
+  );
+}
+
+function AppLoadingSkeleton(props: { shellStyle: CSSProperties }) {
+  const sidebarRows = [0, 1, 2, 3, 4, 5];
+  const messageRows = [
+    { align: "start", width: "min(520px, 72%)" },
+    { align: "end", width: "min(460px, 64%)" },
+    { align: "start", width: "min(600px, 78%)" },
+    { align: "start", width: "min(380px, 58%)" },
+  ] as const;
+
+  return (
+    <div
+      style={props.shellStyle}
+      className={"[display:grid] [grid-template-columns:60px_var(--conversation-sidebar-width)_3px_minmax(var(--chat-pane-min-width),_1fr)] [height:100vh] [overflow:hidden] [background:var(--bg)] max-[1080px]:[grid-template-columns:56px_var(--conversation-sidebar-width)_3px_minmax(var(--chat-pane-min-width),_1fr)] max-[760px]:[grid-template-columns:1fr]"}
+      aria-busy="true"
+      aria-label={t("app.loading")}
+    >
+      <div className={"[display:flex] [height:100vh] [flex-direction:column] [align-items:center] [gap:14px] [border-right:1px_solid_var(--border)] [background:var(--panel)] [padding:12px_8px] max-[760px]:[display:none]"}>
+        <SkeletonBlock className={"[width:34px] [height:34px] [border-radius:12px]"} />
+        <SkeletonBlock className={"[width:32px] [height:32px] [border-radius:10px]"} />
+        <SkeletonBlock className={"[width:32px] [height:32px] [border-radius:10px]"} />
+        <div className={"[flex:1]"} />
+        <SkeletonBlock className={"[width:34px] [height:34px] [border-radius:999px]"} />
+      </div>
+
+      <aside className={"[display:flex] [height:100vh] [min-width:0] [flex-direction:column] [background:var(--panel)] max-[760px]:[display:none]"}>
+        <div className={"[display:flex] [height:52px] [align-items:center] [justify-content:space-between] [gap:12px] [padding:12px_14px_10px_16px]"}>
+          <SkeletonBlock className={"[width:92px] [height:18px] [border-radius:6px]"} />
+          <SkeletonBlock className={"[width:34px] [height:34px] [border-radius:12px]"} />
+        </div>
+        <div className={"[padding:0_8px_10px]"}>
+          <SkeletonBlock className={"[width:100%] [height:36px] [border-radius:14px]"} />
+        </div>
+        <div className={"[display:grid] [gap:6px] [padding:2px_8px_12px]"}>
+          {sidebarRows.map((row) => (
+            <div key={row} className={"[display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:8px] [min-height:56px] [padding:4px_8px]"}>
+              <SkeletonBlock className={"[width:32px] [height:32px] [border-radius:11px]"} />
+              <div className={"[display:grid] [gap:7px]"}>
+                <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:12px]"}>
+                  <SkeletonBlock className={"[width:42%] [height:13px] [border-radius:5px]"} />
+                  <SkeletonBlock className={"[width:34px] [height:10px] [border-radius:5px]"} />
+                </div>
+                <SkeletonBlock className={"[width:76%] [height:12px] [border-radius:5px]"} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </aside>
+
+      <div className={"[width:3px] [height:100vh] [background:var(--border)] max-[760px]:[display:none]"} />
+
+      <main className={"[display:grid] [min-width:0] [min-height:0] [grid-template-rows:56px_minmax(0,_1fr)_auto] [background:var(--panel)]"}>
+        <header className={"[display:flex] [height:56px] [align-items:center] [justify-content:space-between] [gap:12px] [border-bottom:1px_solid_var(--border)] [padding:0_16px]"}>
+          <div className={"[display:flex] [min-width:0] [align-items:center] [gap:10px]"}>
+            <SkeletonBlock className={"[width:34px] [height:34px] [border-radius:12px]"} />
+            <div className={"[display:grid] [gap:7px]"}>
+              <SkeletonBlock className={"[width:140px] [height:15px] [border-radius:5px]"} />
+              <SkeletonBlock className={"[width:92px] [height:11px] [border-radius:5px]"} />
+            </div>
+          </div>
+          <div className={"[display:flex] [gap:8px]"}>
+            <SkeletonBlock className={"[width:32px] [height:32px] [border-radius:10px]"} />
+            <SkeletonBlock className={"[width:32px] [height:32px] [border-radius:10px]"} />
+          </div>
+        </header>
+
+        <div className={"[display:flex] [min-height:0] [flex-direction:column] [gap:18px] [overflow:hidden] [padding:24px_22px]"}>
+          {messageRows.map((row, index) => (
+            <div key={index} className={`[display:grid] [gap:8px] ${row.align === "end" ? "[justify-items:end]" : "[justify-items:start]"}`}>
+              <SkeletonBlock className={"[width:104px] [height:12px] [border-radius:5px]"} />
+              <SkeletonBlock className={"[height:64px] [border-radius:14px]"} style={{ width: row.width }} />
+            </div>
+          ))}
+        </div>
+
+        <div className={"[border-top:1px_solid_var(--border)] [padding:12px_16px_16px]"}>
+          <SkeletonBlock className={"[width:100%] [height:72px] [border-radius:16px]"} />
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function SkeletonBlock(props: { className: string; style?: CSSProperties }) {
+  return (
+    <span
+      className={`app-skeleton [display:block] [overflow:hidden] [background:#0000000a] ${props.className}`}
+      style={props.style}
+      aria-hidden
+    />
   );
 }
 

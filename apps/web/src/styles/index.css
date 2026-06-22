@@ -98,6 +98,22 @@
   }
 }
 
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+
+  to {
+    background-position: -100% 0;
+  }
+}
+
+.app-skeleton {
+  background-image: linear-gradient(90deg, #00000008 0%, #00000012 42%, #00000008 84%);
+  background-size: 220% 100%;
+  animation: skeleton-shimmer 1.15s ease-in-out infinite;
+}
+
 .message-prose {
   max-width: 100%;
   overflow-wrap: anywhere;
