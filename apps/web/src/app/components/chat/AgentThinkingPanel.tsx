@@ -8,7 +8,12 @@ import { formatRunEventStatus, formatRunEventTypeLabel, useTranslation } from ".
 
 type DisplayProcessSection =
   | ProcessSection
-  | { kind: "tool_summary"; id: string; count: number; status: AgentRunEvent["status"]; events: AgentRunEvent[] };
+  | { kind: "tool_summary"; id: string; count: number; status: AgentRunEvent["status"]; events: ToolSummaryDisplayEvent[] };
+
+interface ToolSummaryDisplayEvent {
+  event: AgentRunEvent;
+  displayStatus: AgentRunEvent["status"];
+}
 
 export function AgentThinkingPanel(props: {
   open: boolean;
@@ -151,7 +156,10 @@ function compactToolExecutionSections(sections: ProcessSection[]): DisplayProces
       id: pendingId || `tool-summary-${compacted.length}`,
       count: pendingTools.size,
       status,
-      events: [...pendingEvents],
+      events: pendingEvents.map((event) => ({
+        event,
+        displayStatus: resolveToolSummaryDisplayStatus(event, pendingTools),
+      })),
     });
     pendingTools.clear();
     pendingEvents.length = 0;
@@ -189,7 +197,14 @@ function toolExecutionKey(event: AgentRunEvent) {
   return event.id;
 }
 
-function ToolSummarySection(props: { count: number; status: AgentRunEvent["status"]; events: AgentRunEvent[] }) {
+function resolveToolSummaryDisplayStatus(event: AgentRunEvent, statuses: Map<string, AgentRunEvent["status"]>) {
+  if (event.type !== "tool_call") return event.status;
+  const finalStatus = statuses.get(toolExecutionKey(event));
+  if (finalStatus === "success" || finalStatus === "error") return finalStatus;
+  return event.status;
+}
+
+function ToolSummarySection(props: { count: number; status: AgentRunEvent["status"]; events: ToolSummaryDisplayEvent[] }) {
   const { t } = useTranslation();
   return (
     <details className={`group [display:grid] [min-width:0] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:14px] [background:#ffffff] [color:var(--muted)] [font-size:12px] ${props.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${props.status === "error" ? "[border-color:#dc26262e] [background:#fef2f2]" : ""}`}>
@@ -208,8 +223,8 @@ function ToolSummarySection(props: { count: number; status: AgentRunEvent["statu
           event.stopPropagation();
         }}
       >
-        {props.events.map((event) => (
-          <RunEventSection key={event.id} event={event} compact />
+        {props.events.map(({ event, displayStatus }) => (
+          <RunEventSection key={event.id} event={event} compact displayStatus={displayStatus} />
         ))}
       </div>
     </details>
@@ -222,7 +237,8 @@ function formatToolSummaryStatus(status: AgentRunEvent["status"]) {
   return formatRunEventStatus({ status: "success", type: "tool_result" } as AgentRunEvent);
 }
 
-function RunEventSection(props: { event: AgentRunEvent; compact?: boolean }) {
+function RunEventSection(props: { event: AgentRunEvent; compact?: boolean; displayStatus?: AgentRunEvent["status"] }) {
+  const displayStatus = props.displayStatus ?? props.event.status;
   const toolName = typeof props.event.metadata?.toolName === "string" ? props.event.metadata.toolName : null;
   const icon =
     props.event.type === "tool_call" ? (
@@ -236,12 +252,12 @@ function RunEventSection(props: { event: AgentRunEvent; compact?: boolean }) {
 
   return (
     <section
-      className={`[display:grid] [min-width:0] [overflow:hidden] [gap:8px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:10px_12px] [background:#ffffff] [font-size:12px] ${props.event.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${props.event.status === "error" ? "[border-color:#dc26262e] [background:#fef2f2]" : ""}`}
+      className={`[display:grid] [min-width:0] [overflow:hidden] [gap:8px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:10px_12px] [background:#ffffff] [font-size:12px] ${displayStatus === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${displayStatus === "error" ? "[border-color:#dc26262e] [background:#fef2f2]" : ""}`}
     >
       <div className={"[display:flex] [min-width:0] [align-items:center] [gap:6px] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:700]"}>
         {icon}
         <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{label}</span>
-        <span className={"[flex:0_0_auto] [margin-left:auto] [font-weight:600]"}>{formatRunEventStatus(props.event)}</span>
+        <span className={"[flex:0_0_auto] [margin-left:auto] [font-weight:600]"}>{formatRunEventDisplayStatus(props.event, displayStatus)}</span>
       </div>
       {props.event.content ? (
         <pre className={`${props.compact ? "[max-height:160px] [font-size:11px]" : "[max-height:220px] [font-size:12px]"} [margin:0] [overflow:auto] [border-radius:10px] [padding:10px] [white-space:pre-wrap] [color:#404040] [background:#f8fafc] [line-height:1.5]`}>
@@ -250,4 +266,11 @@ function RunEventSection(props: { event: AgentRunEvent; compact?: boolean }) {
       ) : null}
     </section>
   );
+}
+
+function formatRunEventDisplayStatus(event: AgentRunEvent, status: AgentRunEvent["status"]) {
+  if (event.type === "tool_call" && status === "success") {
+    return formatRunEventStatus({ type: "tool_result", status });
+  }
+  return formatRunEventStatus({ type: event.type, status });
 }
