@@ -207,6 +207,10 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       } satisfies RuntimeStreamEvent;
       let projectPayload: unknown;
       try {
+        yield {
+          type: "thinking_delta",
+          text: "正在创建 Vibe Design 项目...\n",
+        } satisfies RuntimeStreamEvent;
         projectPayload = await runTuttiJsonCommand(
           ["vibe-design", "project-create", "--prompt", bridge.prompt, "--title", titleFromPrompt(bridge.prompt)],
           workspaceRoot,
@@ -226,6 +230,10 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
 
       const projectId = readStringPath(projectPayload, ["project", "id"]);
       if (!projectId) throw new Error("Vibe Design project-create did not return project.id");
+      yield {
+        type: "thinking_delta",
+        text: `项目已创建：${projectId}。开始运行 Vibe Design agent 生成页面...\n`,
+      } satisfies RuntimeStreamEvent;
 
       yield {
         type: "tool_call",
@@ -244,6 +252,10 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
         yield failedToolResult(sessionCallId, "tutti vibe-design session-start", error);
         throw error;
       }
+      yield {
+        type: "thinking_delta",
+        text: "Vibe Design agent 已完成运行，正在读取生成文件列表...\n",
+      } satisfies RuntimeStreamEvent;
       const sessionStatus = readStringPath(sessionPayload, ["status"]);
       if (sessionStatus && sessionStatus !== "succeeded") {
         const error = new Error(`Vibe Design run ${sessionStatus}`);
@@ -276,6 +288,10 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
         throw error;
       }
       const files = extractVibeDesignFiles(filesPayload);
+      yield {
+        type: "thinking_delta",
+        text: `已读取 ${files.length} 个生成文件，准备返回最终链接。\n`,
+      } satisfies RuntimeStreamEvent;
       yield {
         type: "tool_result",
         id: filesCallId,

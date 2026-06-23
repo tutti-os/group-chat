@@ -53,7 +53,10 @@ export function AgentRunPanel(props: {
     };
   }, [props.onClose, props.open]);
 
-  const displayItems = useMemo(() => groupRunEvents(props.events), [props.events]);
+  const displayItems = useMemo(
+    () => props.open ? groupRunEvents(props.events) : [],
+    [props.events, props.open],
+  );
 
   useEffect(() => {
     if (!props.open || !stickToBottomRef.current) return;

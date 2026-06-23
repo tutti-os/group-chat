@@ -8,6 +8,7 @@ import {
   type Conversation,
   type CreateIdentityRequest,
   type CreateRoomRequest,
+  type Identity,
   type Message,
   type MessageBlock,
   type Participant,
@@ -32,6 +33,7 @@ import {
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, isAbsolute, relative, resolve } from "node:path";
 import { nanoid } from "nanoid";
+import { buildEffectiveRoleDescription } from "./agent-instructions.js";
 import { enrichAssistantContentWithWorkspaceResourceLinks } from "./assistant-reference-enrichment.js";
 import { sha256ForFile } from "./artifact-content-hash.js";
 import { AgentToolTokenStore } from "./agent-tool-tokens.js";
@@ -1208,6 +1210,7 @@ export class ChatService {
       type: Parameters<ChatRepository["createAgentRunEvent"]>[0]["type"],
       input: Omit<Parameters<ChatRepository["createAgentRunEvent"]>[0], "runId" | "conversationId" | "type"> = {},
     ) => {
+      ensureAssistantMessage();
       const runEvent = this.repo.createAgentRunEvent({
         runId: run.id,
         conversationId,
@@ -1489,6 +1492,18 @@ export class ChatService {
       return null;
     }
 
+    const visibleOutput = deferAssistantTextToThinking
+      ? extractLocalAgentFinalReply(deferredAssistantText)
+      : content;
+    const fallbackOutput = visibleOutput.trim()
+      ? ""
+      : buildEmptyLocalAgentReplyFallback(latestUserMessage, currentParticipant, identity);
+    const finalVisibleOutput = visibleOutput.trim() ? visibleOutput : fallbackOutput;
+
+    if ((!visibleReply.message || !visibleReply.block) && finalVisibleOutput.trim()) {
+      ensureAssistantMessage();
+    }
+
     if (!visibleReply.message || !visibleReply.block) {
       this.publishAssistantFailure({
         roomId,
@@ -1506,10 +1521,8 @@ export class ChatService {
       return null;
     }
 
-    const visibleOutput = deferAssistantTextToThinking
-      ? extractLocalAgentFinalReply(deferredAssistantText)
-      : content;
-    const replyContent = stripAssistantSkillDetails(visibleOutput) || (visibleOutput.trim() ? "Skill invoked." : visibleOutput);
+    const replyContent = stripAssistantSkillDetails(finalVisibleOutput)
+      || (finalVisibleOutput.trim() ? "Skill invoked." : finalVisibleOutput);
     const enrichedReply = enrichAssistantContentWithWorkspaceResourceLinks(replyContent, userMessage.mentions);
     const runFileArtifacts = this.importRunFileWriteArtifacts({
       roomId,
@@ -2142,6 +2155,34 @@ function splitChineseSentences(text: string) {
   const tail = buffer.trim();
   if (tail) sentences.push(tail);
   return sentences;
+}
+
+function buildEmptyLocalAgentReplyFallback(
+  userMessage: Message,
+  participant: Participant,
+  identity: Identity | null,
+) {
+  if (!isDirectAgentMention(userMessage, participant.id)) return "";
+  if (isIdentityQuestion(userMessage.content)) {
+    const roleDescription = buildEffectiveRoleDescription(participant, identity).trim();
+    const roleSummary = roleDescription
+      ? `我在这个群里的设定是：${truncatePreview(roleDescription)}`
+      : "我还没有配置更具体的角色设定。";
+    return `我是${participant.displayName}。${roleSummary}`;
+  }
+  return `我是${participant.displayName}，刚才没有生成有效的最终回复。`;
+}
+
+function isDirectAgentMention(message: Message, participantId: string) {
+  return message.mentions.some(
+    (mention) =>
+      mention.mentionType === "all"
+      || (mention.mentionType === "participant" && mention.participantId === participantId),
+  );
+}
+
+function isIdentityQuestion(content: string) {
+  return /你是谁|你是誰|who are you|介绍.*自己|自我介绍/i.test(content);
 }
 
 function pushRunArtifactAliases(

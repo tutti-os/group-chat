@@ -199,7 +199,15 @@ function ToolSummarySection(props: { count: number; status: AgentRunEvent["statu
         <span className={"[flex:0_0_auto] [margin-left:auto] [font-weight:600]"}>{formatToolSummaryStatus(props.status)}</span>
         <ChevronDown size={14} className={"[flex:0_0_auto] [transition:transform_0.12s_ease] group-open:[rotate:180deg]"} />
       </summary>
-      <div className={"[display:grid] [gap:8px] [border-top:1px_solid_var(--border)] [padding:8px]"}>
+      <div
+        className={"[display:grid] [gap:8px] [overflow-y:auto] [overscroll-contain] [border-top:1px_solid_var(--border)] [padding:8px] [scrollbar-gutter:stable]"}
+        style={{ maxHeight: "min(460px, calc(100vh - 260px))" }}
+        onWheel={(event) => {
+          const element = event.currentTarget;
+          if (element.scrollHeight <= element.clientHeight) return;
+          event.stopPropagation();
+        }}
+      >
         {props.events.map((event) => (
           <RunEventSection key={event.id} event={event} compact />
         ))}
