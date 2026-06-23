@@ -92,8 +92,8 @@ export function MessageLinkDetailPanel(props: {
       ref={panelRef}
       className={"[position:absolute] [top:56px] [right:0] [bottom:0] [z-index:36] [display:grid] [width:min(420px,_calc(100vw_-_24px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border)] [background:var(--panel)] [box-shadow:-18px_0_40px_rgb(0_0_0_/_8%)]"}
     >
-      <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [padding:14px] [border-bottom:1px_solid_var(--border)]"}>
-        <div className={"[min-width:0] [&_h3]:[margin:0] [&_h3]:[font-size:15px] [&_h3]:[font-weight:720] [&_h3]:[line-height:1.2] [&_span]:[display:block] [&_span]:[margin-top:3px] [&_span]:[color:var(--muted)] [&_span]:[font-size:12px]"}>
+      <div className={"[display:grid] [min-width:0] [grid-template-columns:minmax(0,_1fr)_32px] [align-items:center] [gap:10px] [padding:14px] [border-bottom:1px_solid_var(--border)]"}>
+        <div className={"[min-width:0] [&_h3]:[margin:0] [&_h3]:[overflow:hidden] [&_h3]:[font-size:15px] [&_h3]:[font-weight:720] [&_h3]:[line-height:1.2] [&_h3]:[text-overflow:ellipsis] [&_h3]:[white-space:nowrap] [&_span]:[display:block] [&_span]:[min-width:0] [&_span]:[overflow:hidden] [&_span]:[margin-top:3px] [&_span]:[color:var(--muted)] [&_span]:[font-size:12px] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap]"}>
           <h3>{panelTitle}</h3>
           <span>{room?.title || conversation?.title || t("common.unknownConversation")}</span>
         </div>
@@ -158,12 +158,12 @@ export function MessageLinkDetailPanel(props: {
               )}
               <div className={"[min-width:0] [display:grid]"}>
                 {showHeader ? (
-                  <div className={"[display:flex] [align-items:center] [gap:7px] [min-height:20px] [margin-bottom:4px]"}>
-                    <strong className={"[color:var(--muted)] [font-size:12px] [font-weight:550]"}>{senderLabel}</strong>
-                    <span className={"[color:var(--muted)] [font-size:12px]"}>{formatMessageTime(message.createdAt)}</span>
+                  <div className={"[display:flex] [min-width:0] [align-items:center] [gap:7px] [overflow:hidden] [min-height:20px] [margin-bottom:4px]"}>
+                    <strong className={"[min-width:0] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:550] [text-overflow:ellipsis] [white-space:nowrap]"}>{senderLabel}</strong>
+                    <span className={"[flex:0_0_auto] [color:var(--muted)] [font-size:12px]"}>{formatMessageTime(message.createdAt)}</span>
                   </div>
                 ) : null}
-                <div className={"[user-select:text] [min-width:0]"}>
+                <div className={"[user-select:text] [min-width:0] [max-width:100%]"}>
                   {visibleBlocks.length === 0 ? (
                     <span className={"[color:var(--muted)] [font-size:13px]"}>{t("common.attachment")}</span>
                   ) : null}

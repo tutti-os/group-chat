@@ -50,20 +50,17 @@ export function linkRunFileArtifactPathsInContent(
   fileArtifacts: Array<{ path: string; artifact: Pick<Artifact, "id" | "filename"> }>,
 ) {
   let result = content;
-  const seenArtifactIds = new Set<string>();
   const entries = fileArtifacts
     .map((item) => ({ path: normalizePath(item.path), artifact: item.artifact }))
     .filter((item) => item.path)
     .sort((left, right) => right.path.length - left.path.length);
 
   for (const entry of entries) {
-    if (seenArtifactIds.has(entry.artifact.id)) continue;
-    seenArtifactIds.add(entry.artifact.id);
     const markdown = formatFileReferenceMarkdown(entry.artifact);
-    if (result.includes(markdown)) continue;
 
-    result = replaceNeedleOutsideMarkdownLinkHref(result, `\`${entry.path}\``, markdown);
-    result = replaceNeedleOutsideMarkdownLinkHref(result, entry.path, markdown);
+    result = replaceMarkdownLinksToNeedle(result, entry.path, markdown);
+    result = replaceNeedleOutsideMarkdownLink(result, `\`${entry.path}\``, markdown);
+    result = replaceNeedleOutsideMarkdownLink(result, entry.path, markdown);
   }
   return result;
 }
@@ -71,11 +68,19 @@ export function linkRunFileArtifactPathsInContent(
 export function extractLocalFilePathsFromContent(content: string) {
   const paths = new Set<string>();
   for (const match of content.matchAll(/`([^`]+)`/g)) {
-    const value = match[1]?.trim();
+    const value = cleanPathCandidate(match[1]);
+    if (value && looksLikeLocalPath(value)) paths.add(value);
+  }
+  for (const match of content.matchAll(/\[[^\]]+\]\(([^)\s]+)\)/g)) {
+    const value = cleanPathCandidate(match[1]);
     if (value && looksLikeLocalPath(value)) paths.add(value);
   }
   for (const match of content.matchAll(/(?:^|[\s：:])((?:\/[^\s`<>"')]+)|(?:[A-Za-z]:[\\/][^\s`<>"')]+))/g)) {
-    const value = match[1]?.trim();
+    const value = cleanPathCandidate(match[1]);
+    if (value && looksLikeLocalPath(value)) paths.add(value);
+  }
+  for (const match of content.matchAll(relativeFilePathPattern())) {
+    const value = cleanPathCandidate(match[1]);
     if (value && looksLikeLocalPath(value)) paths.add(value);
   }
   return [...paths];
@@ -86,10 +91,48 @@ function normalizePath(filePath: string) {
 }
 
 function looksLikeLocalPath(value: string) {
-  return value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value);
+  if (value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value)) return true;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return false;
+  if (/\s|[`<>"'|]/.test(value)) return false;
+  if (value.startsWith("#")) return false;
+  const extension = extname(value).toLowerCase();
+  if (!TEXT_EXTENSIONS.has(extension) && !BINARY_EXTENSIONS.has(extension)) return false;
+  return value.startsWith("./")
+    || value.startsWith("../")
+    || value.includes("/")
+    || /^[\w@.-]+\.[A-Za-z0-9]+$/.test(value);
 }
 
-function replaceNeedleOutsideMarkdownLinkHref(input: string, needle: string, replacement: string) {
+function cleanPathCandidate(value: string | undefined) {
+  return value?.trim().replace(/[，。！？、；;,.!?]+$/u, "") ?? "";
+}
+
+function relativeFilePathPattern() {
+  const extensions = [...TEXT_EXTENSIONS.keys(), ...BINARY_EXTENSIONS.keys()]
+    .map((extension) => extension.slice(1).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+  return new RegExp(
+    String.raw`(?:^|[\s：:])((?:\.{1,2}\/)?[\w@.-]+(?:\/[\w@.-]+)*\.(?:${extensions}))(?![\w.-])`,
+    "gi",
+  );
+}
+
+function replaceMarkdownLinksToNeedle(input: string, needle: string, replacement: string) {
+  if (!needle) return input;
+  return input.replace(/\[([^\]]*)\]\(([^)\s]+)\)/g, (markdown, _label: string, href: string) => {
+    return normalizePath(decodeUriSafe(href)) === needle ? replacement : markdown;
+  });
+}
+
+function decodeUriSafe(value: string) {
+  try {
+    return decodeURI(value);
+  } catch {
+    return value;
+  }
+}
+
+function replaceNeedleOutsideMarkdownLink(input: string, needle: string, replacement: string) {
   if (!needle || !input.includes(needle)) return input;
   let output = "";
   let cursor = 0;
@@ -100,19 +143,27 @@ function replaceNeedleOutsideMarkdownLinkHref(input: string, needle: string, rep
       break;
     }
     output += input.slice(cursor, index);
-    output += isInsideMarkdownLinkHref(input, index) ? needle : replacement;
+    output += isInsideMarkdownLink(input, index) ? needle : replacement;
     cursor = index + needle.length;
   }
   return output;
 }
 
-function isInsideMarkdownLinkHref(input: string, index: number) {
+function isInsideMarkdownLink(input: string, index: number) {
   const hrefStart = input.lastIndexOf("](", index);
-  if (hrefStart === -1) return false;
-  const linkLabelStart = input.lastIndexOf("[", hrefStart);
-  if (linkLabelStart === -1) return false;
+  const labelStart = input.lastIndexOf("[", index);
   const lastCloseParenBeforeIndex = input.lastIndexOf(")", index);
-  if (lastCloseParenBeforeIndex > hrefStart) return false;
-  const hrefEnd = input.indexOf(")", hrefStart + 2);
-  return hrefEnd !== -1 && hrefEnd >= index;
+  const insideHref = hrefStart !== -1
+    && labelStart !== -1
+    && labelStart < hrefStart
+    && lastCloseParenBeforeIndex <= hrefStart
+    && input.indexOf(")", hrefStart + 2) >= index;
+  if (insideHref) return true;
+
+  const nextHrefStart = input.indexOf("](", index);
+  if (labelStart === -1 || nextHrefStart === -1 || labelStart > nextHrefStart) return false;
+  const previousCloseParen = input.lastIndexOf(")", index);
+  if (previousCloseParen > labelStart) return false;
+  const hrefEnd = input.indexOf(")", nextHrefStart + 2);
+  return hrefEnd !== -1 && index < hrefEnd;
 }

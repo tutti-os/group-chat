@@ -67,7 +67,7 @@ export function TuttiMessageLinkIcon(props: { className?: string }) {
   return (
     <span
       aria-hidden="true"
-      className={props.className ?? "[display:inline-grid] [width:16px] [height:16px] [place-items:center] [overflow:hidden] [border-radius:4px] [background:#eef2ff]"}
+      className={props.className ?? "[display:inline-grid] [flex:0_0_auto] [width:16px] [height:16px] [place-items:center] [overflow:hidden] [border-radius:4px] [background:#eef2ff]"}
     >
       <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
         <rect x="1.5" y="1.5" width="13" height="13" rx="3.5" fill="#f8fafc" />
@@ -125,6 +125,7 @@ export function createTuttiMessageLinkIconElement() {
   const span = document.createElement("span");
   span.setAttribute("aria-hidden", "true");
   span.style.display = "inline-grid";
+  span.style.flex = "0 0 auto";
   span.style.width = "16px";
   span.style.height = "16px";
   span.style.placeItems = "center";
@@ -152,4 +153,3 @@ export function createTuttiMessageLinkIconElement() {
   span.append(svg);
   return span;
 }
-

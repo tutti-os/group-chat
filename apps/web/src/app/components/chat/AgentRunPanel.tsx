@@ -155,12 +155,12 @@ export function AgentRunPanel(props: {
             return (
               <section
                 key={event.id}
-                className={`[display:grid] [gap:8px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:10px_12px] [background:#ffffff] [font-size:12px] ${event.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${event.status === "error" ? "[border-color:#dc26262e] [background:#fef2f2]" : ""}`}
+                className={`[display:grid] [min-width:0] [overflow:hidden] [gap:8px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:10px_12px] [background:#ffffff] [font-size:12px] ${event.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${event.status === "error" ? "[border-color:#dc26262e] [background:#fef2f2]" : ""}`}
               >
-                <div className={"[display:flex] [align-items:center] [gap:6px] [font-weight:700] [color:var(--text)]"}>
+                <div className={"[display:flex] [min-width:0] [align-items:center] [gap:6px] [overflow:hidden] [font-weight:700] [color:var(--text)]"}>
                   {isResult ? <Braces size={15} /> : <Wrench size={15} />}
-                  <strong>{toolName}</strong>
-                  <span className={"[color:var(--muted)] [font-size:11px] [font-weight:650]"}>{formatRunEventStatus(event)}</span>
+                  <strong className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{toolName}</strong>
+                  <span className={"[flex:0_0_auto] [color:var(--muted)] [font-size:11px] [font-weight:650]"}>{formatRunEventStatus(event)}</span>
                 </div>
                 {event.content ? <pre className={"[margin:0] [max-height:220px] [overflow:auto] [border-radius:10px] [padding:10px] [white-space:pre-wrap] [color:#404040] [background:#f8fafc] [font-size:11px] [line-height:1.5]"}>{event.content}</pre> : null}
               </section>
@@ -170,10 +170,10 @@ export function AgentRunPanel(props: {
           if (event.type === "file_write") {
             const path = typeof event.metadata?.path === "string" ? event.metadata.path : event.content;
             return (
-              <section key={event.id} className={"[display:grid] [gap:6px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:10px_12px] [background:#ffffff] [font-size:12px]"}>
-                <div className={"[display:flex] [align-items:center] [gap:6px] [font-weight:700] [color:var(--text)]"}>
+              <section key={event.id} className={"[display:grid] [min-width:0] [overflow:hidden] [gap:6px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:10px_12px] [background:#ffffff] [font-size:12px]"}>
+                <div className={"[display:flex] [min-width:0] [align-items:center] [gap:6px] [overflow:hidden] [font-weight:700] [color:var(--text)]"}>
                   <FileText size={15} />
-                  <strong>{t("runPanel.writeFile")}</strong>
+                  <strong className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{t("runPanel.writeFile")}</strong>
                 </div>
                 <pre className={"[margin:0] [overflow:auto] [white-space:pre-wrap] [color:#404040] [font-size:11px] [line-height:1.5]"}>{path}</pre>
               </section>

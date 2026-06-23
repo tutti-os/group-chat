@@ -8,7 +8,7 @@ export type SummaryCardPresentation = {
 };
 
 export const SUMMARY_LINK_CARD_CLASS =
-  "[display:grid] [width:min(300px,_100%)] [max-width:100%] [gap:4px] [border:1px_solid_var(--border)] [border-radius:10px] [padding:8px_10px] [color:var(--text)] [background:#ffffff] [text-align:left] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] hover:[border-color:#cbd5e1] hover:[background:#f8fafc]";
+  "[display:grid] [width:min(300px,_100%)] [min-width:0] [max-width:100%] [overflow:hidden] [gap:4px] [border:1px_solid_var(--border)] [border-radius:10px] [padding:8px_10px] [color:var(--text)] [background:#ffffff] [text-align:left] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] hover:[border-color:#cbd5e1] hover:[background:#f8fafc]";
 
 export const SUMMARY_LINK_CARD_COMPOSER_CLASS =
   `${SUMMARY_LINK_CARD_CLASS} [margin:4px_0] [vertical-align:top]`;
@@ -48,7 +48,7 @@ export function createSummaryLinkChipElement(
   chip.className = SUMMARY_LINK_CARD_COMPOSER_CLASS;
 
   const titleRow = document.createElement("span");
-  titleRow.className = "[display:flex] [align-items:center] [gap:5px] [color:#2563eb] [font-size:12px] [font-weight:700] [line-height:1.3]";
+  titleRow.className = "[display:block] [min-width:0] [overflow:hidden] [color:#2563eb] [font-size:12px] [font-weight:700] [line-height:1.3] [text-overflow:ellipsis] [white-space:nowrap]";
   titleRow.textContent = presentation.title;
 
   const metaRow = document.createElement("span");

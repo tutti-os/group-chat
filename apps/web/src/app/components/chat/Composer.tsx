@@ -5,7 +5,7 @@ import type { AgentRun, Artifact, Conversation, Identity, LocalAgentProviderStat
 import { resolveArtifactLinkedMessageId } from "@group-chat/shared";
 import { cancelRun, sendMessage, updateMessage, uploadArtifact } from "../../../api/client.js";
 import { getArtifactCategory, revealArtifactInTuttiFileManager, resolveArtifactPublicUrl } from "../../artifact-actions.js";
-import { formatBytes } from "../../formatting.js";
+import { formatBytes, formatMessageTime } from "../../formatting.js";
 import {
   formatMessageLink,
   formatMessageLinkLabel,
@@ -16,6 +16,7 @@ import {
   readArtifactClipboardFromDataTransfer,
   readStashedSummaryLink,
   SUMMARY_LINK_MIME,
+  messageSenderLabel,
 } from "../../chat-links.js";
 import { resolveArtifactsByIds } from "../../message-artifacts.js";
 import type { BackgroundTask } from "../../background-tasks.js";
@@ -297,6 +298,14 @@ export function Composer(props: {
   const roomArtifacts = useMemo(
     () => props.artifacts.filter((artifact) => artifact.roomId === props.conversation.roomId),
     [props.artifacts, props.conversation.roomId],
+  );
+  const roomArtifactById = useMemo(
+    () => new Map(roomArtifacts.map((artifact) => [artifact.id, artifact])),
+    [roomArtifacts],
+  );
+  const allMessagesById = useMemo(
+    () => new Map(props.allMessages.map((message) => [message.id, message])),
+    [props.allMessages],
   );
   const roomFileFingerprint = useMemo(
     () => roomFileMentionCacheFingerprint(roomArtifacts, props.conversation.roomId),
@@ -2322,7 +2331,17 @@ export function Composer(props: {
             ) : option.kind === "reference" ? (
               (() => {
                 const isFileOption = option.providerId === "file" || option.providerId === "agent-generated-file";
-                const showReferenceSubtitle = !(activeMentionTab === "files" && isFileOption);
+                const roomFileMeta = isFileOption && option.item.roomFile
+                  ? formatMentionRoomFileMeta(option.item.roomFile, {
+                    artifactById: roomArtifactById,
+                    messagesById: allMessagesById,
+                    participants: props.allParticipants,
+                    identities: props.identities,
+                    userDisplayName: props.userDisplayName,
+                  })
+                  : "";
+                const referenceSubtitle = roomFileMeta || formatMentionReferenceSubtitle(option.providerId, option.subtitle) || t(`composer.atProvider.${option.providerId}`);
+                const showReferenceSubtitle = Boolean(referenceSubtitle) && (!(activeMentionTab === "files" && isFileOption) || Boolean(roomFileMeta));
                 const mentionKey = tuttiAtMentionKey(option.providerId, option.item.itemId);
                 const isFileSelected = isFileOption && fileMultiSelectMode && selectedFileMentionKeys.has(mentionKey);
                 const handleFileClick = () => {
@@ -2366,7 +2385,7 @@ export function Composer(props: {
                   <strong className={"[overflow:hidden] [font-size:12px] [font-weight:500] [line-height:16px] [text-overflow:ellipsis] [white-space:nowrap]"}>{option.label}</strong>
                   {showReferenceSubtitle ? (
                     <span className={"[overflow:hidden] [color:var(--muted)] [font-size:11px] [line-height:14px] [text-overflow:ellipsis] [white-space:nowrap]"}>
-                      {option.subtitle || t(`composer.atProvider.${option.providerId}`)}
+                      {referenceSubtitle}
                     </span>
                   ) : null}
                 </button>
@@ -2565,6 +2584,67 @@ function MentionReferenceFileIcon(props: {
       {icon}
     </button>
   );
+}
+
+function formatMentionRoomFileMeta(
+  roomFile: TuttiAtRoomFileMeta,
+  context: {
+    artifactById: Map<string, Artifact>;
+    messagesById: Map<string, Message>;
+    participants: Participant[];
+    identities: Identity[];
+    userDisplayName: string;
+  },
+) {
+  const artifact = context.artifactById.get(roomFile.artifactId) ?? null;
+  const message = roomFile.messageId ? context.messagesById.get(roomFile.messageId) ?? null : null;
+  const details = [
+    artifact ? formatBytes(artifact.sizeBytes) : "",
+    formatMessageTime(message?.createdAt ?? artifact?.createdAt ?? ""),
+  ].filter(Boolean).join(" · ");
+  const creator = message
+    ? messageSenderLabel(message, context.participants, context.identities, context.userDisplayName).trim()
+    : "";
+  return [creator, details].filter(Boolean).join(" · ");
+}
+
+const REFERENCE_STATUS_LABEL_KEYS = {
+  accepted: "reference.status.accepted",
+  active: "reference.status.active",
+  blocked: "reference.status.blocked",
+  cancelled: "reference.status.cancelled",
+  completed: "reference.status.completed",
+  done: "reference.status.completed",
+  error: "reference.status.failed",
+  failed: "reference.status.failed",
+  in_progress: "reference.status.inProgress",
+  not_started: "reference.status.notStarted",
+  pending: "reference.status.pending",
+  pending_acceptance: "reference.status.pendingAcceptance",
+  queued: "reference.status.queued",
+  rejected: "reference.status.rejected",
+  running: "reference.status.running",
+  todo: "reference.status.notStarted",
+} as const;
+
+function formatMentionReferenceSubtitle(providerId: TuttiAtProviderId, subtitle: string | undefined) {
+  const trimmed = subtitle?.trim();
+  if (!trimmed) return "";
+  if (providerId !== "agent-session" && providerId !== "workspace-issue") return trimmed;
+  return replaceReferenceStatusPrefix(trimmed);
+}
+
+function replaceReferenceStatusPrefix(value: string) {
+  const statusEntries = Object.entries(REFERENCE_STATUS_LABEL_KEYS).sort((left, right) => right[0].length - left[0].length);
+  for (const [status, key] of statusEntries) {
+    if (value === status) return t(key);
+    if (!value.startsWith(status)) continue;
+    const suffix = value.slice(status.length);
+    if (/^\s*(?:[·•|,，-]|\s)\s*/.test(suffix)) {
+      return `${t(key)}${suffix}`;
+    }
+  }
+  return value;
 }
 
 function MentionReferenceProviderIcon(props: { providerId: TuttiAtProviderId }) {
@@ -3722,9 +3802,11 @@ function createMessageLinkChip(messageId: string, label: string) {
   chip.dataset.messageLinkId = messageId;
   chip.className = [
     "[display:inline-flex]",
+    "[min-width:0]",
     "[max-width:min(360px,_100%)]",
     "[align-items:center]",
     "[gap:6px]",
+    "[overflow:hidden]",
     "[border:1px_solid_var(--border)]",
     "[border-radius:10px]",
     "[padding:6px_10px]",
@@ -3738,6 +3820,7 @@ function createMessageLinkChip(messageId: string, label: string) {
     "[box-shadow:0_1px_2px_rgb(0_0_0_/_4%)]",
   ].join(" ");
   const labelEl = document.createElement("span");
+  labelEl.className = "[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]";
   labelEl.textContent = label;
   chip.append(createTuttiMessageLinkIconElement(), labelEl);
   return chip;

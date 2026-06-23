@@ -10,7 +10,13 @@ import type {
   RuntimeProfile,
   UpdateParticipantRequest,
 } from "@group-chat/shared";
-import { DEFAULT_PARTICIPANT_LISTEN_MODE, uniqueParticipantDisplayNameInRoom } from "@group-chat/shared";
+import {
+  DEFAULT_PARTICIPANT_LISTEN_MODE,
+  normalizeParticipantDisplayName,
+  participantDisplayNameUnits,
+  truncateParticipantDisplayName,
+  uniqueParticipantDisplayNameInRoom,
+} from "@group-chat/shared";
 import { roleDescriptionPresetLabel, roleDescriptionPresets, getReasoningEffortOptions, reasoningModeFieldLabel } from "../../constants.js";
 import { useTranslation } from "../../i18n/index.js";
 import { isNewAgentDraft } from "../../identity-draft.js";
@@ -62,7 +68,7 @@ export function AgentManageForm(props: {
   const isNewIdentity = isNewAgentDraft(identity);
   const readOnly = props.readOnly ?? false;
 
-  const [displayName, setDisplayName] = useState(participant.displayName);
+  const [displayName, setDisplayName] = useState(() => normalizeParticipantDisplayName(participant.displayName));
   const [roomInstructions, setRoomInstructions] = useState(participant.roomInstructions);
   const [runtimeProfileId, setRuntimeProfileId] = useState(
     () => participant.runtimeProfileId ?? identity?.defaultRuntimeProfileId ?? "",
@@ -106,7 +112,7 @@ export function AgentManageForm(props: {
   const showRoomInstructions = hasRoomInstructions || (!readOnly && showRoomInstructionsEditor);
 
   useEffect(() => {
-    setDisplayName(participant.displayName);
+    setDisplayName(normalizeParticipantDisplayName(participant.displayName));
     setRoomInstructions(participant.roomInstructions);
     setRuntimeProfileId(participant.runtimeProfileId ?? identity?.defaultRuntimeProfileId ?? "");
     setModel(props.runtimeProfile?.model ?? "");
@@ -139,7 +145,7 @@ export function AgentManageForm(props: {
   }, [model, providerStatus?.defaultReasoningEffort, reasoningEffort, reasoningOptions]);
 
   const buildIdentityPayload = (): CreateIdentityRequest => ({
-    name: displayName.trim() || identity?.name || t("common.agent"),
+    name: normalizeParticipantDisplayName(displayName, identity?.name || t("common.agent")),
     icon: props.avatar ?? identity?.icon ?? "",
     systemPrompt: roleDescription,
     stylePrompt: "",
@@ -153,12 +159,13 @@ export function AgentManageForm(props: {
     setSaving(true);
     try {
       let activeIdentity = identity;
-      const resolvedDisplayName = props.roomParticipants
+      const baseDisplayName = normalizeParticipantDisplayName(displayName, identity?.name || t("common.agent"));
+      const resolvedDisplayName = isAddMode && props.roomParticipants
         ? uniqueParticipantDisplayNameInRoom(
-          displayName.trim() || identity?.name || t("common.agent"),
+          baseDisplayName,
           props.roomParticipants,
         )
-        : displayName.trim() || identity?.name || t("common.agent");
+        : baseDisplayName;
       const identityPayload = {
         ...buildIdentityPayload(),
         name: resolvedDisplayName,
@@ -235,12 +242,17 @@ export function AgentManageForm(props: {
           aria-readonly={readOnly || undefined}
           onChange={(event) => {
             if (readOnly) return;
-            setDisplayName(event.target.value);
-            props.onDisplayNameChange?.(event.target.value);
+            const nextValue = truncateParticipantDisplayName(event.target.value);
+            setDisplayName(nextValue);
+            props.onDisplayNameChange?.(nextValue);
           }}
+          maxLength={20}
           className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
           aria-label={t("agentForm.roomAliasAria", { name: participant.displayName })}
         />
+        <small className={"[color:var(--muted)] [font-size:11px] [line-height:1.4]"}>
+          {t("agentForm.roomAliasLimit", { used: participantDisplayNameUnits(displayName) })}
+        </small>
       </label>
 
       <div className={"[display:grid] [grid-template-columns:repeat(3,_minmax(0,_1fr))] [gap:10px] max-[520px]:[grid-template-columns:1fr]"}>

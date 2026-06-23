@@ -37,7 +37,27 @@ test("run file artifact path extraction reads backticked assistant file paths", 
   assert.deepEqual(extractLocalFilePathsFromContent(content), [localPath]);
 });
 
-test("run file artifact links preserve existing markdown link hrefs", async () => {
+test("run file artifact path extraction reads relative assistant file paths", async () => {
+  const { extractLocalFilePathsFromContent } = await loadRunFileArtifactsModule();
+  const content = "已创建 Markdown 文件。\n\n文件路径：[boss111_20260623_235016.md](boss111_20260623_235016.md)";
+
+  assert.deepEqual(extractLocalFilePathsFromContent(content), ["boss111_20260623_235016.md"]);
+});
+
+test("run file artifact links replace relative markdown file links", async () => {
+  const { linkRunFileArtifactPathsInContent } = await loadRunFileArtifactsModule();
+  const content = "文件路径：[boss111_20260623_235016.md](boss111_20260623_235016.md)";
+
+  assert.equal(
+    linkRunFileArtifactPathsInContent(content, [{
+      path: "boss111_20260623_235016.md",
+      artifact: { id: "artifact-1", filename: "boss111_20260623_235016.md" },
+    }]),
+    "文件路径：[boss111_20260623_235016.md](group-chat://reference/file/artifact-1)",
+  );
+});
+
+test("run file artifact links replace markdown links to local files", async () => {
   const { linkRunFileArtifactPathsInContent } = await loadRunFileArtifactsModule();
   const localPath = "/Users/example/workspace/requested_1111.md";
   const content = `[already linked](${localPath})\n\n${localPath}`;
@@ -47,7 +67,7 @@ test("run file artifact links preserve existing markdown link hrefs", async () =
       path: localPath,
       artifact: { id: "artifact-1", filename: "requested_1111.md" },
     }]),
-    "[already linked](/Users/example/workspace/requested_1111.md)\n\n[requested_1111.md](group-chat://reference/file/artifact-1)",
+    "[requested_1111.md](group-chat://reference/file/artifact-1)\n\n[requested_1111.md](group-chat://reference/file/artifact-1)",
   );
 });
 

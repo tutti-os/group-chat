@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import { BrainCircuit, Braces, FileText, LoaderCircle, Wrench, X } from "lucide-react";
+import { BrainCircuit, Braces, ChevronDown, FileText, LoaderCircle, Wrench, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AgentRunEvent } from "@group-chat/shared";
@@ -8,7 +8,7 @@ import { formatRunEventStatus, formatRunEventTypeLabel, useTranslation } from ".
 
 type DisplayProcessSection =
   | ProcessSection
-  | { kind: "tool_summary"; id: string; count: number; status: AgentRunEvent["status"] };
+  | { kind: "tool_summary"; id: string; count: number; status: AgentRunEvent["status"]; events: AgentRunEvent[] };
 
 export function AgentThinkingPanel(props: {
   open: boolean;
@@ -101,7 +101,7 @@ export function AgentThinkingPanel(props: {
         ) : null}
         {displaySections.map((section) => {
           if (section.kind === "tool_summary") {
-            return <ToolSummarySection key={section.id} count={section.count} status={section.status} />;
+            return <ToolSummarySection key={section.id} count={section.count} status={section.status} events={section.events} />;
           }
           if (section.kind === "event") {
             return <RunEventSection key={section.id} event={section.event} />;
@@ -134,21 +134,28 @@ export function AgentThinkingPanel(props: {
 
 function compactToolExecutionSections(sections: ProcessSection[]): DisplayProcessSection[] {
   const compacted: DisplayProcessSection[] = [];
-  const pendingToolIds = new Set<string>();
+  const pendingTools = new Map<string, AgentRunEvent["status"]>();
+  const pendingEvents: AgentRunEvent[] = [];
   let pendingId = "";
-  let pendingStatus: AgentRunEvent["status"] = "success";
 
   const flushTools = () => {
-    if (pendingToolIds.size === 0) return;
+    if (pendingTools.size === 0) return;
+    const statuses = [...pendingTools.values()];
+    const status: AgentRunEvent["status"] = statuses.includes("error")
+      ? "error"
+      : statuses.includes("streaming") || statuses.includes("pending")
+        ? "streaming"
+        : "success";
     compacted.push({
       kind: "tool_summary",
       id: pendingId || `tool-summary-${compacted.length}`,
-      count: pendingToolIds.size,
-      status: pendingStatus,
+      count: pendingTools.size,
+      status,
+      events: [...pendingEvents],
     });
-    pendingToolIds.clear();
+    pendingTools.clear();
+    pendingEvents.length = 0;
     pendingId = "";
-    pendingStatus = "success";
   };
 
   for (const section of sections) {
@@ -159,11 +166,13 @@ function compactToolExecutionSections(sections: ProcessSection[]): DisplayProces
     }
 
     pendingId ||= `tool-summary-${section.id}`;
-    pendingToolIds.add(toolExecutionKey(section.event));
-    if (section.event.status === "error") {
-      pendingStatus = "error";
-    } else if (section.event.status === "streaming" && pendingStatus !== "error") {
-      pendingStatus = "streaming";
+    const key = toolExecutionKey(section.event);
+    pendingEvents.push(section.event);
+    const currentStatus = pendingTools.get(key);
+    if (section.event.type === "tool_result" || section.event.type === "file_write") {
+      pendingTools.set(key, section.event.status === "error" ? "error" : "success");
+    } else if (!currentStatus || currentStatus === "pending" || currentStatus === "streaming") {
+      pendingTools.set(key, section.event.status);
     }
   }
 
@@ -180,14 +189,22 @@ function toolExecutionKey(event: AgentRunEvent) {
   return event.id;
 }
 
-function ToolSummarySection(props: { count: number; status: AgentRunEvent["status"] }) {
+function ToolSummarySection(props: { count: number; status: AgentRunEvent["status"]; events: AgentRunEvent[] }) {
   const { t } = useTranslation();
   return (
-    <section className={`[display:flex] [align-items:center] [gap:8px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:10px_12px] [background:#ffffff] [color:var(--muted)] [font-size:12px] [font-weight:700] ${props.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${props.status === "error" ? "[border-color:#dc26262e] [background:#fef2f2]" : ""}`}>
-      <Wrench size={15} />
-      <span>{t("thinkingPanel.toolCallsSummary", { count: props.count })}</span>
-      <span className={"[font-weight:600]"}>{formatToolSummaryStatus(props.status)}</span>
-    </section>
+    <details className={`group [display:grid] [min-width:0] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:14px] [background:#ffffff] [color:var(--muted)] [font-size:12px] ${props.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${props.status === "error" ? "[border-color:#dc26262e] [background:#fef2f2]" : ""}`}>
+      <summary className={"[display:flex] [min-width:0] [align-items:center] [gap:8px] [padding:10px_12px] [font-weight:700] [cursor:pointer] [list-style:none] [&::-webkit-details-marker]:[display:none]"}>
+        <Wrench size={15} className={"[flex:0_0_auto]"} />
+        <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{t("thinkingPanel.toolCallsSummary", { count: props.count })}</span>
+        <span className={"[flex:0_0_auto] [margin-left:auto] [font-weight:600]"}>{formatToolSummaryStatus(props.status)}</span>
+        <ChevronDown size={14} className={"[flex:0_0_auto] [transition:transform_0.12s_ease] group-open:[rotate:180deg]"} />
+      </summary>
+      <div className={"[display:grid] [gap:8px] [border-top:1px_solid_var(--border)] [padding:8px]"}>
+        {props.events.map((event) => (
+          <RunEventSection key={event.id} event={event} compact />
+        ))}
+      </div>
+    </details>
   );
 }
 
@@ -197,7 +214,7 @@ function formatToolSummaryStatus(status: AgentRunEvent["status"]) {
   return formatRunEventStatus({ status: "success", type: "tool_result" } as AgentRunEvent);
 }
 
-function RunEventSection(props: { event: AgentRunEvent }) {
+function RunEventSection(props: { event: AgentRunEvent; compact?: boolean }) {
   const toolName = typeof props.event.metadata?.toolName === "string" ? props.event.metadata.toolName : null;
   const icon =
     props.event.type === "tool_call" ? (
@@ -211,15 +228,15 @@ function RunEventSection(props: { event: AgentRunEvent }) {
 
   return (
     <section
-      className={`[display:grid] [gap:8px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:10px_12px] [background:#ffffff] [font-size:12px] ${props.event.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${props.event.status === "error" ? "[border-color:#dc26262e] [background:#fef2f2]" : ""}`}
+      className={`[display:grid] [min-width:0] [overflow:hidden] [gap:8px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:10px_12px] [background:#ffffff] [font-size:12px] ${props.event.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${props.event.status === "error" ? "[border-color:#dc26262e] [background:#fef2f2]" : ""}`}
     >
-      <div className={"[display:flex] [align-items:center] [gap:6px] [color:var(--muted)] [font-size:12px] [font-weight:700]"}>
+      <div className={"[display:flex] [min-width:0] [align-items:center] [gap:6px] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:700]"}>
         {icon}
-        <span>{label}</span>
-        <span className={"[margin-left:auto] [font-weight:600]"}>{formatRunEventStatus(props.event)}</span>
+        <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{label}</span>
+        <span className={"[flex:0_0_auto] [margin-left:auto] [font-weight:600]"}>{formatRunEventStatus(props.event)}</span>
       </div>
       {props.event.content ? (
-        <pre className={"[margin:0] [max-height:220px] [overflow:auto] [border-radius:10px] [padding:10px] [white-space:pre-wrap] [color:#404040] [background:#f8fafc] [font-size:12px] [line-height:1.5]"}>
+        <pre className={`${props.compact ? "[max-height:160px] [font-size:11px]" : "[max-height:220px] [font-size:12px]"} [margin:0] [overflow:auto] [border-radius:10px] [padding:10px] [white-space:pre-wrap] [color:#404040] [background:#f8fafc] [line-height:1.5]`}>
           {props.event.content}
         </pre>
       ) : null}

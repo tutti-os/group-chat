@@ -7,7 +7,7 @@ import type { Artifact, AgentRun, AgentRunEvent, Conversation, Identity, Message
 import { isLocalUserMessage, resolveMessageVisibility, enrichAssistantContentWithWorkspaceResourceLinks, resolveTriggerUserMentions, stripAssistantSkillDetails } from "@group-chat/shared";
 import { getArtifactCategory, revealArtifactInTuttiFileManager } from "../../artifact-actions.js";
 import { enrichMessageContentForCopy } from "../../composer-paste-content.js";
-import { formatBytes, formatMessageStatus, formatMessageTime } from "../../formatting.js";
+import { formatBytes, formatMessageStatus, formatMessageTime, truncateMiddle } from "../../formatting.js";
 import { TuttiMessageLinkIcon } from "../../tutti-reference-icons.js";
 import type { LocalUserProfile } from "../../user-profile.js";
 import { UserAvatar, type UserAvatarSize } from "../ui/UserAvatar.js";
@@ -1297,7 +1297,7 @@ function MessageRow(props: {
   const statusLabel = formatMessageStatus(props.message.status);
   const sortedBlocks = [...props.blocks].sort(compareMessageBlocks);
   const runtimeEventBlocks = sortedBlocks.filter(isRuntimeEventBlock);
-  const conversationBlocks = sortedBlocks.filter((block) => !isRuntimeEventBlock(block));
+  const conversationBlocks = sortedBlocks.filter((block) => !isRuntimeEventBlock(block) && block.type !== "reasoning");
   const failureFallbackText = resolveAssistantFailureText(props.message, sortedBlocks, props.agentRuns);
   const showFailureFallback = Boolean(failureFallbackText) && !hasVisibleConversationContent(conversationBlocks);
   const isWhisper = WHISPER_FEATURE_ENABLED && resolveMessageVisibility(props.message, props.allMessages) === "whisper";
@@ -1411,10 +1411,6 @@ function MessageRow(props: {
             message={props.message}
             selectionMode={props.selectionMode}
             onClose={props.onCloseMenu}
-            onContinue={() => {
-              if (props.participant && props.participant.status !== "removed") props.onMentionParticipant(props.participant);
-              props.onQuoteMessage();
-            }}
             onSummarize={props.onSummarizeMessage}
             onViewThinking={() => props.onViewThinking(props.message)}
             agentForwardTargets={props.agentForwardTargets}
@@ -1427,13 +1423,13 @@ function MessageRow(props: {
           />
         ) : null}
         {props.showHeader ? (
-        <div data-slot="message-meta" className={"[user-select:none] [&_span:not([data-message-status=error])]:[color:var(--muted)] [&_span[data-message-status=error]]:[color:#dc2626] [&_span]:[font-size:12px] [display:flex] [align-items:center] [gap:7px] [min-height:20px] [margin-bottom:4px] [&_strong]:[color:var(--muted)] [&_strong]:[font-size:12px] [&_strong]:[font-weight:550]"}>
+        <div data-slot="message-meta" className={"[user-select:none] [min-width:0] [max-width:100%] [&_span:not([data-message-status=error])]:[color:var(--muted)] [&_span[data-message-status=error]]:[color:#dc2626] [&_span]:[font-size:12px] [display:flex] [align-items:center] [gap:7px] [overflow:hidden] [min-height:20px] [margin-bottom:4px] [&_strong]:[color:var(--muted)] [&_strong]:[font-size:12px] [&_strong]:[font-weight:550]"}>
             {isUserMessage ? (
-              <strong>{senderLabel}</strong>
+              <strong className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{senderLabel}</strong>
             ) : props.participant && props.participant.status !== "removed" ? (
                 <button
                   type="button"
-                  className={"group [display:inline-flex] [align-items:center] [border:0] [padding:0] [color:var(--muted)] [background:transparent] [font-size:12px] [font-weight:550] [line-height:20px] [cursor:pointer] [transition:color_0.12s_ease] hover:![color:#2563eb] focus-visible:![color:#2563eb] focus-visible:[outline:none]"}
+                  className={"group [display:inline-flex] [min-width:0] [align-items:center] [overflow:hidden] [border:0] [padding:0] [color:var(--muted)] [background:transparent] [font-size:12px] [font-weight:550] [line-height:20px] [cursor:pointer] [transition:color_0.12s_ease] hover:![color:#2563eb] focus-visible:![color:#2563eb] focus-visible:[outline:none]"}
                   title={`@${props.participant.displayName}`}
                   aria-label={t("messageActions.mentionInComposer", { name: props.participant.displayName })}
                   onMouseDown={(event) => event.preventDefault()}
@@ -1442,12 +1438,12 @@ function MessageRow(props: {
                   <span className={"[display:inline-block] [max-width:0] [overflow:hidden] [opacity:0] [transition:max-width_0.12s_ease,_opacity_0.12s_ease] group-hover:[max-width:14px] group-hover:[opacity:1] group-focus-visible:[max-width:14px] group-focus-visible:[opacity:1]"}>
                     @
                   </span>
-                  <span>{senderLabel}</span>
+                  <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{senderLabel}</span>
                 </button>
               ) : (
-                <strong>{senderLabel}</strong>
+                <strong className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{senderLabel}</strong>
               )}
-            <span>{formatMessageTime(props.message.createdAt)}</span>
+            <span className={"[flex:0_0_auto]"}>{formatMessageTime(props.message.createdAt)}</span>
             {statusLabel ? (
               <span data-message-status={props.message.status === "error" ? "error" : undefined}>{statusLabel}</span>
             ) : null}
@@ -1571,7 +1567,7 @@ function isRuntimeEventBlock(block: MessageBlock) {
 const MESSAGE_ACTION_BAR_Z_INDEX = 2147483000;
 const MESSAGE_MORE_MENU_Z_INDEX = MESSAGE_ACTION_BAR_Z_INDEX + 1;
 const MESSAGE_MORE_MENU_BOTTOM_RESERVE_PX = 96;
-const MESSAGE_MORE_MENU_MIN_WIDTH = 178;
+const MESSAGE_MORE_MENU_MIN_WIDTH = 196;
 
 function computeMessageMoreMenuPosition(anchorRect: DOMRect, menuHeight: number) {
   const viewportPadding = 12;
@@ -1597,8 +1593,98 @@ function computeMessageMoreMenuPosition(anchorRect: DOMRect, menuHeight: number)
 const MESSAGE_ACTION_BAR_BUTTON_CLASS =
   "group/icon [position:relative] [display:inline-grid] [width:24px] [height:24px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000008]";
 
-const MESSAGE_ACTION_BAR_TOOLTIP_CLASS =
-  "[position:absolute] [left:50%] [bottom:calc(100%+5px)] [z-index:30] [transform:translateX(-50%)] [border-radius:5px] [padding:3px_6px] [color:#ffffff] [background:#1f2329] [font-size:11px] [font-weight:500] [line-height:16px] [white-space:nowrap] [pointer-events:none] [opacity:0] [transition:opacity_0.12s_ease] group-hover/icon:[opacity:1] group-focus-visible/icon:[opacity:1]";
+const MESSAGE_ACTION_BAR_TOOLTIP_GAP_PX = 6;
+const MESSAGE_ACTION_BAR_TOOLTIP_VIEWPORT_PADDING_PX = 8;
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function ViewportActionTooltip(props: {
+  anchorRef: { current: HTMLElement | null };
+  visible: boolean;
+  children: ReactNode;
+}) {
+  const tooltipRef = useRef<HTMLSpanElement | null>(null);
+  const [layout, setLayout] = useState<{
+    arrowLeft: number;
+    placement: "above" | "below";
+    ready: boolean;
+    style: CSSProperties;
+  }>({
+    arrowLeft: 0,
+    placement: "above",
+    ready: false,
+    style: { left: -9999, top: -9999 },
+  });
+
+  const updateLayout = useCallback(() => {
+    const anchor = props.anchorRef.current;
+    const tooltip = tooltipRef.current;
+    if (!anchor || !tooltip) return;
+    const anchorRect = anchor.getBoundingClientRect();
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const padding = MESSAGE_ACTION_BAR_TOOLTIP_VIEWPORT_PADDING_PX;
+    const gap = MESSAGE_ACTION_BAR_TOOLTIP_GAP_PX;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const anchorCenterX = anchorRect.left + anchorRect.width / 2;
+    const spaceAbove = anchorRect.top - padding;
+    const spaceBelow = viewportHeight - anchorRect.bottom - padding;
+    const placement = spaceAbove >= tooltipRect.height + gap || spaceAbove >= spaceBelow ? "above" : "below";
+    const unclampedTop = placement === "above"
+      ? anchorRect.top - tooltipRect.height - gap
+      : anchorRect.bottom + gap;
+    const top = clampNumber(unclampedTop, padding, Math.max(padding, viewportHeight - tooltipRect.height - padding));
+    const left = clampNumber(
+      anchorCenterX - tooltipRect.width / 2,
+      padding,
+      Math.max(padding, viewportWidth - tooltipRect.width - padding),
+    );
+    setLayout({
+      arrowLeft: clampNumber(anchorCenterX - left, 8, Math.max(8, tooltipRect.width - 8)),
+      placement,
+      ready: true,
+      style: { left, top, zIndex: MESSAGE_ACTION_BAR_Z_INDEX + 2 },
+    });
+  }, [props.anchorRef]);
+
+  useLayoutEffect(() => {
+    if (!props.visible) return;
+    updateLayout();
+  }, [props.children, props.visible, updateLayout]);
+
+  useEffect(() => {
+    if (!props.visible) return;
+    const handleMove = () => updateLayout();
+    window.addEventListener("resize", handleMove);
+    window.addEventListener("scroll", handleMove, true);
+    return () => {
+      window.removeEventListener("resize", handleMove);
+      window.removeEventListener("scroll", handleMove, true);
+    };
+  }, [props.visible, updateLayout]);
+
+  if (!props.visible) return null;
+  return createPortal(
+    <span
+      ref={tooltipRef}
+      role="tooltip"
+      className={"[position:fixed] [border-radius:5px] [padding:3px_6px] [color:#ffffff] [background:#1f2329] [font-size:11px] [font-weight:500] [line-height:16px] [white-space:nowrap] [pointer-events:none]"}
+      style={{ ...layout.style, visibility: layout.ready ? "visible" : "hidden" }}
+    >
+      {props.children}
+      <span
+        aria-hidden
+        className={`[position:absolute] [width:0] [height:0] [border-left:5px_solid_transparent] [border-right:5px_solid_transparent] ${layout.placement === "above"
+          ? "[top:100%] [border-top:5px_solid_#1f2329]"
+          : "[bottom:100%] [border-bottom:5px_solid_#1f2329]"}`}
+        style={{ left: layout.arrowLeft, transform: "translateX(-50%)" }}
+      />
+    </span>,
+    document.body,
+  );
+}
 
 function MessageActionBar(props: {
   visible: boolean;
@@ -1670,6 +1756,7 @@ function ForwardToAgentAction(props: {
   onDismissActions: () => void;
 }) {
   const { anchorRef, closeMenu, open, toggleMenu } = useForwardSubmenuHover(props.onDismissActions);
+  const [tooltipVisible, setTooltipVisible] = useState(false);
 
   useEffect(() => {
     if (!props.active) closeMenu();
@@ -1689,8 +1776,13 @@ function ForwardToAgentAction(props: {
         className={MESSAGE_ACTION_BAR_BUTTON_CLASS}
         aria-label={t("messageActions.forwardTo")}
         aria-expanded={open}
+        onMouseEnter={() => setTooltipVisible(true)}
+        onMouseLeave={() => setTooltipVisible(false)}
+        onFocus={() => setTooltipVisible(true)}
+        onBlur={() => setTooltipVisible(false)}
         onClick={() => {
           props.onCloseMenu();
+          setTooltipVisible(false);
           toggleMenu();
         }}
       >
@@ -1699,17 +1791,10 @@ function ForwardToAgentAction(props: {
           className={"[transition:transform_0.14s_ease]"}
           style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
         />
-        <span
-          role="tooltip"
-          className={`${MESSAGE_ACTION_BAR_TOOLTIP_CLASS} ${open ? "" : "group-hover/icon:[opacity:1]"}`}
-        >
-          {t("messageActions.forwardTo")}
-          <span
-            aria-hidden
-            className={"[position:absolute] [left:50%] [top:100%] [transform:translateX(-50%)] [width:0] [height:0] [border-left:5px_solid_transparent] [border-right:5px_solid_transparent] [border-top:5px_solid_#1f2329]"}
-          />
-        </span>
       </button>
+      <ViewportActionTooltip anchorRef={anchorRef} visible={tooltipVisible && props.active && !props.moreMenuOpen && !open}>
+        {t("messageActions.forwardTo")}
+      </ViewportActionTooltip>
       {open ? (
         <div
           className={"[position:absolute] [left:50%] [top:100%] [z-index:40] [transform:translateX(-50%)] before:[content:''] before:[position:absolute] before:[bottom:100%] before:[left:0] before:[right:0] before:[height:8px]"}
@@ -1733,7 +1818,6 @@ function MessageMoreMenu(props: {
   message: Message;
   selectionMode: boolean;
   onClose: () => void;
-  onContinue: () => void;
   onSummarize: () => void;
   onViewThinking: () => void;
   agentForwardTargets: AgentForwardTarget[];
@@ -1811,7 +1895,7 @@ function MessageMoreMenu(props: {
     <div
       ref={menuRef}
       data-slot="message-more-menu"
-      className={"[user-select:none] [display:grid] [min-width:178px] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:4px] [padding:6px] [background:#ffffff] [box-shadow:0_18px_46px_rgb(0_0_0_/_14%)]"}
+      className={"[user-select:none] [display:grid] [min-width:196px] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:4px] [padding:6px] [background:#ffffff] [box-shadow:0_18px_46px_rgb(0_0_0_/_14%)]"}
       style={{
         position: "fixed",
         top: -9999,
@@ -1830,7 +1914,6 @@ function MessageMoreMenu(props: {
         />
       ) : null}
       {!isRemoved ? <MenuButton icon={<CheckSquare size={14} />} label={t("messageActions.select")} onClick={() => void run(props.onSelect)} /> : null}
-      {isAssistant ? <MenuButton icon={<RotateCcw size={14} />} label={t("messageActions.continue")} onClick={() => void run(props.onContinue)} /> : null}
       <MenuButton icon={<BrainCircuit size={14} />} label={t("messageActions.summarize")} onClick={() => void run(props.onSummarize)} />
       {isAssistant ? <MenuButton icon={<BrainCircuit size={14} />} label={t("messageActions.viewThinking")} onClick={() => void run(props.onViewThinking)} /> : null}
       {!isRemoved ? <MenuButton icon={<Copy size={14} />} label={t("common.copy")} onClick={(event) => void run(() => {
@@ -1943,7 +2026,7 @@ function ForwardToAgentMenuItem(props: {
     >
       <button
         type="button"
-        className={`[display:grid] [width:100%] [min-width:0] [height:34px] [grid-template-columns:14px_minmax(0,_1fr)_14px] [align-items:center] [gap:8px] [border:0] [padding:0_9px] [color:var(--text)] [font-size:12px] [font-weight:650] [text-align:left] [&:hover]:[background:#00000008] ${open ? "[border-radius:8px_8px_0_0] [background:#00000006]" : "[border-radius:8px] [background:transparent]"}`}
+        className={`[display:grid] [width:100%] [min-width:0] [height:34px] [grid-template-columns:14px_max-content_14px] [align-items:center] [column-gap:8px] [border:0] [padding:0_9px] [color:var(--text)] [font-size:12px] [font-weight:650] [text-align:left] [&:hover]:[background:#00000008] ${open ? "[border-radius:8px_8px_0_0] [background:#00000006]" : "[border-radius:8px] [background:transparent]"}`}
         role="menuitem"
         aria-expanded={open}
         onClick={(event) => {
@@ -1953,8 +2036,8 @@ function ForwardToAgentMenuItem(props: {
         }}
       >
         <SendHorizontal size={14} />
-        <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{t("messageActions.forwardTo")}</span>
-        {open ? <ChevronDown size={14} className={"[color:var(--muted)]"} /> : <ChevronRight size={14} className={"[color:var(--muted)]"} />}
+        <span className={"[min-width:max-content] [white-space:nowrap]"}>{t("messageActions.forwardTo")}</span>
+        {open ? <ChevronDown size={14} className={"[justify-self:end] [color:var(--muted)]"} /> : <ChevronRight size={14} className={"[justify-self:end] [color:var(--muted)]"} />}
       </button>
       {open ? (
         <AgentForwardSubmenu
@@ -2619,7 +2702,7 @@ function DetailMessageCard(props: {
     props.userProfile.displayName,
   );
   return (
-    <article className={"[display:grid] [gap:10px] [border-radius:16px] [padding:16px] [background:#eef0f3]"}>
+    <article className={"[display:grid] [min-width:0] [overflow:hidden] [gap:10px] [border-radius:16px] [padding:16px] [background:#eef0f3]"}>
       <div className={"[display:grid] [grid-template-columns:38px_minmax(0,_1fr)_auto] [gap:10px] [align-items:center]"}>
         <span className={isUserMessage
           ? "[display:grid] [width:38px] [height:38px] [overflow:hidden] [border-radius:999px]"
@@ -2634,7 +2717,7 @@ function DetailMessageCard(props: {
           />
         </span>
         <span className={"[display:grid] [min-width:0]"}>
-          <strong className={"[font-size:13px] [font-weight:750] [color:var(--text)]"}>{senderLabel}</strong>
+          <strong className={"[overflow:hidden] [font-size:13px] [font-weight:750] [color:var(--text)] [text-overflow:ellipsis] [white-space:nowrap]"}>{senderLabel}</strong>
           <small className={"[color:var(--muted)] [font-size:12px]"}>{formatMessageTime(props.message.createdAt)}</small>
         </span>
         <button
@@ -2661,25 +2744,31 @@ function IconAction(props: {
   onClick: (event: MouseEvent<HTMLButtonElement>) => void;
   children: ReactNode;
 }) {
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const [tooltipVisible, setTooltipVisible] = useState(false);
+
   return (
-    <button
-      type="button"
-      className={MESSAGE_ACTION_BAR_BUTTON_CLASS}
-      aria-label={props.title}
-      onClick={props.onClick}
-    >
-      {props.children}
-      <span
-        role="tooltip"
-        className={MESSAGE_ACTION_BAR_TOOLTIP_CLASS}
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        className={MESSAGE_ACTION_BAR_BUTTON_CLASS}
+        aria-label={props.title}
+        onMouseEnter={() => setTooltipVisible(true)}
+        onMouseLeave={() => setTooltipVisible(false)}
+        onFocus={() => setTooltipVisible(true)}
+        onBlur={() => setTooltipVisible(false)}
+        onClick={(event) => {
+          setTooltipVisible(false);
+          props.onClick(event);
+        }}
       >
+        {props.children}
+      </button>
+      <ViewportActionTooltip anchorRef={buttonRef} visible={tooltipVisible}>
         {props.title}
-        <span
-          aria-hidden
-          className={"[position:absolute] [left:50%] [top:100%] [transform:translateX(-50%)] [width:0] [height:0] [border-left:5px_solid_transparent] [border-right:5px_solid_transparent] [border-top:5px_solid_#1f2329]"}
-        />
-      </span>
-    </button>
+      </ViewportActionTooltip>
+    </>
   );
 }
 
@@ -3171,7 +3260,7 @@ export function MessageBlockRenderer(props: {
       data-slot="message-block"
       data-block-id={props.block.id}
       data-link-only={isLinkOnly || undefined}
-      className={`message-prose [width:fit-content] [max-width:100%] [border:0] [color:var(--text)] ${isLinkOnly ? "[display:grid] [gap:6px] [padding:0] [background:transparent] [border-radius:0]" : hasWhisperFooter ? "[display:flex] [flex-direction:column] [gap:4px] [padding:10px_12px] [border-radius:8px]" : "[padding:10px_13px] [border-radius:4px_6px_6px_4px]"} ${props.block.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${props.block.status === "error" && !hasWhisperFooter ? "[border:1px_solid_#fecaca] [color:var(--danger)] [background:#fef2f2]" : ""}`}
+      className={`message-prose [box-sizing:border-box] [width:fit-content] [min-width:0] [max-width:100%] [overflow-wrap:anywhere] [word-break:break-word] [border:0] [color:var(--text)] ${isLinkOnly ? "[display:grid] [gap:6px] [padding:0] [background:transparent] [border-radius:0]" : hasWhisperFooter ? "[display:flex] [flex-direction:column] [gap:4px] [padding:10px_12px] [border-radius:8px]" : "[padding:10px_13px] [border-radius:4px_6px_6px_4px]"} ${props.block.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${props.block.status === "error" && !hasWhisperFooter ? "[border:1px_solid_#fecaca] [color:var(--danger)] [background:#fef2f2]" : ""}`}
     >
       {props.quotedMessage ? (
         <ReferencedMessagePreview
@@ -3233,7 +3322,7 @@ export function MessageBlockRenderer(props: {
           tightSpacing={hasWhisperFooter}
         />
       ) : whisperPlainText ? (
-        <span data-slot="whisper-body" className="[display:block] [line-height:1.35] [white-space:pre-wrap]">{bodyWithoutLinks}</span>
+        <span data-slot="whisper-body" className="[display:block] [min-width:0] [max-width:100%] [overflow-wrap:anywhere] [word-break:break-word] [line-height:1.35] [white-space:pre-wrap]">{bodyWithoutLinks}</span>
       ) : bodyWithoutLinks ? (
         <MessageReferenceContent
           content={bodyWithoutLinks}
@@ -3282,7 +3371,7 @@ function ReplyQuotePreview(props: { quotes: Array<{ sender: string; content: str
 }
 
 const embeddedLinkCardClassName =
-  "[display:grid] [width:300px] [max-width:100%] [gap:3px] [border:1px_solid_var(--border)] [border-radius:10px] [padding:7px_9px] [color:var(--text)] [background:#ffffff] [text-align:left] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] hover:[border-color:#cbd5e1] hover:[background:#f8fafc]";
+  "[display:grid] [width:300px] [min-width:0] [max-width:100%] [overflow:hidden] [gap:3px] [border:1px_solid_var(--border)] [border-radius:10px] [padding:7px_9px] [color:var(--text)] [background:#ffffff] [text-align:left] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] hover:[border-color:#cbd5e1] hover:[background:#f8fafc]";
 
 function SummaryLinkCard(props: {
   taskId: string;
@@ -3319,9 +3408,9 @@ function SummaryLinkCard(props: {
       className={SUMMARY_LINK_CARD_CLASS}
       onClick={props.onOpen}
     >
-      <span className={"[display:flex] [align-items:center] [gap:5px] [color:#2563eb] [font-size:12px] [font-weight:700] [line-height:1.3]"}>
-        <BrainCircuit size={13} />
-        <span>{presentation.title}</span>
+      <span className={"[display:flex] [min-width:0] [align-items:center] [gap:5px] [overflow:hidden] [color:#2563eb] [font-size:12px] [font-weight:700] [line-height:1.3]"}>
+        <BrainCircuit size={13} className={"[flex:0_0_auto]"} />
+        <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{presentation.title}</span>
       </span>
       {presentation.meta ? (
         <span className={"[display:block] [overflow:hidden] [color:var(--muted)] [font-size:11px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>
@@ -3332,9 +3421,9 @@ function SummaryLinkCard(props: {
         {presentation.body}
       </span>
       {task ? (
-        <span className={"[display:flex] [align-items:center] [gap:6px] [color:var(--muted)] [font-size:11px] [line-height:1.3]"}>
-          <span>{room?.title || conversation?.title || t("common.unknownConversation")}</span>
-          <span>{formatMessageTime(task.updatedAt)}</span>
+        <span className={"[display:flex] [min-width:0] [align-items:center] [gap:6px] [overflow:hidden] [color:var(--muted)] [font-size:11px] [line-height:1.3]"}>
+          <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{room?.title || conversation?.title || t("common.unknownConversation")}</span>
+          <span className={"[flex:0_0_auto]"}>{formatMessageTime(task.updatedAt)}</span>
         </span>
       ) : null}
     </button>
@@ -3382,7 +3471,7 @@ function MessageLinkCard(props: {
   const senderSummary = senderNames.length <= 2
     ? senderNames.join("、")
     : t("messageLink.sendersAndMore", { first: senderNames[0]!, second: senderNames[1]!, count: senderNames.length - 2 });
-  const cardLabel = t("messageLink.cardLabel", { senders: senderSummary, count: linkedMessages.length });
+  const cardLabel = t("messageLink.cardLabel", { senders: truncateMiddle(senderSummary, 14), count: linkedMessages.length });
 
   return (
     <button
@@ -3393,13 +3482,13 @@ function MessageLinkCard(props: {
       aria-label={cardLabel}
       onClick={props.onOpen}
     >
-      <span className={"[display:flex] [align-items:center] [gap:5px] [color:#2563eb] [font-size:12px] [font-weight:700] [line-height:1.3]"}>
+      <span className={"[display:flex] [min-width:0] [align-items:center] [gap:5px] [overflow:hidden] [color:#2563eb] [font-size:12px] [font-weight:700] [line-height:1.3]"}>
         <TuttiMessageLinkIcon />
         <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{cardLabel}</span>
       </span>
-      <span className={"[display:flex] [align-items:center] [gap:6px] [color:var(--muted)] [font-size:11px] [line-height:1.3]"}>
-        <span>{room?.title || conversation?.title || t("common.unknownConversation")}</span>
-        {message ? <span>{formatMessageTime(message.createdAt)}</span> : null}
+      <span className={"[display:flex] [min-width:0] [align-items:center] [gap:6px] [overflow:hidden] [color:var(--muted)] [font-size:11px] [line-height:1.3]"}>
+        <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{room?.title || conversation?.title || t("common.unknownConversation")}</span>
+        {message ? <span className={"[flex:0_0_auto]"}>{formatMessageTime(message.createdAt)}</span> : null}
       </span>
     </button>
   );
@@ -3443,7 +3532,7 @@ function LinkedMessageCardBody(props: {
   );
 
   return (
-    <span className={"[display:grid] [gap:4px] [&_[data-slot=message-block]]:[padding:0] [&_[data-slot=message-block]]:[font-size:13px] [&_[data-slot=message-block]]:[font-weight:600]"}>
+    <span className={"[display:grid] [min-width:0] [max-width:100%] [overflow:hidden] [gap:4px] [&_[data-slot=message-block]]:[min-width:0] [&_[data-slot=message-block]]:[max-width:100%] [&_[data-slot=message-block]]:[overflow:hidden] [&_[data-slot=message-block]]:[padding:0] [&_[data-slot=message-block]]:[font-size:13px] [&_[data-slot=message-block]]:[font-weight:600]"}>
       {previewBlocks.map((block) => (
         <MessageBlockRenderer
           key={block.id}
@@ -3638,7 +3727,7 @@ export function ArtifactBlock(props: { artifact: Artifact; onOpen: () => void })
       type="button"
       data-slot="artifact-block"
       data-artifact-id={props.artifact.id}
-      className={"[display:grid] [width:min(300px,_100%)] [min-height:40px] [grid-template-columns:28px_minmax(0,_1fr)] [align-items:center] [gap:9px] [margin-top:6px] [border:1px_solid_var(--border)] [border-radius:10px] [padding:6px_10px] [color:var(--text)] [background:#ffffff] [cursor:pointer] [box-shadow:0_1px_2px_rgb(0_0_0_/_3%)] [transition:border-color_0.12s_ease,_background-color_0.12s_ease,_box-shadow_0.12s_ease] hover:[border-color:#d4d4d8] hover:[background:#fbfbfc] hover:[box-shadow:0_3px_10px_rgb(0_0_0_/_5%)] focus-visible:[outline:none] focus-visible:[border-color:var(--border-strong)] [&[data-copy-selected]]:[border-color:#2563eb] [&[data-copy-selected]]:[background:#dbeafe] [&[data-copy-selected]]:[box-shadow:0_0_0_2px_rgb(37_99_235_/_22%)] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-flash=true]]:[border-color:#facc15]"}
+      className={"[display:grid] [width:min(300px,_100%)] [min-width:0] [min-height:40px] [overflow:hidden] [grid-template-columns:28px_minmax(0,_1fr)] [align-items:center] [gap:9px] [margin-top:6px] [border:1px_solid_var(--border)] [border-radius:10px] [padding:6px_10px] [color:var(--text)] [background:#ffffff] [cursor:pointer] [box-shadow:0_1px_2px_rgb(0_0_0_/_3%)] [transition:border-color_0.12s_ease,_background-color_0.12s_ease,_box-shadow_0.12s_ease] hover:[border-color:#d4d4d8] hover:[background:#fbfbfc] hover:[box-shadow:0_3px_10px_rgb(0_0_0_/_5%)] focus-visible:[outline:none] focus-visible:[border-color:var(--border-strong)] [&[data-copy-selected]]:[border-color:#2563eb] [&[data-copy-selected]]:[background:#dbeafe] [&[data-copy-selected]]:[box-shadow:0_0_0_2px_rgb(37_99_235_/_22%)] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-flash=true]]:[border-color:#facc15]"}
       onClick={props.onOpen}
       title={t("messageActions.revealInFileManager")}
     >

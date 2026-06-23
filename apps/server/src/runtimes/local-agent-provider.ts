@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
 import { dirname, join, resolve } from "node:path";
@@ -13,7 +13,7 @@ import {
   type RawAgentEvent,
   type RawAgentStream,
 } from "@tutti-os/agent-acp-kit";
-import type { LocalAgentProviderStatus } from "@group-chat/shared";
+import type { LocalAgentProviderStatus, MentionTarget } from "@group-chat/shared";
 import { isMentionAllTrigger } from "@group-chat/shared";
 import { buildEffectiveRoleDescription } from "../domains/agent-instructions.js";
 import { participantWorkspaceRoot } from "../local/paths.js";
@@ -23,7 +23,6 @@ import { buildLocalAgentInput, decodeLocalAgentStdout, localToolBaseUrl } from "
 import type { RuntimeProvider, RuntimeReplyContext, RuntimeStreamEvent } from "./runtime-provider.js";
 import { RuntimeProviderUnsupportedError } from "./runtime-provider.js";
 
-const DEFAULT_TIMEOUT_MS = 120_000;
 type GroupChatLocalAgentProviderPlugin = LocalAgentProviderPlugin<"local-agent", string>;
 
 type TuttiAgentProviderStatus = {
@@ -46,6 +45,22 @@ type TuttiAgentProviderStatus = {
 
 type TuttiAgentProviderStatusListResponse = {
   providers?: TuttiAgentProviderStatus[];
+};
+
+type WorkspaceAppBridge = {
+  appId: "vibe-design";
+  prompt: string;
+  workspaceId?: string;
+};
+
+type TuttiCliRunState = {
+  child: ChildProcessWithoutNullStreams | null;
+  cancelled: boolean;
+};
+
+type VibeDesignFile = {
+  name: string;
+  url?: string;
 };
 
 export class LocalAgentRuntimeProvider implements RuntimeProvider {
@@ -133,6 +148,12 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
   }
 
   async *streamReply(context: RuntimeReplyContext) {
+    const workspaceAppBridge = resolveWorkspaceAppBridge(context);
+    if (workspaceAppBridge) {
+      yield* this.streamWorkspaceAppBridge(context, workspaceAppBridge);
+      return;
+    }
+
     const command = resolveLocalAgentCommand(context);
     if (command) {
       yield* this.streamCommandBridge(context, command);
@@ -149,6 +170,135 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
     await process.cancel();
     this.processes.delete(runId);
     return { cancelled: true };
+  }
+
+  private async *streamWorkspaceAppBridge(context: RuntimeReplyContext, bridge: WorkspaceAppBridge) {
+    if (bridge.appId === "vibe-design") {
+      yield* this.streamVibeDesignBridge(context, bridge);
+    }
+  }
+
+  private async *streamVibeDesignBridge(context: RuntimeReplyContext, bridge: WorkspaceAppBridge) {
+    const workspaceRoot = participantWorkspaceRoot(context.conversation.roomId, context.participant.id);
+    const runState: TuttiCliRunState = { child: null, cancelled: false };
+    if (context.runId) {
+      this.processes.set(context.runId, {
+        cancel: () => {
+          runState.cancelled = true;
+          runState.child?.kill("SIGTERM");
+        },
+      });
+    }
+
+    const projectCallId = `${context.runId ?? context.conversation.id}:vibe-design-project-create`;
+    const sessionCallId = `${context.runId ?? context.conversation.id}:vibe-design-session-start`;
+    const filesCallId = `${context.runId ?? context.conversation.id}:vibe-design-files`;
+    try {
+      yield {
+        type: "thinking_delta",
+        text: "识别到 Vibe Design 应用引用，改为通过 Tutti CLI 创建原型项目并运行 Vibe Design agent。\n",
+      } satisfies RuntimeStreamEvent;
+
+      yield {
+        type: "tool_call",
+        id: projectCallId,
+        name: "tutti vibe-design project-create",
+        input: { prompt: bridge.prompt },
+      } satisfies RuntimeStreamEvent;
+      let projectPayload: unknown;
+      try {
+        projectPayload = await runTuttiJsonCommand(
+          ["vibe-design", "project-create", "--prompt", bridge.prompt, "--title", titleFromPrompt(bridge.prompt)],
+          workspaceRoot,
+          runState,
+        );
+      } catch (error) {
+        yield failedToolResult(projectCallId, "tutti vibe-design project-create", error);
+        throw error;
+      }
+      yield {
+        type: "tool_result",
+        id: projectCallId,
+        name: "tutti vibe-design project-create",
+        status: "completed",
+        output: summarizeVibeDesignProject(projectPayload),
+      } satisfies RuntimeStreamEvent;
+
+      const projectId = readStringPath(projectPayload, ["project", "id"]);
+      if (!projectId) throw new Error("Vibe Design project-create did not return project.id");
+
+      yield {
+        type: "tool_call",
+        id: sessionCallId,
+        name: "tutti vibe-design session-start",
+        input: { projectId },
+      } satisfies RuntimeStreamEvent;
+      let sessionPayload: unknown;
+      try {
+        sessionPayload = await runTuttiJsonCommand(
+          ["vibe-design", "session-start", "--project-id", projectId, "--prompt", bridge.prompt],
+          workspaceRoot,
+          runState,
+        );
+      } catch (error) {
+        yield failedToolResult(sessionCallId, "tutti vibe-design session-start", error);
+        throw error;
+      }
+      const sessionStatus = readStringPath(sessionPayload, ["status"]);
+      if (sessionStatus && sessionStatus !== "succeeded") {
+        const error = new Error(`Vibe Design run ${sessionStatus}`);
+        yield failedToolResult(sessionCallId, "tutti vibe-design session-start", error);
+        throw error;
+      }
+      yield {
+        type: "tool_result",
+        id: sessionCallId,
+        name: "tutti vibe-design session-start",
+        status: "completed",
+        output: summarizeVibeDesignSession(sessionPayload),
+      } satisfies RuntimeStreamEvent;
+
+      yield {
+        type: "tool_call",
+        id: filesCallId,
+        name: "tutti vibe-design files",
+        input: { projectId },
+      } satisfies RuntimeStreamEvent;
+      let filesPayload: unknown;
+      try {
+        filesPayload = await runTuttiJsonCommand(
+          ["vibe-design", "files", "--project-id", projectId],
+          workspaceRoot,
+          runState,
+        );
+      } catch (error) {
+        yield failedToolResult(filesCallId, "tutti vibe-design files", error);
+        throw error;
+      }
+      const files = extractVibeDesignFiles(filesPayload);
+      yield {
+        type: "tool_result",
+        id: filesCallId,
+        name: "tutti vibe-design files",
+        status: "completed",
+        output: { files: files.map((file) => ({ name: file.name, url: file.url })) },
+      } satisfies RuntimeStreamEvent;
+
+      yield {
+        type: "text_delta",
+        text: formatVibeDesignFinalReply({
+          projectId,
+          conversationId: readStringPath(sessionPayload, ["conversationId"])
+            ?? readStringPath(projectPayload, ["conversationId"]),
+          provider: readStringPath(sessionPayload, ["provider"]),
+          fallback: readStringPath(sessionPayload, ["agentFallback", "message"]),
+          files,
+          workspaceId: bridge.workspaceId,
+        }),
+      } satisfies RuntimeStreamEvent;
+    } finally {
+      if (context.runId) this.processes.delete(context.runId);
+    }
   }
 
   private async *streamCommandBridge(context: RuntimeReplyContext, command: string) {
@@ -183,7 +333,14 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
     }
 
     const stderrChunks: string[] = [];
-    const timeout = setTimeout(() => child.kill("SIGTERM"), Number(process.env.GROUP_CHAT_LOCAL_AGENT_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS));
+    const timeoutMs = localAgentTimeoutMs();
+    let timedOut = false;
+    const timeout = timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          child.kill("SIGTERM");
+        }, timeoutMs)
+      : undefined;
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk) => stderrChunks.push(String(chunk)));
 
@@ -194,13 +351,13 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       const [code, signal] = (await once(child, "close")) as [number | null, NodeJS.Signals | null];
       if (code !== 0) {
         const stderr = stderrChunks.join("").trim();
-        if (signal === "SIGTERM" && code === null) {
+        if (timedOut && signal === "SIGTERM" && code === null) {
           throw new Error("Agent 执行超时，已被终止");
         }
         throw new Error(`local-agent command exited with ${code ?? signal ?? "unknown"}${stderr ? `: ${stderr}` : ""}`);
       }
     } finally {
-      clearTimeout(timeout);
+      if (timeout) clearTimeout(timeout);
       if (context.runId) this.processes.delete(context.runId);
     }
   }
@@ -222,6 +379,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       const previousSession = sessionStore.read(context.conversation.id);
       const input = buildLocalAgentInput(context);
       const prompt = acpPromptFromLocalAgentInput(input);
+      const timeoutMs = localAgentTimeoutMs();
       let resume = previousSession?.provider === provider && (previousSession.providerSessionId || previousSession.resumeToken)
         ? {
             mode: "provider" as const,
@@ -254,7 +412,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
               GROUP_CHAT_CONVERSATION_ID: context.conversation.id,
               GROUP_CHAT_TOOL_BASE_URL: localToolBaseUrl(),
             },
-            timeoutMs: Number(process.env.GROUP_CHAT_LOCAL_AGENT_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS),
+            ...(timeoutMs ? { timeoutMs } : {}),
             extraAllowedDirs: [workspaceRoot],
             resume,
             signal: controller.signal,
@@ -296,6 +454,255 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       if (context.runId) this.processes.delete(context.runId);
     }
   }
+}
+
+function localAgentTimeoutMs() {
+  const raw = process.env.GROUP_CHAT_LOCAL_AGENT_TIMEOUT_MS;
+  if (raw === undefined || raw.trim() === "") return undefined;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function resolveWorkspaceAppBridge(context: RuntimeReplyContext): WorkspaceAppBridge | null {
+  for (const mention of context.userMessage.mentions) {
+    if (mention.mentionType !== "reference" || mention.referenceProviderId !== "workspace-app") continue;
+    if (mention.referenceEntityId !== "vibe-design") continue;
+    const prompt = stripWorkspaceAppMentionPrompt(context.userMessage.content, mention, context.userMessage.mentions);
+    return {
+      appId: "vibe-design",
+      prompt: prompt || context.userMessage.content.trim() || "Create a website prototype.",
+      workspaceId: workspaceIdFromMention(mention),
+    };
+  }
+  return null;
+}
+
+function stripWorkspaceAppMentionPrompt(
+  content: string,
+  appMention: MentionTarget,
+  mentions: MentionTarget[],
+) {
+  let result = content;
+  result = result.replace(/\[[^\]]+\]\(mention:\/\/workspace-app\/vibe-design[^)]*\)/gi, " ");
+  result = result.replace(/\[[^\]]+\]\(group-chat:\/\/reference\/workspace-app\/vibe-design[^)]*\)/gi, " ");
+  result = stripMentionLabel(result, appMention.displayNameSnapshot);
+  for (const mention of mentions) {
+    if (mention.mentionType === "participant") {
+      result = stripMentionLabel(result, mention.displayNameSnapshot);
+    }
+  }
+  return result
+    .replace(/(?:^|\n)\s*你用\s*(?=\n|$)/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function stripMentionLabel(content: string, label: string) {
+  const normalized = label.replace(/^@/, "").trim();
+  if (!normalized) return content;
+  const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return content
+    .replace(new RegExp(`\\[@?${escaped}\\]\\([^)]+\\)`, "gi"), " ")
+    .replace(new RegExp(`@${escaped}(?=\\s|$|[，。！？,.!?;:：；、])`, "gi"), " ")
+    .replace(new RegExp(`(^|\\n)\\s*${escaped}\\s*(?=\\n|$)`, "gi"), "$1");
+}
+
+function workspaceIdFromMention(mention: MentionTarget) {
+  const scopedWorkspaceId = mention.referenceScope?.workspaceId;
+  if (typeof scopedWorkspaceId === "string" && scopedWorkspaceId.trim()) return scopedWorkspaceId.trim();
+  if (mention.referenceInsert?.kind === "mention") {
+    const workspaceId = mention.referenceInsert.scope?.workspaceId;
+    if (typeof workspaceId === "string" && workspaceId.trim()) return workspaceId.trim();
+  }
+  return undefined;
+}
+
+async function runTuttiJsonCommand(
+  args: string[],
+  cwd: string,
+  state: TuttiCliRunState,
+): Promise<unknown> {
+  if (state.cancelled) throw new Error("Cancelled by user");
+  const command = resolveTuttiCliCommand();
+  const child = spawn(command, ["--json", ...args], {
+    cwd,
+    env: {
+      ...process.env,
+      PATH: augmentedTuttiCliPath(),
+    },
+    stdio: "pipe",
+  });
+  state.child = child;
+  child.stdin.end();
+
+  const stdoutChunks: string[] = [];
+  const stderrChunks: string[] = [];
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => stdoutChunks.push(String(chunk)));
+  child.stderr.on("data", (chunk) => stderrChunks.push(String(chunk)));
+
+  let code: number | null;
+  let signal: NodeJS.Signals | null;
+  try {
+    [code, signal] = await Promise.race([
+      once(child, "close") as Promise<[number | null, NodeJS.Signals | null]>,
+      once(child, "error").then(([error]) => {
+        throw error instanceof Error ? error : new Error(String(error));
+      }),
+    ]);
+  } catch (error) {
+    state.child = null;
+    throw new Error(`Unable to start Tutti CLI (${command}): ${error instanceof Error ? error.message : String(error)}`);
+  }
+  state.child = null;
+  const stdout = stdoutChunks.join("").trim();
+  const stderr = stderrChunks.join("").trim();
+  if (state.cancelled) throw new Error("Cancelled by user");
+  if (code !== 0) {
+    throw new Error(`tutti ${args.join(" ")} exited with ${code ?? signal ?? "unknown"}${stderr ? `: ${stderr}` : ""}`);
+  }
+  return parseTuttiJsonOutput(stdout);
+}
+
+function resolveTuttiCliCommand() {
+  const candidates = [
+    process.env.GROUP_CHAT_TUTTI_CLI_PATH,
+    process.env.TUTTI_CLI_PATH,
+    process.env.TUTTI_CLI,
+    process.env.TUTTI_BINARY,
+    process.env.HOME ? join(process.env.HOME, ".tutti", "bin", "tutti") : null,
+    "/opt/homebrew/bin/tutti",
+    "/usr/local/bin/tutti",
+  ];
+  for (const candidate of candidates) {
+    const command = candidate?.trim();
+    if (command && existsSync(command)) return command;
+  }
+  return "tutti";
+}
+
+function augmentedTuttiCliPath() {
+  const paths = [
+    process.env.HOME ? join(process.env.HOME, ".tutti", "bin") : null,
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    process.env.PATH,
+  ].filter((item): item is string => Boolean(item?.trim()));
+  return [...new Set(paths)].join(":");
+}
+
+function parseTuttiJsonOutput(stdout: string) {
+  if (!stdout) return null;
+  try {
+    return JSON.parse(stdout);
+  } catch {
+    const firstObject = stdout.indexOf("{");
+    const firstArray = stdout.indexOf("[");
+    const start = firstObject < 0 ? firstArray : firstArray < 0 ? firstObject : Math.min(firstObject, firstArray);
+    if (start < 0) throw new Error(`Tutti CLI did not return JSON: ${stdout.slice(0, 240)}`);
+    return JSON.parse(stdout.slice(start));
+  }
+}
+
+function failedToolResult(id: string, name: string, error: unknown): RuntimeStreamEvent {
+  return {
+    type: "tool_result",
+    id,
+    name,
+    status: "failed",
+    error: error instanceof Error ? error.message : String(error),
+    isError: true,
+  };
+}
+
+function titleFromPrompt(prompt: string) {
+  const normalized = prompt.replace(/\s+/g, " ").trim();
+  return normalized.slice(0, 40) || "Vibe Design prototype";
+}
+
+function readStringPath(value: unknown, path: string[]) {
+  let current: unknown = value;
+  for (const key of path) {
+    if (!current || typeof current !== "object" || !(key in current)) return null;
+    current = (current as Record<string, unknown>)[key];
+  }
+  return typeof current === "string" && current.trim() ? current.trim() : null;
+}
+
+function summarizeVibeDesignProject(payload: unknown) {
+  return {
+    projectId: readStringPath(payload, ["project", "id"]),
+    conversationId: readStringPath(payload, ["conversationId"]),
+  };
+}
+
+function summarizeVibeDesignSession(payload: unknown) {
+  return {
+    status: readStringPath(payload, ["status"]),
+    provider: readStringPath(payload, ["provider"]),
+    conversationId: readStringPath(payload, ["conversationId"]),
+    fallback: readStringPath(payload, ["agentFallback", "message"]),
+  };
+}
+
+function extractVibeDesignFiles(payload: unknown): VibeDesignFile[] {
+  const candidates = Array.isArray(payload)
+    ? payload
+    : payload && typeof payload === "object"
+      ? (payload as Record<string, unknown>).files ?? (payload as Record<string, unknown>).resources
+      : null;
+  if (!Array.isArray(candidates)) return [];
+  const files: VibeDesignFile[] = [];
+  for (const item of candidates) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    const name = typeof record.name === "string"
+      ? record.name
+      : typeof record.path === "string"
+        ? record.path
+        : "";
+    if (!name) continue;
+    files.push({
+      name,
+      url: typeof record.url === "string"
+        ? record.url
+        : typeof record.staticUrl === "string"
+          ? record.staticUrl
+          : undefined,
+    });
+  }
+  return files;
+}
+
+function formatVibeDesignFinalReply(input: {
+  projectId: string;
+  conversationId: string | null;
+  provider: string | null;
+  fallback: string | null;
+  files: VibeDesignFile[];
+  workspaceId?: string;
+}) {
+  const projectLink = input.workspaceId
+    ? `mention://workspace-app/vibe-design?workspaceId=${encodeURIComponent(input.workspaceId)}&projectId=${encodeURIComponent(input.projectId)}`
+    : `mention://workspace-app/vibe-design?projectId=${encodeURIComponent(input.projectId)}`;
+  const lines = [
+    `Vibe Design 已完成生成：[打开项目](${projectLink})`,
+    "",
+    `项目 ID：\`${input.projectId}\``,
+    input.conversationId ? `会话 ID：\`${input.conversationId}\`` : null,
+    input.provider ? `执行 Agent：\`${input.provider}\`` : null,
+    input.fallback ? `运行切换：${input.fallback}` : null,
+  ].filter((line): line is string => Boolean(line));
+
+  if (input.files.length) {
+    lines.push("", "生成文件：");
+    for (const file of input.files.slice(0, 8)) {
+      lines.push(file.url ? `- [${file.name}](${file.url})` : `- \`${file.name}\``);
+    }
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 function toRuntimeStreamEvent(event: AgentEvent): RuntimeStreamEvent | null {
@@ -533,7 +940,7 @@ function buildKitSystemPrompt(context: RuntimeReplyContext) {
     "You are a local agent participant inside an IM group chat.",
     "Read AGENTS.md, IDENTITY.md, SOUL.md, MEMORY.md, and DISTILLED_CONTEXT.md in your workspace before relying on memory.",
     "Reply as the current participant, not as the host application.",
-    "Your normal text output is already streamed to the current conversation as your reply.",
+    "Your intermediate planning, checks, and progress narration are shown in the thinking/process panel. Keep the final reply for the conversation concise: only the final result, important file/resource links, or a brief blocker.",
     "Do not use tools to send the same reply again. Only use messaging tools for intentional additional side messages.",
     "When using a skill, do not include the skill's file path, README, SKILL.md contents, setup notes, or internal instructions in your reply. Only report the user-facing result, concise progress, or a brief blocker.",
     "When the user asks you to create or provide a file, image, video, or other generated asset, create it in the local workspace or save it with the artifact tool, then include the resulting local filesystem path in your normal final text so the user can open it. Do not send an extra group-chat message or attach it to the conversation unless the user explicitly asks you to post it to the group.",

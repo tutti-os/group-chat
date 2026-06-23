@@ -88,25 +88,25 @@ function ExecutingRunsPanel(props: {
   return (
     <section
       aria-label={t("taskBar.executingCount", { count: props.agentRuns.length })}
-      className={"[position:relative] [width:calc(100%-32px)] [max-width:960px] [margin:6px_auto_4px] [border:1px_solid_#dbeafe] [border-radius:12px] [background:linear-gradient(180deg,_#eff6ff_0%,_#eef2ff_100%)] max-[760px]:[width:calc(100%-24px)] max-[760px]:[margin:5px_auto_4px]"}
+      className={"[position:relative] [width:calc(100%-32px)] [max-width:960px] [margin:4px_auto_3px] [border:1px_solid_#dbeafe] [border-radius:11px] [background:linear-gradient(180deg,_#eff6ff_0%,_#eef2ff_100%)] max-[760px]:[width:calc(100%-24px)] max-[760px]:[margin:4px_auto_3px]"}
     >
-      <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:8px] [padding:8px_10px_8px_12px]"}>
+      <button
+        type="button"
+        className={"[display:flex] [width:100%] [align-items:center] [justify-content:space-between] [gap:8px] [border:0] [border-radius:10px] [padding:5px_8px_5px_11px] [color:inherit] [background:transparent] [cursor:pointer] [text-align:left] hover:[background:#ffffff52] [&:focus-visible]:[outline:none] [&:focus-visible]:[box-shadow:0_0_0_2px_#93c5fd]"}
+        aria-label={expanded ? t("taskBar.collapse") : t("taskBar.expand")}
+        aria-expanded={expanded}
+        onClick={() => setExpanded((current) => !current)}
+      >
         <div className={"[display:inline-flex] [min-width:0] [flex:1_1_auto] [align-items:center] [gap:6px] [color:#1e3a8a] [font-size:12px] [font-weight:650]"}>
           <LoaderCircle size={14} className={"[flex:0_0_auto] animate-spin"} />
           <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>
             {t("taskBar.executingCount", { count: props.agentRuns.length })}
           </span>
         </div>
-        <button
-          type="button"
-          className={"[display:grid] [flex:0_0_auto] [width:24px] [height:24px] [place-items:center] [border:0] [border-radius:6px] [color:#475569] [background:#ffffff99] [cursor:pointer] hover:[color:#1e293b] hover:[background:#ffffff]"}
-          aria-label={expanded ? t("taskBar.collapse") : t("taskBar.expand")}
-          aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
-        >
+        <span className={"[display:grid] [flex:0_0_auto] [width:22px] [height:22px] [place-items:center] [border-radius:6px] [color:#475569] [background:#ffffff99]"}>
           {expanded ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-        </button>
-      </div>
+        </span>
+      </button>
       {expanded ? (
         <div
           className={"[display:flex] [flex-wrap:wrap] [align-items:flex-start] [align-content:flex-start] [gap:6px] [padding:0_10px_10px_12px]"}

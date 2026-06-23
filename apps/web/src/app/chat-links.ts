@@ -13,7 +13,7 @@ const MESSAGE_ID_SEGMENT = "[A-Za-z0-9_-]+(?:,[A-Za-z0-9_-]+)*";
 const MESSAGE_LINK_PATTERN = new RegExp(`\\bgroup-chat://message/(${MESSAGE_ID_SEGMENT})`, "g");
 const SUMMARY_LINK_PATTERN = /\bgroup-chat:\/\/summary\/([A-Za-z0-9_-]+)/g;
 const EMBEDDED_LINK_PATTERN = new RegExp(`\\bgroup-chat://(?:message/${MESSAGE_ID_SEGMENT}|summary/[A-Za-z0-9_-]+)`, "g");
-const MESSAGE_LINK_LABEL_MAX_LENGTH = 28;
+const MESSAGE_LINK_LABEL_MAX_LENGTH = 14;
 
 export function parseMessageLinkIds(value: string) {
   const segment = value.includes("group-chat://message/")

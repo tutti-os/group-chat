@@ -32,6 +32,7 @@ import {
   type UpdateRoomRequest,
   type UploadArtifactRequest,
   type PrivateTaskSnapshot,
+  normalizeParticipantDisplayName,
   uniqueParticipantDisplayNameInRoom,
 } from "@group-chat/shared";
 import { getDb, json, parseJson } from "../db/database.js";
@@ -354,7 +355,7 @@ export class ChatRepository {
         id,
         conversationId,
         input.kind,
-        input.displayName,
+        normalizeParticipantDisplayName(input.displayName, "Agent"),
         input.runtimeProfileId,
         input.identityId ?? null,
         input.roomInstructions?.trim() ?? "",
@@ -373,7 +374,7 @@ export class ChatRepository {
     const runtimeProfileId = input.runtimeProfileId ?? identity.defaultRuntimeProfileId;
     if (!runtimeProfileId) throw new Error("Runtime profile is required");
     const participants = this.listParticipants(conversationId);
-    const baseName = input.displayName?.trim() || identity.name;
+    const baseName = normalizeParticipantDisplayName(input.displayName ?? "", identity.name);
     const row = getDb()
       .prepare(`SELECT COALESCE(MAX(sort_order), -1) + 1 AS sort_order FROM participants WHERE conversation_id = ?`)
       .get(conversationId) as { sort_order: number };
@@ -408,7 +409,7 @@ export class ChatRepository {
     if (!current) return null;
     const now = new Date().toISOString();
     const next = {
-      displayName: input.displayName?.trim() || current.displayName,
+      displayName: normalizeParticipantDisplayName(input.displayName ?? "", current.displayName),
       runtimeProfileId: input.runtimeProfileId ?? current.runtimeProfileId,
       identityId: input.identityId ?? current.identityId,
       roomInstructions: input.roomInstructions === undefined ? current.roomInstructions : input.roomInstructions.trim(),

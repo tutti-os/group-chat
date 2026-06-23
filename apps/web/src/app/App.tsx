@@ -1474,6 +1474,9 @@ export function App() {
                   messages={currentMessages}
                   messageBlocks={currentMessageBlocks}
                   agentRuns={state.agentRuns}
+                  participants={currentParticipants}
+                  identities={state.identities}
+                  userDisplayName={userProfile.displayName}
                   onClose={() => setFilesPanelOpen(false)}
                   onFocusMessage={({ messageId, artifactId }) => {
                     setFocusMessageRequest((current) => ({

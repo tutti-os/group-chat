@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { Download, FileText, FolderOpen, Search, Video, X } from "lucide-react";
-import type { Artifact, AgentRun, Message, MessageBlock } from "@group-chat/shared";
+import type { Artifact, AgentRun, Identity, Message, MessageBlock, Participant } from "@group-chat/shared";
 import { resolveArtifactLinkedMessageId } from "@group-chat/shared";
 import {
   downloadArtifactFile,
@@ -10,14 +10,12 @@ import {
   revealArtifactInTuttiFileManager,
   type ArtifactFilterCategory,
 } from "../../artifact-actions.js";
-import { formatBytes, formatShortDate } from "../../formatting.js";
+import { formatBytes, formatMessageTime } from "../../formatting.js";
 import { messageSenderLabel } from "../../chat-links.js";
 import { t, useTranslation } from "../../i18n/index.js";
-import { ToastTip } from "../ui/ToastTip.js";
 
 const PAGE_SIZE = 30;
 const SINGLE_CLICK_DELAY_MS = 250;
-const DOWNLOAD_TIP_MS = 1600;
 
 function getCategoryTabs() {
   return [
@@ -35,6 +33,9 @@ export function ConversationFilesPanel(props: {
   messages: Message[];
   messageBlocks: MessageBlock[];
   agentRuns: AgentRun[];
+  participants: Participant[];
+  identities: Identity[];
+  userDisplayName: string;
   onClose: () => void;
   onFocusMessage: (input: { messageId: string; artifactId: string }) => void;
 }) {
@@ -42,10 +43,8 @@ export function ConversationFilesPanel(props: {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<ArtifactFilterCategory>("all");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  const [downloadTip, setDownloadTip] = useState<string | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
   const pendingClickTimerRef = useRef<number | null>(null);
-  const downloadTipTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!props.open) return;
@@ -57,7 +56,6 @@ export function ConversationFilesPanel(props: {
   useEffect(() => {
     return () => {
       if (pendingClickTimerRef.current) window.clearTimeout(pendingClickTimerRef.current);
-      if (downloadTipTimerRef.current) window.clearTimeout(downloadTipTimerRef.current);
     };
   }, []);
 
@@ -160,19 +158,9 @@ export function ConversationFilesPanel(props: {
     revealInTuttiFileManager(artifact);
   };
 
-  const showDownloadStartedTip = () => {
-    setDownloadTip(t("files.downloadStarted"));
-    if (downloadTipTimerRef.current) window.clearTimeout(downloadTipTimerRef.current);
-    downloadTipTimerRef.current = window.setTimeout(() => {
-      setDownloadTip(null);
-      downloadTipTimerRef.current = null;
-    }, DOWNLOAD_TIP_MS);
-  };
-
   const handleDownload = async (artifact: Artifact, event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     await downloadArtifactFile(artifact);
-    showDownloadStartedTip();
   };
 
   if (!props.open) return null;
@@ -185,7 +173,6 @@ export function ConversationFilesPanel(props: {
       : t("files.emptyCategory", { category: categoryTabs.find((tab) => tab.id === category)?.label ?? t("files.file") });
 
   return (
-    <>
     <aside
       ref={panelRef}
       className={"[position:absolute] [top:56px] [right:0] [bottom:0] [z-index:36] [display:grid] [width:min(360px,_calc(100vw_-_24px))] [grid-template-rows:auto_auto_auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border)] [background:var(--panel)] [box-shadow:-18px_0_40px_rgb(0_0_0_/_8%)]"}
@@ -286,8 +273,11 @@ export function ConversationFilesPanel(props: {
                     {artifact.filename}
                   </strong>
                   <span className={"[overflow:hidden] [color:var(--muted)] [font-size:11px] [line-height:1.3] [text-overflow:ellipsis] [white-space:nowrap]"}>
-                    {formatBytes(artifact.sizeBytes)} · {formatShortDate(artifact.createdAt)}
-                    {message ? t("files.sentBy", { sender: formatMessageSender(message) }) : t("files.noLinkedMeta")}
+                    {formatFileCreatorMeta(artifact, message, {
+                      participants: props.participants,
+                      identities: props.identities,
+                      userDisplayName: props.userDisplayName,
+                    })}
                   </span>
                 </span>
               </button>
@@ -323,13 +313,18 @@ export function ConversationFilesPanel(props: {
         ) : null}
       </div>
     </aside>
-    <ToastTip message={downloadTip} />
-    </>
   );
 }
 
-function formatMessageSender(message: Message) {
-  return messageSenderLabel(message);
+function formatFileCreatorMeta(
+  artifact: Artifact,
+  message: Message | null,
+  context: { participants: Participant[]; identities: Identity[]; userDisplayName: string },
+) {
+  const details = `${formatBytes(artifact.sizeBytes)} · ${formatMessageTime(message?.createdAt ?? artifact.createdAt)}`;
+  if (!message) return details;
+  const creator = messageSenderLabel(message, context.participants, context.identities, context.userDisplayName).trim();
+  return creator ? `${creator} · ${details}` : details;
 }
 
 function artifactChatSortMs(artifact: Artifact, messages: Message[], agentRuns: AgentRun[]) {

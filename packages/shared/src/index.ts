@@ -790,14 +790,16 @@ export function resolveMentionSpeakingOrder(
 }
 
 export function uniqueDisplayName(baseName: string, takenLowercase: Iterable<string>): string {
-  const base = baseName.trim() || "Agent";
+  const base = normalizeParticipantDisplayName(baseName, "Agent");
   const taken = new Set(takenLowercase);
   if (!taken.has(base.toLowerCase())) return base;
   let index = 2;
-  while (taken.has(`${base} ${index}`.toLowerCase())) {
+  let candidate = appendDisplayNameSuffix(base, index);
+  while (taken.has(candidate.toLowerCase())) {
     index += 1;
+    candidate = appendDisplayNameSuffix(base, index);
   }
-  return `${base} ${index}`;
+  return candidate;
 }
 
 export function uniqueParticipantDisplayNameInRoom(
@@ -811,6 +813,48 @@ export function uniqueParticipantDisplayNameInRoom(
     .map((participant) => participant.displayName.trim().toLowerCase())
     .filter(Boolean);
   return uniqueDisplayName(baseName, taken);
+}
+
+export const PARTICIPANT_DISPLAY_NAME_MAX_UNITS = 20;
+
+export function normalizeParticipantDisplayName(displayName: string, fallback = ""): string {
+  const trimmed = displayName.trim();
+  return truncateParticipantDisplayName(trimmed || fallback, PARTICIPANT_DISPLAY_NAME_MAX_UNITS);
+}
+
+export function participantDisplayNameUnits(displayName: string): number {
+  let units = 0;
+  for (const char of [...displayName]) {
+    units += participantDisplayNameCharUnits(char);
+  }
+  return units;
+}
+
+export function truncateParticipantDisplayName(displayName: string, maxUnits = PARTICIPANT_DISPLAY_NAME_MAX_UNITS): string {
+  let units = 0;
+  let result = "";
+  for (const char of [...displayName]) {
+    const charUnits = participantDisplayNameCharUnits(char);
+    if (units + charUnits > maxUnits) break;
+    result += char;
+    units += charUnits;
+  }
+  return result.trimEnd();
+}
+
+function appendDisplayNameSuffix(baseName: string, index: number) {
+  const suffix = ` ${index}`;
+  const prefix = truncateParticipantDisplayName(
+    baseName,
+    PARTICIPANT_DISPLAY_NAME_MAX_UNITS - participantDisplayNameUnits(suffix),
+  );
+  return `${prefix || "Agent"}${suffix}`;
+}
+
+function participantDisplayNameCharUnits(char: string) {
+  return /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(char)
+    ? 2
+    : 1;
 }
 
 export {

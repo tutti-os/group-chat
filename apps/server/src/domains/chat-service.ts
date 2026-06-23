@@ -38,7 +38,7 @@ import { AgentToolTokenStore } from "./agent-tool-tokens.js";
 import { AgentWorkspaceService } from "./agent-workspace.js";
 import { ChatRepository } from "./chat-repository.js";
 import { extractLocalFilePathsFromContent, inferMimeTypeForPath, linkRunFileArtifactPathsInContent } from "./run-file-artifacts.js";
-import { roomArtifactRoot } from "../local/paths.js";
+import { participantWorkspaceRoot, roomArtifactRoot } from "../local/paths.js";
 import { NO_REPLY_MARKER } from "../runtimes/local-agent-protocol.js";
 import { createRuntimeProviderRegistry } from "../runtimes/runtime-registry.js";
 import { RuntimeProviderUnsupportedError, type RuntimeReplyContext, type RuntimeStreamEvent } from "../runtimes/runtime-provider.js";
@@ -741,10 +741,12 @@ export class ChatService {
   private backfillAssistantFilePathArtifacts() {
     const snapshot = this.repo.snapshot();
     const conversationsById = new Map(snapshot.conversations.map((conversation) => [conversation.id, conversation]));
+    const runsById = new Map(snapshot.agentRuns.map((run) => [run.id, run]));
     for (const message of snapshot.messages) {
-      if (message.role !== "assistant" || !message.runId || !message.content.includes("/")) continue;
+      if (message.role !== "assistant" || !message.runId) continue;
       const conversation = conversationsById.get(message.conversationId);
       if (!conversation) continue;
+      const run = runsById.get(message.runId);
       const paths = extractLocalFilePathsFromContent(message.content);
       if (!paths.length) continue;
       const fileArtifacts = this.importRunFileWriteArtifacts({
@@ -752,6 +754,7 @@ export class ChatService {
         conversationId: conversation.id,
         runId: message.runId,
         messageId: message.id,
+        participantId: run?.participantId ?? null,
         paths,
       });
       if (!fileArtifacts.length) continue;
@@ -1198,6 +1201,8 @@ export class ChatService {
     }
 
     let content = "";
+    let deferredAssistantText = "";
+    const deferAssistantTextToThinking = provider.id === "local-agent";
     const runFileWritePaths = new Set<string>();
     const createRunEvent = (
       type: Parameters<ChatRepository["createAgentRunEvent"]>[0]["type"],
@@ -1354,6 +1359,10 @@ export class ChatService {
     };
     const emitRuntimeEvent = (event: RuntimeStreamEvent) => {
       if (event.type === "text_delta") {
+        if (deferAssistantTextToThinking) {
+          deferredAssistantText += event.text;
+          return;
+        }
         emitToken(event.text);
         return;
       }
@@ -1465,7 +1474,9 @@ export class ChatService {
         participant,
         visibleReply,
         errorText,
-        existingContent: content,
+        existingContent: deferAssistantTextToThinking
+          ? extractLocalAgentFinalReply(deferredAssistantText)
+          : content,
         visibility: userMessage.visibility,
         createRunEvent,
         emitBlockUpdated,
@@ -1495,14 +1506,22 @@ export class ChatService {
       return null;
     }
 
-    const replyContent = stripAssistantSkillDetails(content) || (content.trim() ? "Skill invoked." : content);
+    const visibleOutput = deferAssistantTextToThinking
+      ? extractLocalAgentFinalReply(deferredAssistantText)
+      : content;
+    const replyContent = stripAssistantSkillDetails(visibleOutput) || (visibleOutput.trim() ? "Skill invoked." : visibleOutput);
     const enrichedReply = enrichAssistantContentWithWorkspaceResourceLinks(replyContent, userMessage.mentions);
     const runFileArtifacts = this.importRunFileWriteArtifacts({
       roomId,
       conversationId,
       runId: run.id,
       messageId: visibleReply.message.id,
-      paths: [...runFileWritePaths, ...extractLocalFilePathsFromContent(enrichedReply.content)],
+      participantId: currentParticipant.id,
+      paths: [
+        ...runFileWritePaths,
+        ...extractLocalFilePathsFromContent(enrichedReply.content),
+        ...extractLocalFilePathsFromContent(deferredAssistantText),
+      ],
     });
     const finalContent = linkRunFileArtifactPathsInContent(enrichedReply.content, runFileArtifacts);
     const finalBlock = this.repo.updateMessageBlock(visibleReply.block.id, { content: finalContent, status: "success" });
@@ -1898,17 +1917,26 @@ export class ChatService {
     conversationId: string;
     runId: string;
     messageId: string;
+    participantId?: string | null;
     paths: string[];
   }): Array<{ path: string; artifact: Artifact }> {
     const linked: Array<{ path: string; artifact: Artifact }> = [];
-    const seenPaths = new Set<string>();
+    const artifactByPath = new Map<string, Artifact>();
     const allowedRoot = roomArtifactRoot(params.roomId);
+    const workspaceRoot = params.participantId
+      ? participantWorkspaceRoot(params.roomId, params.participantId)
+      : allowedRoot;
 
     for (const rawPath of params.paths) {
-      const filePath = rawPath.replace(/\\/g, "/").trim();
-      if (!filePath || seenPaths.has(filePath)) continue;
-      seenPaths.add(filePath);
+      const normalizedRawPath = rawPath.replace(/\\/g, "/").trim();
+      if (!normalizedRawPath) continue;
+      const filePath = resolveRunOutputPath(normalizedRawPath, workspaceRoot);
       if (!isPathInsideDirectory(filePath, allowedRoot)) continue;
+      const existingLinkedArtifact = artifactByPath.get(filePath);
+      if (existingLinkedArtifact) {
+        pushRunArtifactAliases(linked, normalizedRawPath, filePath, existingLinkedArtifact);
+        continue;
+      }
       if (!existsSync(filePath)) continue;
 
       let sizeBytes = 0;
@@ -1927,7 +1955,8 @@ export class ChatService {
         return localPath === filePath || Boolean(contentHash && artifact.contentHash === contentHash);
       });
       if (existingArtifact) {
-        linked.push({ path: filePath, artifact: existingArtifact });
+        artifactByPath.set(filePath, existingArtifact);
+        pushRunArtifactAliases(linked, normalizedRawPath, filePath, existingArtifact);
         continue;
       }
 
@@ -1958,7 +1987,8 @@ export class ChatService {
         runId: params.runId,
         payload: { artifact },
       });
-      linked.push({ path: filePath, artifact });
+      artifactByPath.set(filePath, artifact);
+      pushRunArtifactAliases(linked, normalizedRawPath, filePath, artifact);
     }
 
     return linked;
@@ -2044,6 +2074,86 @@ export class ChatService {
 function isPathInsideDirectory(filePath: string, directory: string) {
   const relativePath = relative(resolve(directory), resolve(filePath));
   return Boolean(relativePath) && !relativePath.startsWith("..") && !isAbsolute(relativePath);
+}
+
+function resolveRunOutputPath(filePath: string, workspaceRoot: string) {
+  return isAbsolute(filePath) ? resolve(filePath) : resolve(workspaceRoot, filePath);
+}
+
+function extractLocalAgentFinalReply(raw: string) {
+  const text = raw.trim();
+  if (!text) return "";
+  if (text.length <= 500 && !LOCAL_AGENT_PROCESS_TEXT_PATTERN.test(text)) return text;
+
+  const headingMatch = /(?:^|\n)\s{0,3}(?:#{1,6}\s*)?(?:最终(?:结论|回复|结果)|最终输出|完成结果|结果)\s*[:：]?\s*(?:\n|$)/i.exec(text);
+  if (headingMatch?.index !== undefined) {
+    const afterHeading = text.slice(headingMatch.index + headingMatch[0].length).trim();
+    if (afterHeading) return afterHeading;
+  }
+
+  const finalStart = localAgentFinalReplyStartIndex(text);
+  if (finalStart >= 0) return trimLeadingSentenceBoundary(text.slice(finalStart));
+
+  const paragraphs = text.split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
+  if (paragraphs.length > 1) return paragraphs.slice(-2).join("\n\n");
+
+  const sentences = splitChineseSentences(text);
+  if (sentences.length > 1) return sentences.slice(-2).join("");
+  return text;
+}
+
+const LOCAL_AGENT_PROCESS_TEXT_PATTERN = /我(?:先|会先|准备|将|正在|现在|接下来|随后)|当前工作区|读取本地|检查/;
+const LOCAL_AGENT_PROCESS_MARKER_PATTERN = /我(?:先|会先|准备|将|正在|现在|接下来|随后)|当前工作区|读取本地|检查/g;
+const LOCAL_AGENT_FINAL_MARKER_PATTERN = /已(?:完成|创建|生成|写入|更新|保存|验证)|(?:文件路径|入口文件|输出文件|结果文件)\s*[:：]|(?:可以|可直接).{0,24}(?:打开|使用|查看)/g;
+
+function localAgentFinalReplyStartIndex(text: string) {
+  let lastProcessIndex = -1;
+  for (const match of text.matchAll(LOCAL_AGENT_PROCESS_MARKER_PATTERN)) {
+    lastProcessIndex = Math.max(lastProcessIndex, match.index ?? -1);
+  }
+
+  const candidates = [...text.matchAll(LOCAL_AGENT_FINAL_MARKER_PATTERN)]
+    .map((match) => match.index ?? -1)
+    .filter((index) => index >= 0);
+  if (candidates.length === 0) return -1;
+
+  const afterProcess = candidates.filter((index) => index > lastProcessIndex);
+  if (afterProcess.length > 0) return Math.min(...afterProcess);
+
+  const lateCandidates = candidates.filter((index) => index >= text.length * 0.45);
+  return lateCandidates.length > 0 ? Math.min(...lateCandidates) : candidates.at(-1)!;
+}
+
+function trimLeadingSentenceBoundary(value: string) {
+  return value.replace(/^[\s。！？!?,，、；;：:]+/, "").trim();
+}
+
+function splitChineseSentences(text: string) {
+  const sentences: string[] = [];
+  let buffer = "";
+  for (const char of text) {
+    buffer += char;
+    if ("。！？!?".includes(char)) {
+      const sentence = buffer.trim();
+      if (sentence) sentences.push(sentence);
+      buffer = "";
+    }
+  }
+  const tail = buffer.trim();
+  if (tail) sentences.push(tail);
+  return sentences;
+}
+
+function pushRunArtifactAliases(
+  linked: Array<{ path: string; artifact: Artifact }>,
+  rawPath: string,
+  filePath: string,
+  artifact: Artifact,
+) {
+  const aliases = new Set([rawPath, filePath]);
+  for (const alias of aliases) {
+    linked.push({ path: alias, artifact });
+  }
 }
 
 function resolveReplySpeakingOrder(
