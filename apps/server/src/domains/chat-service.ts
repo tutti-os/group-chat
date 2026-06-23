@@ -27,6 +27,7 @@ import {
   type ReplyMode,
   type RuntimeProfile,
   resolveMentionSpeakingOrder,
+  stripAssistantSkillDetails,
 } from "@group-chat/shared";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, isAbsolute, relative, resolve } from "node:path";
@@ -51,7 +52,10 @@ export class ChatService {
   private readonly activeReplyKeys = new Set<string>();
   private readonly cancelledRunIds = new Set<string>();
   private readonly cancelledPrivateTaskIds = new Set<string>();
-  private readonly activePrivateTasks = new Map<string, { cancel: () => Promise<void> | void }>();
+  private readonly activePrivateTasks = new Map<string, {
+    participantId: string;
+    cancel: (reason: string) => Promise<void> | void;
+  }>();
   private recoveredReplyQueue = false;
   private bootstrapMaintenanceStarted = false;
 
@@ -127,7 +131,7 @@ export class ChatService {
     this.workspaces.materializeIdentity(identity);
     this.events.emit({
       type: "identity.created",
-      payload: { identity },
+      payload: { identity, runtimeProfile: this.getRuntimeProfile(identity.defaultRuntimeProfileId) },
     });
     return identity;
   }
@@ -142,15 +146,20 @@ export class ChatService {
       }
       this.events.emit({
         type: "identity.updated",
-        payload: { identity },
+        payload: { identity, runtimeProfile: this.getRuntimeProfile(identity.defaultRuntimeProfileId) },
       });
     }
     return identity;
   }
 
-  deleteIdentity(identityId: string) {
+  async deleteIdentity(identityId: string) {
     const result = this.repo.deleteIdentity(identityId);
     if (result) {
+      await Promise.all(
+        result.removedParticipants.map((participant) =>
+          this.cancelParticipantWork(participant.id, "Participant removed from room")
+        ),
+      );
       for (const participant of result.removedParticipants) {
         const conversation = this.repo.getConversation(participant.conversationId);
         this.events.emit({
@@ -180,7 +189,7 @@ export class ChatService {
       type: "participant.created",
       roomId: conversation.roomId,
       conversationId,
-      payload: { participant },
+      payload: { participant, runtimeProfile: this.getRuntimeProfile(participant.runtimeProfileId) },
     });
     const systemMessage = this.emitSystemNotice(conversation, `${participant.displayName} joined the room`);
     return { participant, systemMessage };
@@ -220,10 +229,14 @@ export class ChatService {
         type: "participant.updated",
         roomId: conversation.roomId,
         conversationId: conversation.id,
-        payload: { participant },
+        payload: { participant, runtimeProfile: this.getRuntimeProfile(participant.runtimeProfileId) },
       });
     }
     return participant;
+  }
+
+  getRuntimeProfile(runtimeProfileId: string | null | undefined) {
+    return runtimeProfileId ? this.repo.getRuntimeProfile(runtimeProfileId) : null;
   }
 
   updateConversationRules(conversationId: string, input: UpdateConversationRulesRequest) {
@@ -284,7 +297,22 @@ export class ChatService {
     return artifact;
   }
 
-  async cancelRun(runId: string) {
+  prepareArtifactUpload(conversationId: string, filename: string) {
+    return this.repo.prepareArtifactUpload(conversationId, filename);
+  }
+
+  uploadArtifactFromFile(conversationId: string, input: { filename: string; mimeType: string; localPath: string }) {
+    const artifact = this.repo.createArtifactFromFile(conversationId, input);
+    this.events.emit({
+      type: "artifact.created",
+      roomId: artifact.roomId,
+      conversationId,
+      payload: { artifact },
+    });
+    return artifact;
+  }
+
+  async cancelRun(runId: string, reason = "Cancelled by user") {
     const run = this.repo.getAgentRun(runId);
     if (!run) return null;
     if (!["accepted", "running"].includes(run.status)) {
@@ -295,12 +323,32 @@ export class ChatService {
     const runtimeProfile = participant?.runtimeProfileId ? this.repo.getRuntimeProfile(participant.runtimeProfileId) : null;
     const provider = this.runtimes.getProvider(runtimeProfile);
     await provider.cancel(runId).catch(() => undefined);
-    return this.finalizeRunCancellation(runId, "Cancelled by user");
+    return this.finalizeRunCancellation(runId, reason);
   }
 
   private async cancelRunsForTriggerMessage(triggerMessageId: string) {
     const runs = this.repo.listActiveAgentRunsForTriggerMessage(triggerMessageId);
     await Promise.all(runs.map((run) => this.cancelRun(run.id)));
+  }
+
+  private async cancelRunsForParticipant(participantId: string, reason: string) {
+    this.repo.deletePendingRepliesForParticipant(participantId);
+    const runs = this.repo.listActiveAgentRunsForParticipant(participantId);
+    await Promise.all(runs.map((run) => this.cancelRun(run.id, reason)));
+  }
+
+  private async cancelPrivateTasksForParticipant(participantId: string, reason: string) {
+    const taskIds = [...this.activePrivateTasks.entries()]
+      .filter(([, task]) => task.participantId === participantId)
+      .map(([taskId]) => taskId);
+    await Promise.all(taskIds.map((taskId) => this.cancelPrivateTask(taskId, reason)));
+  }
+
+  private async cancelParticipantWork(participantId: string, reason: string) {
+    await Promise.all([
+      this.cancelRunsForParticipant(participantId, reason),
+      this.cancelPrivateTasksForParticipant(participantId, reason),
+    ]);
   }
 
   setParticipantMuted(participantId: string, muted: boolean) {
@@ -332,9 +380,10 @@ export class ChatService {
     return participant;
   }
 
-  removeParticipant(participantId: string) {
+  async removeParticipant(participantId: string) {
     const participant = this.repo.updateParticipantStatus(participantId, "removed");
     if (participant) {
+      await this.cancelParticipantWork(participant.id, "Participant removed from room");
       const conversation = this.repo.getConversation(participant.conversationId);
       this.events.emit({
         type: "participant.updated",
@@ -445,6 +494,7 @@ export class ChatService {
     if (!conversation) throw new Error("Conversation not found");
     const participant = this.repo.getParticipant(input.participantId);
     if (!participant || participant.conversationId !== conversationId) throw new Error("Participant not found");
+    if (participant.status === "removed") throw new Error("Participant not found");
     const sourceMessage = input.sourceMessageId ? this.repo.getMessage(input.sourceMessageId) : null;
     if (input.sourceMessageId && !sourceMessage) throw new Error("Source message not found");
     const prompt = input.prompt.trim();
@@ -501,9 +551,9 @@ export class ChatService {
     return this.repo.listPrivateTasksForConversation(conversationId);
   }
 
-  cancelPrivateTask(taskId: string) {
+  async cancelPrivateTask(taskId: string, reason = "Cancelled by user") {
     this.cancelledPrivateTaskIds.add(taskId);
-    this.activePrivateTasks.get(taskId)?.cancel();
+    await this.activePrivateTasks.get(taskId)?.cancel(reason);
     this.activePrivateTasks.delete(taskId);
     return { taskId, cancelled: true };
   }
@@ -541,6 +591,9 @@ export class ChatService {
 
     const result = this.repo.updateUserMessage(messageId, input);
     if (!result?.message) return null;
+    const replacement = input.parts?.length
+      ? this.repo.replaceUserMessageBlocks(messageId, input.parts)
+      : null;
     this.repo.touchConversation(conversation.id, result.message.content);
     this.events.emit({
       type: "message.updated",
@@ -548,7 +601,24 @@ export class ChatService {
       conversationId: conversation.id,
       payload: { message: result.message },
     });
-    if (result.block) {
+    if (replacement) {
+      for (const artifact of replacement.artifacts) {
+        this.events.emit({
+          type: "artifact.created",
+          roomId: conversation.roomId,
+          conversationId: conversation.id,
+          payload: { artifact },
+        });
+      }
+      for (const block of replacement.blocks) {
+        this.events.emit({
+          type: "message_block.created",
+          roomId: conversation.roomId,
+          conversationId: conversation.id,
+          payload: { block },
+        });
+      }
+    } else if (result.block) {
       this.events.emit({
         type: "message_block.updated",
         roomId: conversation.roomId,
@@ -564,7 +634,12 @@ export class ChatService {
       seenParticipantIds: new Set(targets.map((participant) => participant.id)),
       mentionScoped: isParticipantMentionScoped(result.message.mentions),
     });
-    return { message: result.message, blocks: result.block ? [result.block] : [], targets };
+    return {
+      message: result.message,
+      blocks: replacement ? replacement.blocks : result.block ? [result.block] : [],
+      artifacts: replacement?.artifacts ?? [],
+      targets,
+    };
   }
 
   hideMessageForLocalUser(messageId: string) {
@@ -925,13 +1000,18 @@ export class ChatService {
     try {
       let nextMessage: Message | null = userMessage;
       while (nextMessage) {
+        const currentParticipant = this.repo.getParticipant(participant.id);
+        if (!currentParticipant || currentParticipant.status !== "active") {
+          this.repo.deletePendingRepliesForParticipant(participant.id);
+          break;
+        }
         const latest = this.repo.getMessage(nextMessage.id);
         if (!latest || latest.status === "recalled") break;
         const generated = await this.generateForParticipant(
           roomId,
           conversationId,
           latest,
-          participant,
+          currentParticipant,
           nextMessage.id === userMessage.id ? preacceptedRun : null,
         );
         if (nextMessage.id === userMessage.id) requestedReply = generated;
@@ -976,18 +1056,20 @@ export class ChatService {
   ): AgentRun | null {
     const latestUserMessage = this.repo.getMessage(userMessage.id);
     if (!latestUserMessage || latestUserMessage.status === "recalled") return null;
+    const currentParticipant = this.repo.getParticipant(participant.id);
+    if (!currentParticipant || currentParticipant.status !== "active") return null;
     const conversation = this.repo.getConversation(conversationId);
     if (!conversation) return null;
-    const runtimeProfile = participant.runtimeProfileId ? this.repo.getRuntimeProfile(participant.runtimeProfileId) : null;
-    const identity = participant.identityId ? this.repo.getIdentity(participant.identityId) : null;
+    const runtimeProfile = currentParticipant.runtimeProfileId ? this.repo.getRuntimeProfile(currentParticipant.runtimeProfileId) : null;
+    const identity = currentParticipant.identityId ? this.repo.getIdentity(currentParticipant.identityId) : null;
     const attachments = this.repo.listArtifactsForMessage(userMessage.id);
     const recentMessages = this.repo
       .listRecentMessages(conversationId, 24)
-      .filter((message) => isMessageVisibleToParticipant(message, participant.id));
+      .filter((message) => isMessageVisibleToParticipant(message, currentParticipant.id));
     const provider = this.runtimes.getProvider(runtimeProfile);
     const runtimeContext: RuntimeReplyContext = {
       conversation,
-      participant,
+      participant: currentParticipant,
       identity,
       runtimeProfile,
       userMessage: latestUserMessage,
@@ -998,7 +1080,7 @@ export class ChatService {
     const run = this.repo.createAgentRun({
       roomId,
       conversationId,
-      participantId: participant.id,
+      participantId: currentParticipant.id,
       assistantMessageId: null,
       triggerMessageId: latestUserMessage.id,
       runtime: runDescriptor.runtime,
@@ -1033,18 +1115,25 @@ export class ChatService {
   ): Promise<Message | null> {
     const latestUserMessage = this.repo.getMessage(userMessage.id);
     if (!latestUserMessage || latestUserMessage.status === "recalled") return null;
+    const currentParticipant = this.repo.getParticipant(participant.id);
+    if (!currentParticipant || currentParticipant.status !== "active") {
+      if (preacceptedRun && ["accepted", "running"].includes(preacceptedRun.status)) {
+        await this.cancelRun(preacceptedRun.id, "Participant removed from room");
+      }
+      return null;
+    }
     const conversation = this.repo.getConversation(conversationId);
     if (!conversation) return null;
-    const runtimeProfile = participant.runtimeProfileId ? this.repo.getRuntimeProfile(participant.runtimeProfileId) : null;
-    const identity = participant.identityId ? this.repo.getIdentity(participant.identityId) : null;
+    const runtimeProfile = currentParticipant.runtimeProfileId ? this.repo.getRuntimeProfile(currentParticipant.runtimeProfileId) : null;
+    const identity = currentParticipant.identityId ? this.repo.getIdentity(currentParticipant.identityId) : null;
     const attachments = this.repo.listArtifactsForMessage(userMessage.id);
     const recentMessages = this.repo
       .listRecentMessages(conversationId, 24)
-      .filter((message) => isMessageVisibleToParticipant(message, participant.id));
+      .filter((message) => isMessageVisibleToParticipant(message, currentParticipant.id));
     const provider = this.runtimes.getProvider(runtimeProfile);
     const runtimeContext: RuntimeReplyContext = {
       conversation,
-      participant,
+      participant: currentParticipant,
       identity,
       runtimeProfile,
       userMessage: latestUserMessage,
@@ -1056,7 +1145,7 @@ export class ChatService {
       ?? this.repo.createAgentRun({
         roomId,
         conversationId,
-        participantId: participant.id,
+        participantId: currentParticipant.id,
         assistantMessageId: null,
         triggerMessageId: latestUserMessage.id,
         runtime: runDescriptor.runtime,
@@ -1064,6 +1153,8 @@ export class ChatService {
         model: runDescriptor.model,
         visibility: latestUserMessage.visibility,
       });
+    const currentRun = this.repo.getAgentRun(run.id);
+    if (!currentRun || currentRun.status === "cancelled") return null;
     if (!preacceptedRun) {
       this.events.emit({
         type: "run.accepted",
@@ -1076,7 +1167,7 @@ export class ChatService {
     runtimeContext.runId = run.id;
     runtimeContext.toolAccess = this.toolTokens.issue({
       runId: run.id,
-      participantId: participant.id,
+      participantId: currentParticipant.id,
       conversationId,
     });
 
@@ -1155,8 +1246,8 @@ export class ChatService {
       visibleReply.message = this.repo.createMessage({
         conversationId,
         role: "assistant",
-        senderParticipantId: participant.id,
-        senderName: participant.displayName,
+        senderParticipantId: currentParticipant.id,
+        senderName: currentParticipant.displayName,
         content: "",
         visibility: userMessage.visibility,
         status: "streaming",
@@ -1404,7 +1495,8 @@ export class ChatService {
       return null;
     }
 
-    const enrichedReply = enrichAssistantContentWithWorkspaceResourceLinks(content, userMessage.mentions);
+    const replyContent = stripAssistantSkillDetails(content) || (content.trim() ? "Skill invoked." : content);
+    const enrichedReply = enrichAssistantContentWithWorkspaceResourceLinks(replyContent, userMessage.mentions);
     const runFileArtifacts = this.importRunFileWriteArtifacts({
       roomId,
       conversationId,
@@ -1426,7 +1518,7 @@ export class ChatService {
     if (finalMessage) {
       this.workspaces.recordInteractionMemory({
         conversation,
-        participant,
+        participant: currentParticipant,
         userMessage,
         assistantMessage: finalMessage,
       });
@@ -1476,19 +1568,23 @@ export class ChatService {
   }) {
     const conversation = this.repo.getConversation(input.conversationId);
     if (!conversation) return;
-    const runtimeProfile = input.participant.runtimeProfileId ? this.repo.getRuntimeProfile(input.participant.runtimeProfileId) : null;
-    const identity = input.participant.identityId ? this.repo.getIdentity(input.participant.identityId) : null;
+    const currentParticipant = this.repo.getParticipant(input.participant.id);
+    if (!currentParticipant || currentParticipant.status !== "active") return;
+    const runtimeProfile = currentParticipant.runtimeProfileId ? this.repo.getRuntimeProfile(currentParticipant.runtimeProfileId) : null;
+    const identity = currentParticipant.identityId ? this.repo.getIdentity(currentParticipant.identityId) : null;
     const attachments = input.sourceMessageId ? this.repo.listArtifactsForMessage(input.sourceMessageId) : [];
     const recentMessages = this.repo.listRecentMessages(input.conversationId, 24);
     const provider = this.runtimes.getProvider(runtimeProfile);
+    const runtimeRunId = `private-task-${input.taskId}`;
     const runtimeContext: RuntimeReplyContext = {
       conversation,
-      participant: input.participant,
+      participant: currentParticipant,
       identity,
       runtimeProfile,
       userMessage: input.userMessage,
       recentMessages,
       attachments,
+      runId: runtimeRunId,
     };
     const now = new Date().toISOString();
     const buildTask = (partial: Pick<PrivateTaskSnapshot, "status" | "content" | "error" | "updatedAt">): PrivateTaskSnapshot => ({
@@ -1497,8 +1593,8 @@ export class ChatService {
       conversationId: input.conversationId,
       sourceMessageId: input.sourceMessageId,
       sourceMessageIds: input.sourceMessageIds,
-      participantId: input.participant.id,
-      participantName: input.participant.displayName,
+      participantId: currentParticipant.id,
+      participantName: currentParticipant.displayName,
       sourcePreview: input.sourcePreview,
       createdAt: now,
       ...partial,
@@ -1525,9 +1621,13 @@ export class ChatService {
 
     let content = "";
     let cancelled = false;
+    let cancelReason = "Cancelled by user";
     this.activePrivateTasks.set(input.taskId, {
-      cancel: () => {
+      participantId: currentParticipant.id,
+      cancel: async (reason) => {
         cancelled = true;
+        cancelReason = reason;
+        await provider.cancel(runtimeRunId).catch(() => undefined);
       },
     });
 
@@ -1544,7 +1644,7 @@ export class ChatService {
             task: buildTask({
               status: "cancelled",
               content,
-              error: "Cancelled by user",
+              error: cancelReason,
               updatedAt: new Date().toISOString(),
             }),
           });
@@ -1589,6 +1689,17 @@ export class ChatService {
         });
         this.repo.updatePrivateTaskContent(input.taskId, content);
       }
+      if (cancelled || this.cancelledPrivateTaskIds.has(input.taskId)) {
+        emitTask("private_task.cancelled", {
+          task: buildTask({
+            status: "cancelled",
+            content,
+            error: cancelReason,
+            updatedAt: new Date().toISOString(),
+          }),
+        });
+        return;
+      }
       emitTask("private_task.completed", {
         task: buildTask({
           status: "completed",
@@ -1598,6 +1709,17 @@ export class ChatService {
         }),
       });
     } catch (error) {
+      if (cancelled || this.cancelledPrivateTaskIds.has(input.taskId)) {
+        emitTask("private_task.cancelled", {
+          task: buildTask({
+            status: "cancelled",
+            content,
+            error: cancelReason,
+            updatedAt: new Date().toISOString(),
+          }),
+        });
+        return;
+      }
       const errorText = error instanceof Error ? error.message : "Private task failed";
       emitTask("private_task.failed", {
         task: buildTask({
@@ -1676,7 +1798,13 @@ export class ChatService {
     ) => void;
     emitBlockUpdated: (block: MessageBlock | null) => void;
   }) {
-    const messageContent = params.existingContent?.trim() || params.errorText;
+    const strippedExistingContent = params.existingContent
+      ? stripAssistantSkillDetails(params.existingContent)
+      : "";
+    const hasVisibleOutput = strippedExistingContent.trim().length > 0;
+    const messageContent = hasVisibleOutput ? strippedExistingContent : params.errorText;
+    const messageStatus: Message["status"] = hasVisibleOutput ? "success" : "error";
+    const blockStatus: MessageBlock["status"] = hasVisibleOutput ? "success" : "error";
     const visibility = params.visibility ?? "public";
     params.createRunEvent("error", { content: params.errorText, status: "error" });
 
@@ -1688,14 +1816,14 @@ export class ChatService {
         senderName: params.participant.displayName,
         content: messageContent,
         visibility,
-        status: "error",
+        status: messageStatus,
         runId: params.runId,
       });
       params.visibleReply.block = this.repo.createMessageBlock({
         messageId: params.visibleReply.message.id,
         type: "main_text",
         content: messageContent,
-        status: "error",
+        status: blockStatus,
       });
       this.repo.updateAgentRun(params.runId, {
         assistantMessageId: params.visibleReply.message.id,
@@ -1719,11 +1847,11 @@ export class ChatService {
     } else {
       const finalBlock = this.repo.updateMessageBlock(params.visibleReply.block.id, {
         content: messageContent,
-        status: "error",
+        status: blockStatus,
       });
       const finalMessage = this.repo.updateMessage(params.visibleReply.message.id, {
         content: messageContent,
-        status: "error",
+        status: messageStatus,
       });
       params.emitBlockUpdated(finalBlock);
       for (const streamingBlock of this.repo
@@ -1733,7 +1861,7 @@ export class ChatService {
             item.id !== params.visibleReply.block?.id
             && (item.status === "streaming" || item.status === "pending"),
         )) {
-        params.emitBlockUpdated(this.repo.updateMessageBlock(streamingBlock.id, { status: "error" }));
+        params.emitBlockUpdated(this.repo.updateMessageBlock(streamingBlock.id, { status: blockStatus }));
       }
       if (finalMessage) {
         this.events.emit({

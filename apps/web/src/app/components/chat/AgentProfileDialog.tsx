@@ -26,6 +26,7 @@ export function AgentProfileDialog(props: {
   runtimeProfile: RuntimeProfile | null;
   runtimeProfiles: RuntimeProfile[];
   localAgentProviders: LocalAgentProviderStatus[];
+  onRefreshLocalAgentProviders?: () => void;
   showRemove?: boolean;
   onClose: () => void;
   onSaved?: () => void;
@@ -92,6 +93,15 @@ export function AgentProfileDialog(props: {
       document.removeEventListener("pointerdown", closeOnOutsidePointer);
     };
   }, [formParticipant, props, setupIdentity]);
+
+  const wasOpenRef = useRef(false);
+  useEffect(() => {
+    const isOpen = Boolean(formParticipant);
+    if (isOpen && !wasOpenRef.current) {
+      props.onRefreshLocalAgentProviders?.();
+    }
+    wasOpenRef.current = isOpen;
+  }, [formParticipant, props.onRefreshLocalAgentProviders]);
 
   if (!formParticipant) return null;
 
@@ -227,7 +237,6 @@ export function AgentProfileDialog(props: {
             conversationId={props.conversationId ?? undefined}
             roomParticipants={props.roomParticipants}
             onDisplayNameChange={setPreviewDisplayName}
-            onMention={props.onMention}
             onCreateIdentity={props.onCreateIdentity}
             onUpdateIdentity={props.onUpdateIdentity}
             onAddParticipant={props.onAddParticipant}

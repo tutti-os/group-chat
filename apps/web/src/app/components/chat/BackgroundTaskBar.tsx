@@ -179,12 +179,14 @@ function ExecutingRunsPanel(props: {
 function AgentExecutingLabel(props: { participantName: string }) {
   const { t } = useTranslation();
   const suffix = t("taskBar.executingSuffix");
+  const nameRef = useRef<HTMLSpanElement>(null);
   const measureRef = useRef<HTMLSpanElement>(null);
   const [displayName, setDisplayName] = useState(props.participantName.trim());
 
   useLayoutEffect(() => {
-    const node = measureRef.current;
-    if (!node) return;
+    const nameNode = nameRef.current;
+    const measureNode = measureRef.current;
+    if (!nameNode || !measureNode) return;
 
     const update = () => {
       const full = props.participantName.trim();
@@ -192,8 +194,14 @@ function AgentExecutingLabel(props: { participantName: string }) {
         setDisplayName("");
         return;
       }
-      node.textContent = full;
-      if (node.scrollWidth <= node.clientWidth) {
+      const availableWidth = nameNode.clientWidth;
+      if (availableWidth <= 0) {
+        setDisplayName(truncateMiddle(full, 8));
+        return;
+      }
+
+      measureNode.textContent = full;
+      if (measureNode.offsetWidth <= availableWidth) {
         setDisplayName(full);
         return;
       }
@@ -203,8 +211,8 @@ function AgentExecutingLabel(props: { participantName: string }) {
       while (low <= high) {
         const mid = Math.floor((low + high) / 2);
         const candidate = truncateMiddle(full, mid);
-        node.textContent = candidate;
-        if (node.scrollWidth <= node.clientWidth) {
+        measureNode.textContent = candidate;
+        if (measureNode.offsetWidth <= availableWidth) {
           best = candidate;
           low = mid + 1;
         } else {
@@ -216,7 +224,7 @@ function AgentExecutingLabel(props: { participantName: string }) {
 
     update();
     const observer = new ResizeObserver(update);
-    observer.observe(node);
+    observer.observe(nameNode);
     return () => observer.disconnect();
   }, [props.participantName, suffix]);
 
@@ -225,10 +233,15 @@ function AgentExecutingLabel(props: { participantName: string }) {
       className={"[display:inline-flex] [min-width:0] [flex:1_1_auto] [align-items:baseline] [overflow:hidden] [white-space:nowrap]"}
       title={`${props.participantName.trim()}${suffix}`}
     >
-      <span ref={measureRef} className={"[min-width:0] [flex:1_1_auto] [overflow:hidden] [white-space:nowrap]"}>
+      <span ref={nameRef} className={"[min-width:0] [flex:1_1_auto] [overflow:hidden] [white-space:nowrap]"}>
         {displayName}
       </span>
       <span className={"[flex:0_0_auto]"}>{suffix}</span>
+      <span
+        ref={measureRef}
+        aria-hidden="true"
+        className={"[position:absolute] [visibility:hidden] [white-space:nowrap] [pointer-events:none]"}
+      />
     </span>
   );
 }

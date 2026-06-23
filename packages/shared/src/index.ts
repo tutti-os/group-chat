@@ -25,6 +25,41 @@ export function getConfiguredIdentityRoleDescription(
   }
   return description;
 }
+
+export function stripAssistantSkillDetails(content: string): string {
+  return normalizeStrippedSkillDetails(
+    stripSkillMarkdownSection(
+      stripFromSkillBaseDirectory(content),
+    ),
+  );
+}
+
+function stripFromSkillBaseDirectory(content: string) {
+  const match = content.match(/\bBase directory for this skill:\s*/i);
+  if (!match || match.index === undefined) return content;
+  return content.slice(0, match.index);
+}
+
+function stripSkillMarkdownSection(content: string) {
+  const headingPattern = /^#{1,2}\s+\S.*$/gm;
+  for (const match of content.matchAll(headingPattern)) {
+    const headingIndex = match.index ?? -1;
+    if (headingIndex < 0) continue;
+    const prefix = content.slice(0, headingIndex);
+    const section = content.slice(headingIndex);
+    if (!/(?:^|\n)#{2,3}\s+User Input Tools\b/i.test(section)) continue;
+    if (!/(?:^|\b)(skill|调用|call|using|invoke)(?:\b|$)/i.test(prefix)) continue;
+    return content.slice(0, headingIndex);
+  }
+  return content;
+}
+
+function normalizeStrippedSkillDetails(content: string) {
+  return content
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 export type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
 export type SpeakingOrder = "sequential" | "random" | "parallel";
 export type ReplyMode = "all" | "mentioned" | "selected" | "auto";
@@ -609,6 +644,7 @@ export interface PrivateTaskSnapshot {
 
 export interface UpdateMessageRequest {
   content?: string;
+  parts?: SendMessageRequest["parts"];
   mentions?: MentionTarget[];
   status?: Extract<MessageStatus, "deleted" | "recalled">;
 }

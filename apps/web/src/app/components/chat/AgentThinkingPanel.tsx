@@ -1,10 +1,14 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { BrainCircuit, Braces, FileText, LoaderCircle, Wrench, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AgentRunEvent } from "@group-chat/shared";
 import type { ProcessSection } from "../../agent-thinking.js";
 import { formatRunEventStatus, formatRunEventTypeLabel, useTranslation } from "../../i18n/index.js";
+
+type DisplayProcessSection =
+  | ProcessSection
+  | { kind: "tool_summary"; id: string; count: number; status: AgentRunEvent["status"] };
 
 export function AgentThinkingPanel(props: {
   open: boolean;
@@ -15,8 +19,14 @@ export function AgentThinkingPanel(props: {
   const { t } = useTranslation();
   const panelRef = useRef<HTMLElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const streaming = props.sections.some(
-    (section) => (section.kind === "reasoning" || section.kind === "thinking") && section.streaming,
+  const displaySections = useMemo(
+    () => compactToolExecutionSections(props.sections),
+    [props.sections],
+  );
+  const streaming = displaySections.some(
+    (section) =>
+      (section.kind === "reasoning" || section.kind === "thinking") && section.streaming
+      || section.kind === "tool_summary" && section.status === "streaming",
   );
 
   useEffect(() => {
@@ -82,14 +92,17 @@ export function AgentThinkingPanel(props: {
         ref={scrollRef}
         className={"[min-height:0] [overflow-y:auto] [padding:14px] [display:grid] [align-content:start] [gap:10px]"}
       >
-        {props.sections.length === 0 ? (
+        {displaySections.length === 0 ? (
           <div className={"[display:grid] [place-items:center] [gap:10px] [padding:40px_12px] [color:var(--muted)] [font-size:13px] [text-align:center]"}>
             <BrainCircuit size={22} />
             <p className={"[margin:0]"}>{t("thinkingPanel.emptyTitle")}</p>
             <p className={"[margin:0] [font-size:12px]"}>{t("thinkingPanel.emptyHint")}</p>
           </div>
         ) : null}
-        {props.sections.map((section) => {
+        {displaySections.map((section) => {
+          if (section.kind === "tool_summary") {
+            return <ToolSummarySection key={section.id} count={section.count} status={section.status} />;
+          }
           if (section.kind === "event") {
             return <RunEventSection key={section.id} event={section.event} />;
           }
@@ -117,6 +130,71 @@ export function AgentThinkingPanel(props: {
       </div>
     </aside>
   );
+}
+
+function compactToolExecutionSections(sections: ProcessSection[]): DisplayProcessSection[] {
+  const compacted: DisplayProcessSection[] = [];
+  const pendingToolIds = new Set<string>();
+  let pendingId = "";
+  let pendingStatus: AgentRunEvent["status"] = "success";
+
+  const flushTools = () => {
+    if (pendingToolIds.size === 0) return;
+    compacted.push({
+      kind: "tool_summary",
+      id: pendingId || `tool-summary-${compacted.length}`,
+      count: pendingToolIds.size,
+      status: pendingStatus,
+    });
+    pendingToolIds.clear();
+    pendingId = "";
+    pendingStatus = "success";
+  };
+
+  for (const section of sections) {
+    if (section.kind !== "event" || !isToolExecutionEvent(section.event)) {
+      flushTools();
+      compacted.push(section);
+      continue;
+    }
+
+    pendingId ||= `tool-summary-${section.id}`;
+    pendingToolIds.add(toolExecutionKey(section.event));
+    if (section.event.status === "error") {
+      pendingStatus = "error";
+    } else if (section.event.status === "streaming" && pendingStatus !== "error") {
+      pendingStatus = "streaming";
+    }
+  }
+
+  flushTools();
+  return compacted;
+}
+
+function isToolExecutionEvent(event: AgentRunEvent) {
+  return event.type === "tool_call" || event.type === "tool_result" || event.type === "file_write";
+}
+
+function toolExecutionKey(event: AgentRunEvent) {
+  if (typeof event.metadata?.toolCallId === "string") return event.metadata.toolCallId;
+  return event.id;
+}
+
+function ToolSummarySection(props: { count: number; status: AgentRunEvent["status"] }) {
+  const { t } = useTranslation();
+  return (
+    <section className={`[display:flex] [align-items:center] [gap:8px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:10px_12px] [background:#ffffff] [color:var(--muted)] [font-size:12px] [font-weight:700] ${props.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${props.status === "error" ? "[border-color:#dc26262e] [background:#fef2f2]" : ""}`}>
+      <Wrench size={15} />
+      <span>{t("thinkingPanel.toolCallsSummary", { count: props.count })}</span>
+      <span className={"[font-weight:600]"}>{formatToolSummaryStatus(props.status)}</span>
+    </section>
+  );
+}
+
+function formatToolSummaryStatus(status: AgentRunEvent["status"]) {
+  if (status === "streaming") return formatRunEventStatus({ status, type: "tool_call" } as AgentRunEvent);
+  if (status === "error") return formatRunEventStatus({ status, type: "tool_result" } as AgentRunEvent);
+  return formatRunEventStatus({ status: "success", type: "tool_result" } as AgentRunEvent);
 }
 
 function RunEventSection(props: { event: AgentRunEvent }) {

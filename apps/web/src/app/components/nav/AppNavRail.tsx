@@ -1,5 +1,4 @@
 import type { RefObject, ReactNode } from "react";
-import { Settings } from "lucide-react";
 import type { LocalUserProfile } from "../../user-profile.js";
 import { useTranslation } from "../../i18n/index.js";
 import { ProfileMenu } from "../settings/ProfileMenu.js";
@@ -46,7 +45,6 @@ function NavIconButton(props: {
 export function AppNavRail(props: {
   profileMenuOpen: boolean;
   onToggleProfileMenu: () => void;
-  onOpenSettings: () => void;
   profileButtonRef: RefObject<HTMLButtonElement | null>;
   profileMenuRef: RefObject<HTMLDivElement | null>;
   userProfile: LocalUserProfile;
@@ -96,10 +94,6 @@ export function AppNavRail(props: {
       </NavIconButton>
 
       <div className={"[flex:1_1_auto]"} />
-
-      <NavIconButton active={false} title={t("nav.settings")} ariaLabel={t("nav.settings")} onClick={props.onOpenSettings}>
-        <Settings size={20} />
-      </NavIconButton>
     </aside>
   );
 }

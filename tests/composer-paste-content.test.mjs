@@ -32,3 +32,20 @@ test("retains internal links that become meaningful composer elements", async ()
     "[@产品](group-chat://participant/participant-1) 处理 [文件](group-chat://reference/file/artifact-1)",
   );
 });
+
+test("copies generated reply quotes without leaking markdown quote markers", async () => {
+  const { enrichMessageContentForCopy } = await loadModule();
+
+  assert.equal(
+    enrichMessageContentForCopy("> 回复 老板: 颠三倒四\n\n11", []),
+    "回复 老板: 颠三倒四\n\n11",
+  );
+  assert.equal(
+    enrichMessageContentForCopy("> Reply Alice: status\n> Reply Bob: next step\n\nDone", []),
+    "Reply Alice: status\nReply Bob: next step\n\nDone",
+  );
+  assert.equal(
+    enrichMessageContentForCopy("> plain markdown quote\n\nbody", []),
+    "> plain markdown quote\n\nbody",
+  );
+});

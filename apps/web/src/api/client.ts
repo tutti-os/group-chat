@@ -33,6 +33,12 @@ export interface SendMessageResponse {
   targets?: Participant[];
 }
 
+export interface UploadArtifactFileInput {
+  file: File;
+  filename?: string;
+  mimeType?: string;
+}
+
 export interface RemoteUserProfile {
   displayName: string;
   avatarPreset: string;
@@ -217,8 +223,22 @@ export async function updateParticipant(participantId: string, input: UpdatePart
 
 export async function uploadArtifact(
   conversationId: string,
-  input: UploadArtifactRequest,
+  input: UploadArtifactRequest | UploadArtifactFileInput,
 ): Promise<UploadArtifactResponse> {
+  if ("file" in input) {
+    const filename = input.filename?.trim() || input.file.name || "upload.bin";
+    const file =
+      input.mimeType && input.mimeType !== input.file.type
+        ? new File([input.file], filename, { type: input.mimeType })
+        : input.file;
+    const body = new FormData();
+    body.append("file", file, filename);
+    return fetchJson(`/api/conversations/${conversationId}/artifacts`, {
+      method: "POST",
+      body,
+    });
+  }
+
   return fetchJson(`/api/conversations/${conversationId}/artifacts`, {
     method: "POST",
     body: JSON.stringify(input),
@@ -254,7 +274,8 @@ export async function setParticipantListenMode(participantId: string, listenMode
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
-  if (init?.body && !headers.has("Content-Type")) {
+  const isFormDataBody = typeof FormData !== "undefined" && init?.body instanceof FormData;
+  if (init?.body && !isFormDataBody && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
   const response = await fetch(url, {

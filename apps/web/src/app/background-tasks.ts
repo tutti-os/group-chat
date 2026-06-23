@@ -171,6 +171,18 @@ export function backgroundTaskStatusLabel(task: BackgroundTask) {
   return t("task.statusCancelled");
 }
 
+export function isBackgroundTaskVisibleInConversation(
+  task: Pick<BackgroundTask, "id" | "conversationId">,
+  conversationId: string | null | undefined,
+  localTaskIds: ReadonlySet<string>,
+  dismissedTaskIds: ReadonlySet<string>,
+) {
+  return Boolean(conversationId)
+    && task.conversationId === conversationId
+    && localTaskIds.has(task.id)
+    && !dismissedTaskIds.has(task.id);
+}
+
 const DISMISSED_TASK_IDS_KEY = "group-chat:dismissed-private-task-ids";
 
 export function loadDismissedBackgroundTaskIds() {

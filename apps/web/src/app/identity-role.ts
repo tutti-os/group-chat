@@ -8,7 +8,7 @@ export function matchRolePresetId(description: string) {
   const matched = roleDescriptionPresets.find(
     (preset) => preset.id !== "custom" && preset.description.trim() === normalized,
   );
-  return matched?.id ?? null;
+  return matched?.id ?? "custom";
 }
 
 export function normalizeRoleDescriptionForEditor(

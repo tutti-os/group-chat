@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AppWindow, AtSign, Bot, Check, Ear, FileOutput, FileText, LayoutList, LoaderCircle, Paperclip, Plus, Send, Square, Video, X } from "lucide-react";
-import type { AgentRun, Artifact, Conversation, Identity, LocalAgentProviderStatus, MentionTarget, Message, Participant, Room, RuntimeProfile, TuttiAtProviderId } from "@group-chat/shared";
+import type { AgentRun, Artifact, Conversation, Identity, LocalAgentProviderStatus, MentionTarget, Message, MessageBlock, Participant, Room, RuntimeProfile, TuttiAtProviderId } from "@group-chat/shared";
 import { resolveArtifactLinkedMessageId } from "@group-chat/shared";
 import { cancelRun, sendMessage, updateMessage, uploadArtifact } from "../../../api/client.js";
 import { getArtifactCategory, revealArtifactInTuttiFileManager, resolveArtifactPublicUrl } from "../../artifact-actions.js";
-import { formatBytes, fileToBase64 } from "../../formatting.js";
+import { formatBytes } from "../../formatting.js";
 import {
   formatMessageLink,
   formatMessageLinkLabel,
@@ -50,7 +50,7 @@ import {
   type TuttiAtQueryResult,
   type TuttiAtRoomFileMeta,
 } from "../../tutti-at-mentions.js";
-import { serializeReferenceMentionChip } from "../../reference-mentions.js";
+import { formatParticipantMentionMarkdown, serializeReferenceMentionChip } from "../../reference-mentions.js";
 import { buildReferencePasteTarget, normalizeComposerPasteText, splitComposerPasteContent, type ComposerPasteContext } from "../../composer-paste-content.js";
 import { createSummaryLinkChipElement } from "../../summary-link-card.js";
 import { mentionTabProviders } from "../../mention-panel-tabs.js";
@@ -66,6 +66,7 @@ import {
 const MENTION_MENU_Z_INDEX = 90;
 const COMPOSER_UPLOAD_CLIPBOARD_MIME = "application/x-agent-chat-composer-uploads";
 const COMPOSER_UPLOAD_CLIPBOARD_CACHE_LIMIT = 10;
+const COMPOSER_HISTORY_LIMIT = 80;
 const composerUploadClipboardSnapshots = new Map<string, UploadItem[]>();
 
 function mentionPanelCacheKey(tab: MentionPanelTab, roomId: string, roomFileFingerprint: string) {
@@ -123,7 +124,7 @@ export function Composer(props: {
     | { type: "insertSummaryLink"; seq: number; taskId: string }
     | { type: "quote"; seq: number; quote: ComposerQuote }
     | { type: "quotes"; seq: number; quotes: ComposerQuote[] }
-    | { type: "edit"; seq: number; messageId: string; content: string; mentions: MentionTarget[] }
+    | { type: "edit"; seq: number; messageId: string; content: string; mentions: MentionTarget[]; blocks: MessageBlock[] }
     | null;
 }) {
   const { t } = useTranslation();
@@ -175,6 +176,22 @@ export function Composer(props: {
   const attachmentPickerCaretRef = useRef<Range | null>(null);
   const lastComposerInputAtRef = useRef(Date.now());
   const composerIdleBreakPendingRef = useRef(false);
+  const composerHistoryRef = useRef<{ undo: ComposerHistorySnapshot[]; redo: ComposerHistorySnapshot[] }>({
+    undo: [],
+    redo: [],
+  });
+  const uploadItemsRef = useRef<UploadItem[]>([]);
+  const mentionedIdsRef = useRef<Set<string>>(new Set());
+  const mentionedAllRef = useRef(false);
+  useEffect(() => {
+    uploadItemsRef.current = uploadItems;
+  }, [uploadItems]);
+  useEffect(() => {
+    mentionedIdsRef.current = mentionedIds;
+  }, [mentionedIds]);
+  useEffect(() => {
+    mentionedAllRef.current = mentionedAll;
+  }, [mentionedAll]);
   const roomMembers = useMemo(
     () => props.participants.filter((participant) => participant.status !== "removed"),
     [props.participants],
@@ -419,14 +436,47 @@ export function Composer(props: {
     setSending(true);
     try {
       if (editingMessageId) {
-        await props.onUpdateMessage(editingMessageId, { content: text, mentions: editingMentions });
+        const orderedUploadItems = uploadItemsInEditorOrder(editorRef.current, uploadItems);
+        const artifacts = await uploadQueuedItems(orderedUploadItems);
+        const artifactsByUploadItemId = new Map(
+          orderedUploadItems.flatMap((item, index) => artifacts[index] ? [[item.id, artifacts[index]!] as const] : []),
+        );
+        const messageParts = serializeComposerMessageParts(editorRef.current, artifactsByUploadItemId);
+        const editorMentions = collectMentionTargetsFromEditor(editorRef.current, allMentionableParticipants);
+        const agentGuiDispatch = resolveAgentGuiDispatchFromMentions(
+          text,
+          editorMentions,
+          {
+            artifacts: [...props.artifacts, ...artifacts],
+            messages: props.allMessages,
+            participants: allMentionableParticipants,
+            identities: props.identities,
+            userDisplayName: props.userDisplayName,
+            summaryTasks: props.summaryTasks,
+          },
+        );
+        await props.onUpdateMessage(editingMessageId, { content: text, mentions: editorMentions, parts: messageParts });
+        if (agentGuiDispatch) {
+          void dispatchAgentGuiTask(agentGuiDispatch);
+        }
         setText("");
         setEditorText(editorRef.current, "", 0);
         setEditingMessageId(null);
         setEditingMentions([]);
+        setUploadItems((current) => {
+          for (const item of current) {
+            revokePreviewUrl(item.previewUrl);
+            if (item.previewUrl) previewUrlsRef.current.delete(item.previewUrl);
+          }
+          return [];
+        });
+        uploadItemsRef.current = [];
         setMentionedIds(new Set());
+        mentionedIdsRef.current = new Set();
         setMentionedAll(false);
+        mentionedAllRef.current = false;
         setMentionQuery(null);
+        resetComposerHistory();
         return;
       }
       const orderedUploadItems = uploadItemsInEditorOrder(editorRef.current, uploadItems);
@@ -477,10 +527,14 @@ export function Composer(props: {
         }
         return [];
       });
+      uploadItemsRef.current = [];
       removedUploadIdsRef.current.clear();
       setMentionedIds(new Set());
+      mentionedIdsRef.current = new Set();
       setMentionedAll(false);
+      mentionedAllRef.current = false;
       setMentionQuery(null);
+      resetComposerHistory();
     } finally {
       setSending(false);
     }
@@ -545,6 +599,94 @@ export function Composer(props: {
   const handleEditorBlur = () => {
     saveMentionSelection();
     syncEditorText();
+  };
+
+  const captureComposerHistorySnapshot = (editor = editorRef.current): ComposerHistorySnapshot => ({
+    html: editor?.innerHTML ?? "",
+    text: editorText(editor),
+    uploadItems: uploadItemsRef.current,
+    mentionedIds: [...mentionedIdsRef.current],
+    mentionedAll: mentionedAllRef.current,
+  });
+
+  const composerHistorySnapshotKey = (snapshot: ComposerHistorySnapshot) =>
+    JSON.stringify({
+      html: snapshot.html,
+      text: snapshot.text,
+      uploadItemIds: snapshot.uploadItems.map((item) => item.id),
+      mentionedIds: snapshot.mentionedIds,
+      mentionedAll: snapshot.mentionedAll,
+    });
+
+  const pushComposerHistorySnapshot = (snapshot: ComposerHistorySnapshot, clearRedo: boolean) => {
+    const history = composerHistoryRef.current;
+    const previous = history.undo.at(-1);
+    if (previous && composerHistorySnapshotKey(previous) === composerHistorySnapshotKey(snapshot)) return;
+    history.undo.push(snapshot);
+    if (history.undo.length > COMPOSER_HISTORY_LIMIT) {
+      history.undo.splice(0, history.undo.length - COMPOSER_HISTORY_LIMIT);
+    }
+    if (clearRedo) history.redo = [];
+  };
+
+  const ensureComposerHistoryBaseline = () => {
+    pushComposerHistorySnapshot(captureComposerHistorySnapshot(), false);
+  };
+
+  const recordComposerHistorySnapshot = () => {
+    pushComposerHistorySnapshot(captureComposerHistorySnapshot(), true);
+  };
+
+  const resetComposerHistory = () => {
+    composerHistoryRef.current = { undo: [], redo: [] };
+    pushComposerHistorySnapshot(captureComposerHistorySnapshot(), true);
+  };
+
+  const applyComposerHistorySnapshot = (snapshot: ComposerHistorySnapshot) => {
+    const editor = editorRef.current;
+    if (editor) {
+      editor.innerHTML = snapshot.html;
+      placeCaretAtEditorEnd(editor, { preventScroll: true });
+      resizeComposerEditor(editor);
+      editor.focus({ preventScroll: true });
+    }
+    setText(snapshot.text);
+    setUploadItems(snapshot.uploadItems);
+    uploadItemsRef.current = snapshot.uploadItems;
+    const nextMentionedIds = new Set(snapshot.mentionedIds);
+    setMentionedIds(nextMentionedIds);
+    mentionedIdsRef.current = nextMentionedIds;
+    setMentionedAll(snapshot.mentionedAll);
+    mentionedAllRef.current = snapshot.mentionedAll;
+    setMentionQuery(null);
+    mentionSelectionRef.current = null;
+    mentionQueryRangeRef.current = null;
+    composerCaretOffsetRef.current = snapshot.text.length;
+  };
+
+  const undoComposerHistory = () => {
+    const history = composerHistoryRef.current;
+    const currentSnapshot = captureComposerHistorySnapshot();
+    const lastSnapshot = history.undo.at(-1);
+    if (!lastSnapshot || composerHistorySnapshotKey(lastSnapshot) !== composerHistorySnapshotKey(currentSnapshot)) {
+      pushComposerHistorySnapshot(currentSnapshot, false);
+    }
+    if (history.undo.length < 2) return false;
+    const current = history.undo.pop();
+    if (current) history.redo.push(current);
+    const previous = history.undo.at(-1);
+    if (!previous) return false;
+    applyComposerHistorySnapshot(previous);
+    return true;
+  };
+
+  const redoComposerHistory = () => {
+    const history = composerHistoryRef.current;
+    const next = history.redo.pop();
+    if (!next) return false;
+    history.undo.push(next);
+    applyComposerHistorySnapshot(next);
+    return true;
   };
 
   const restoreMentionSelection = (editor: HTMLDivElement) => {
@@ -616,6 +758,7 @@ export function Composer(props: {
     updateMentionQuery(nextText, cursor, reopenMentionMenu);
     if (editor) composerCaretOffsetRef.current = cursor;
     resizeComposerEditor(editor);
+    recordComposerHistorySnapshot();
   };
 
   useLayoutEffect(() => {
@@ -712,6 +855,13 @@ export function Composer(props: {
 
     editor.focus({ preventScroll: true });
     restoreComposerCaret(editor, mentionSelectionRef.current, composerCaretOffsetRef.current);
+    if (hasMentionChip(editor, participant.id)) {
+      syncMentionedIdsFromEditor(editor);
+      setMentionQuery(null);
+      mentionQueryRangeRef.current = null;
+      resizeComposerEditor(editor);
+      return true;
+    }
 
     suppressEditorSyncRef.current = true;
     let trailingSpace: Text | null = null;
@@ -1203,11 +1353,10 @@ export function Composer(props: {
             currentItem.id === item.id ? { ...currentItem, status: "uploading" as const, error: undefined } : currentItem,
           ),
         );
-        const dataBase64 = await fileToBase64(item.file);
         const result = await props.onUpload(props.conversationId, {
+          file: item.file,
           filename: item.filename,
           mimeType: item.mimeType,
-          dataBase64,
         });
         if (removedUploadIdsRef.current.has(item.id)) {
           revokePreviewUrl(item.previewUrl);
@@ -1257,6 +1406,7 @@ export function Composer(props: {
   };
 
   const pasteFiles = (event: ClipboardEvent<HTMLDivElement>) => {
+    ensureComposerHistoryBaseline();
     const copiedUploads = readComposerUploadClipboard(event.clipboardData);
     if (copiedUploads.itemIds.length > 0) {
       event.preventDefault();
@@ -1483,14 +1633,21 @@ export function Composer(props: {
     saveCurrentComposerDraft(activeDraftConversationIdRef.current);
     activeDraftConversationIdRef.current = props.conversationId;
     const draft = composerDraftsRef.current.get(props.conversationId) ?? null;
+    const nextUploadItems = draft?.uploadItems ?? [];
+    const nextMentionedIds = new Set(draft?.mentionedIds ?? []);
+    const nextMentionedAll = draft?.mentionedAll ?? false;
     setText(draft?.text ?? "");
     setEditingMessageId(draft?.editingMessageId ?? null);
     setEditingMentions(draft?.editingMentions ?? []);
     setQuotes(draft?.quotes ?? []);
-    setUploadItems(draft?.uploadItems ?? []);
-    setMentionedIds(new Set(draft?.mentionedIds ?? []));
-    setMentionedAll(draft?.mentionedAll ?? false);
+    setUploadItems(nextUploadItems);
+    uploadItemsRef.current = nextUploadItems;
+    setMentionedIds(nextMentionedIds);
+    mentionedIdsRef.current = nextMentionedIds;
+    setMentionedAll(nextMentionedAll);
+    mentionedAllRef.current = nextMentionedAll;
     restoreEditorDraft(editorRef.current, draft);
+    resetComposerHistory();
     handledMentionRequestSeqRef.current = 0;
     setMentionQuery(null);
     setMentionMenuDismissed(false);
@@ -1572,8 +1729,26 @@ export function Composer(props: {
       setEditingMessageId(request.messageId);
       setEditingMentions(request.mentions);
       setQuotes([]);
+      const restoredUploadItems = uploadItemsFromMessageBlocks(request.blocks, props.allArtifacts);
       setText(request.content);
-      requestAnimationFrame(() => setEditorText(editorRef.current, request.content, request.content.length));
+      setUploadItems(restoredUploadItems);
+      uploadItemsRef.current = restoredUploadItems;
+      mentionedIdsRef.current = new Set();
+      mentionedAllRef.current = false;
+      requestAnimationFrame(() => {
+        restoreEditorFromMessageBlocks(
+          editorRef.current,
+          request.blocks,
+          props.allArtifacts,
+          composerInsertLabels,
+          composerPasteContext,
+        );
+        const editor = editorRef.current;
+        const nextText = editorText(editor);
+        setText(nextText);
+        if (editor) syncMentionedIdsFromEditor(editor);
+        resetComposerHistory();
+      });
       return;
     }
     if (request.type === "quote") {
@@ -1628,7 +1803,7 @@ export function Composer(props: {
       });
       return;
     }
-  }, [props.composerRequest, text, props.summaryTasks, composerInsertLabels, composerPasteContext]);
+  }, [props.allArtifacts, props.composerRequest, text, props.summaryTasks, composerInsertLabels, composerPasteContext]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -1781,6 +1956,9 @@ export function Composer(props: {
                 attachmentDragSelectionRef.current = { pointerId: event.pointerId, startX: event.clientX };
                 suppressEditorClickClearRef.current = false;
               }}
+              onBeforeInput={() => {
+                ensureComposerHistoryBaseline();
+              }}
               onInput={() => {
                 setSelectedUploadItemIds((current) => current.size ? new Set() : current);
                 const editor = editorRef.current;
@@ -1862,6 +2040,21 @@ export function Composer(props: {
               }}
               onBlur={handleEditorBlur}
               onKeyDown={(event) => {
+                const key = event.key.toLowerCase();
+                if ((event.metaKey || event.ctrlKey) && !event.altKey && key === "z") {
+                  event.preventDefault();
+                  if (event.shiftKey) {
+                    redoComposerHistory();
+                  } else {
+                    undoComposerHistory();
+                  }
+                  return;
+                }
+                if (event.ctrlKey && !event.metaKey && !event.altKey && key === "y") {
+                  event.preventDefault();
+                  redoComposerHistory();
+                  return;
+                }
                 if (
                   event.key.length === 1
                   && !event.metaKey
@@ -2129,6 +2322,7 @@ export function Composer(props: {
             ) : option.kind === "reference" ? (
               (() => {
                 const isFileOption = option.providerId === "file" || option.providerId === "agent-generated-file";
+                const showReferenceSubtitle = !(activeMentionTab === "files" && isFileOption);
                 const mentionKey = tuttiAtMentionKey(option.providerId, option.item.itemId);
                 const isFileSelected = isFileOption && fileMultiSelectMode && selectedFileMentionKeys.has(mentionKey);
                 const handleFileClick = () => {
@@ -2170,9 +2364,11 @@ export function Composer(props: {
                   }}
                 >
                   <strong className={"[overflow:hidden] [font-size:12px] [font-weight:500] [line-height:16px] [text-overflow:ellipsis] [white-space:nowrap]"}>{option.label}</strong>
-                  <span className={"[overflow:hidden] [color:var(--muted)] [font-size:11px] [line-height:14px] [text-overflow:ellipsis] [white-space:nowrap]"}>
-                    {option.subtitle || t(`composer.atProvider.${option.providerId}`)}
-                  </span>
+                  {showReferenceSubtitle ? (
+                    <span className={"[overflow:hidden] [color:var(--muted)] [font-size:11px] [line-height:14px] [text-overflow:ellipsis] [white-space:nowrap]"}>
+                      {option.subtitle || t(`composer.atProvider.${option.providerId}`)}
+                    </span>
+                  ) : null}
                 </button>
               </div>
                 );
@@ -2492,6 +2688,66 @@ function restoreEditorDraft(editor: HTMLDivElement | null, draft: ComposerDraft 
   resizeComposerEditor(editor);
 }
 
+function restoreEditorFromMessageBlocks(
+  editor: HTMLDivElement | null,
+  blocks: MessageBlock[],
+  artifacts: Artifact[],
+  labels: {
+    getMessageLabel: (messageId: string) => string;
+    getSummaryTask?: (taskId: string) => BackgroundTask | null;
+  },
+  context: ComposerPasteContext,
+) {
+  if (!editor) return;
+  editor.innerHTML = "";
+  editor.focus({ preventScroll: true });
+  placeCaretAtEditorEnd(editor, { preventScroll: true });
+  const artifactsById = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
+
+  for (const block of editableMessageBlocks(blocks)) {
+    if (block.type === "main_text") {
+      if (block.content) insertComposerPasteAtCaret(block.content, labels, context);
+      continue;
+    }
+    const artifactId = typeof block.metadata?.artifactId === "string" ? block.metadata.artifactId : "";
+    const artifact = artifactId ? artifactsById.get(artifactId) ?? null : null;
+    if (artifact) insertUploadItemsAtCaret(editor, [uploadItemFromArtifact(artifact, block.id)]);
+  }
+
+  placeCaretAtEditorEnd(editor, { preventScroll: true });
+  resizeComposerEditor(editor);
+}
+
+function uploadItemsFromMessageBlocks(blocks: MessageBlock[], artifacts: Artifact[]) {
+  const artifactsById = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
+  return editableMessageBlocks(blocks)
+    .flatMap((block) => {
+      if (block.type !== "image" && block.type !== "file") return [];
+      const artifactId = typeof block.metadata?.artifactId === "string" ? block.metadata.artifactId : "";
+      const artifact = artifactId ? artifactsById.get(artifactId) ?? null : null;
+      return artifact ? [uploadItemFromArtifact(artifact, block.id)] : [];
+    });
+}
+
+function editableMessageBlocks(blocks: MessageBlock[]) {
+  return blocks
+    .filter((block) => block.type === "main_text" || block.type === "image" || block.type === "file")
+    .sort((left, right) => left.sortOrder - right.sortOrder || left.createdAt.localeCompare(right.createdAt));
+}
+
+function uploadItemFromArtifact(artifact: Artifact, blockId: string): UploadItem {
+  return {
+    id: `edit-${blockId}-${artifact.id}`,
+    filename: artifact.filename,
+    mimeType: artifact.mimeType,
+    sizeBytes: artifact.sizeBytes,
+    previewUrl: isPreviewableComposerMedia(artifact.mimeType, artifact.filename) ? artifact.publicUrl : null,
+    status: "uploaded",
+    file: new File([], artifact.filename, { type: artifact.mimeType }),
+    artifact,
+  };
+}
+
 function isComposerEditorFocused(editor: HTMLDivElement) {
   const active = document.activeElement;
   return active === editor || (active instanceof Node && editor.contains(active));
@@ -2738,6 +2994,13 @@ function findActiveMentionQuery(editor: HTMLDivElement): string | null {
 function rangeCrossesMentionChip(range: Range): boolean {
   const fragment = range.cloneContents();
   return fragment.querySelector("[data-mention-chip='true']") !== null;
+}
+
+function hasMentionChip(editor: HTMLDivElement, mentionId: string) {
+  for (const chip of editor.querySelectorAll("[data-mention-chip='true']")) {
+    if ((chip as HTMLElement).dataset.mentionId === mentionId) return true;
+  }
+  return false;
 }
 
 function removeTrailingPartialMentionQuery(editor: HTMLDivElement) {
@@ -3160,10 +3423,7 @@ function nodeTextValue(node: Node) {
   if (isUploadItemChip(node)) return "";
   if (isWhisperChip(node)) return "";
   if (isMentionChip(node)) {
-    if (node.dataset.mentionDisplayMode === "reference-link") {
-      return serializeReferenceMentionChip(node);
-    }
-    return `@${node.dataset.mentionLabel ?? node.textContent?.replace(/^@/, "") ?? ""}`;
+    return serializeMentionChip(node);
   }
   if (isMessageLinkChip(node)) return formatMessageLink(...parseMessageLinkIds(node.dataset.messageLinkId ?? ""));
   if (isSummaryLinkChip(node)) return formatSummaryLink(node.dataset.summaryLinkId ?? "");
@@ -3173,6 +3433,18 @@ function nodeTextValue(node: Node) {
     text += nodeTextValue(child);
   });
   return text;
+}
+
+function serializeMentionChip(node: HTMLElement) {
+  if (node.dataset.mentionDisplayMode === "reference-link") {
+    return serializeReferenceMentionChip(node);
+  }
+  const label = node.dataset.mentionLabel?.trim() || node.textContent?.replace(/^@/, "").trim() || "";
+  const mentionId = node.dataset.mentionId?.trim() || "";
+  if (mentionId && mentionId !== "all" && node.dataset.mentionKind !== "reference") {
+    return formatParticipantMentionMarkdown(mentionId, label);
+  }
+  return `@${label}`;
 }
 
 function rangeTextValue(range: Range) {
@@ -3700,7 +3972,7 @@ function serializeComposerMessageParts(
       return;
     }
     if (node instanceof HTMLElement && node.dataset.mentionChip === "true") {
-      text += serializeReferenceMentionChip(node);
+      text += serializeMentionChip(node);
       return;
     }
     if (node instanceof Text) {
@@ -3808,6 +4080,14 @@ interface ComposerDraft {
   editingMessageId: string | null;
   editingMentions: MentionTarget[];
   quotes: ComposerQuote[];
+  uploadItems: UploadItem[];
+  mentionedIds: string[];
+  mentionedAll: boolean;
+}
+
+interface ComposerHistorySnapshot {
+  html: string;
+  text: string;
   uploadItems: UploadItem[];
   mentionedIds: string[];
   mentionedAll: boolean;

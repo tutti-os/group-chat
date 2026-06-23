@@ -1,4 +1,4 @@
-import type { ChatSnapshot, Identity, Message, Participant, StreamEvent, UpdateRoomRequest, AgentRun } from "@group-chat/shared";
+import type { AgentRun, ChatSnapshot, Identity, Message, Participant, RuntimeProfile, StreamEvent, UpdateRoomRequest } from "@group-chat/shared";
 import { enrichAgentRun, enrichAgentRuns } from "@group-chat/shared";
 
 export interface AppState extends ChatSnapshot {
@@ -59,7 +59,11 @@ export function applyEvent(state: AppState, event: StreamEvent): AppState {
     }
     case "identity.created":
     case "identity.updated":
-      return { ...withSeq, identities: upsertIdentity(state.identities, payload.identity) };
+      return {
+        ...withSeq,
+        identities: upsertIdentity(state.identities, payload.identity),
+        runtimeProfiles: upsert(state.runtimeProfiles, payload.runtimeProfile as RuntimeProfile | null | undefined),
+      };
     case "identity.deleted":
       return {
         ...withSeq,
@@ -68,7 +72,11 @@ export function applyEvent(state: AppState, event: StreamEvent): AppState {
       };
     case "participant.created":
     case "participant.updated":
-      return { ...withSeq, participants: upsertParticipant(state.participants, payload.participant) };
+      return {
+        ...withSeq,
+        participants: upsertParticipant(state.participants, payload.participant),
+        runtimeProfiles: upsert(state.runtimeProfiles, payload.runtimeProfile as RuntimeProfile | null | undefined),
+      };
     case "message.created":
     case "message.updated": {
       const messages = upsertMessage(state.messages, payload.message);
@@ -300,4 +308,3 @@ export function removeDeletedRoom(state: AppState, roomId: string | null, conver
     activeRuns: state.activeRuns.filter((run) => run.roomId !== roomId && run.conversationId !== conversationId),
   };
 }
-

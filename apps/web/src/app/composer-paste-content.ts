@@ -36,11 +36,32 @@ export function enrichMessageContentForCopy(
   content: string,
   mentions: Array<Pick<MentionTarget, "mentionType" | "displayNameSnapshot" | "participantId" | "referenceProviderId" | "referenceEntityId" | "referenceInsert" | "referenceScope">>,
 ) {
-  if (!mentions.length) return content;
-  return enrichContentWithReferenceMentions(
-    enrichContentWithParticipantMentions(content, mentions),
-    mentions,
-  );
+  const enriched = mentions.length
+    ? enrichContentWithReferenceMentions(
+        enrichContentWithParticipantMentions(content, mentions),
+        mentions,
+      )
+    : content;
+  return stripGeneratedReplyQuoteMarkdownForCopy(enriched);
+}
+
+export function stripGeneratedReplyQuoteMarkdownForCopy(content: string) {
+  const normalized = content.replace(/\r\n?/g, "\n");
+  const lines = normalized.split("\n");
+  const bodyStartIndex = lines.findIndex((line, index) => index > 0 && line.trim() === "");
+  if (bodyStartIndex === -1) return content;
+
+  const quoteLines = lines.slice(0, bodyStartIndex);
+  if (!quoteLines.length || quoteLines.some((line) => !isGeneratedReplyQuoteLine(line))) return content;
+
+  return [
+    ...quoteLines.map((line) => line.replace(/^([ \t]*)>\s?/, "$1")),
+    ...lines.slice(bodyStartIndex),
+  ].join("\n");
+}
+
+function isGeneratedReplyQuoteLine(line: string) {
+  return /^[ \t]*>\s?(?:回复|Reply)\s+[^:：]+[:：]/i.test(line);
 }
 
 export function normalizeComposerPasteText(html: string, plain: string) {

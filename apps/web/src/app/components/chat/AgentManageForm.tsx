@@ -42,7 +42,6 @@ export function AgentManageForm(props: {
   conversationId?: string;
   roomParticipants?: Participant[];
   onDisplayNameChange?: (displayName: string) => void;
-  onMention: (participant: Participant) => void;
   onCreateIdentity?: (input: CreateIdentityRequest) => Promise<{ identity: Identity }>;
   onUpdateIdentity?: (
     identityId: string,
@@ -87,10 +86,15 @@ export function AgentManageForm(props: {
   );
   const selectedRuntime =
     props.runtimeProfiles.find((profile) => profile.id === runtimeProfileId)
+    ?? (props.runtimeProfile?.id === runtimeProfileId ? props.runtimeProfile : null)
     ?? props.runtimeProfiles.find((profile) => profile.id === identity?.defaultRuntimeProfileId)
     ?? props.runtimeProfile;
   const canonicalRuntime = resolveCanonicalRuntimeProfile(selectedRuntime ?? null, props.runtimeProfiles);
-  const modelOptions = listRuntimeModels(selectedRuntime ?? null, props.localAgentProviders);
+  const listedModelOptions = listRuntimeModels(selectedRuntime ?? null, props.localAgentProviders);
+  const modelOptions =
+    model && !listedModelOptions.some((option) => option.id === model)
+      ? [{ id: model, label: model }, ...listedModelOptions]
+      : listedModelOptions;
   const reasoningOptions = listRuntimeReasoningOptions(
     selectedRuntime ?? null,
     props.localAgentProviders,
@@ -98,7 +102,6 @@ export function AgentManageForm(props: {
     getReasoningEffortOptions(),
   );
   const providerStatus = localAgentStatus(selectedRuntime ?? null, props.localAgentProviders);
-  const skillIds = identity?.skillIds ?? [];
   const hasRoomInstructions = Boolean(roomInstructions.trim());
   const showRoomInstructions = hasRoomInstructions || (!readOnly && showRoomInstructionsEditor);
 
@@ -116,13 +119,15 @@ export function AgentManageForm(props: {
 
   useEffect(() => {
     if (!selectedRuntime) return;
+    if (model) return;
     const nextModel = preferredRuntimeModelId(selectedRuntime, props.localAgentProviders);
+    if (!nextModel) return;
     setModel(nextModel);
     const nextProvider = localAgentStatus(selectedRuntime, props.localAgentProviders);
     if (nextProvider?.defaultReasoningEffort) {
       setReasoningEffort(nextProvider.defaultReasoningEffort);
     }
-  }, [props.localAgentProviders, runtimeProfileId, selectedRuntime]);
+  }, [model, props.localAgentProviders, selectedRuntime]);
 
   useEffect(() => {
     if (!reasoningOptions.some((option) => option.value === reasoningEffort)) {
@@ -132,11 +137,6 @@ export function AgentManageForm(props: {
       );
     }
   }, [model, providerStatus?.defaultReasoningEffort, reasoningEffort, reasoningOptions]);
-
-  const mention = () => {
-    props.onMention(participant);
-    props.onSaved?.();
-  };
 
   const buildIdentityPayload = (): CreateIdentityRequest => ({
     name: displayName.trim() || identity?.name || t("common.agent"),
@@ -371,36 +371,6 @@ export function AgentManageForm(props: {
           {t("agentForm.addRoomDesc")}
         </button>
       ) : null}
-
-      <div className={"[display:grid] [gap:8px]"}>
-        <span className={"[color:var(--muted)] [font-size:12px] [font-weight:700]"}>Skills</span>
-        {skillIds.length ? (
-          <div className={"[display:flex] [flex-wrap:wrap] [gap:6px]"}>
-            {skillIds.map((skillId) => (
-              readOnly ? (
-                <span
-                  key={skillId}
-                  className={"[border:1px_solid_var(--border)] [border-radius:999px] [padding:4px_10px] [color:var(--muted)] [background:#f3f4f6] [font-size:11px] [font-weight:650]"}
-                >
-                  {skillId}
-                </span>
-              ) : (
-                <button
-                  key={skillId}
-                  type="button"
-                  className={"[border:1px_solid_var(--border)] [border-radius:999px] [padding:4px_10px] [color:var(--text)] [background:#f7f7f8] [font-size:11px] [font-weight:650] [&:hover]:[background:#eceef1]"}
-                  title={t("agentForm.mentionSkill", { name: participant.displayName })}
-                  onClick={mention}
-                >
-                  {skillId}
-                </button>
-              )
-            ))}
-          </div>
-        ) : (
-          <span className={"[color:var(--muted)] [font-size:12px]"}>{t("agentForm.noSkills")}</span>
-        )}
-      </div>
 
       {!readOnly ? (
         <div className={"[display:flex] [flex-wrap:wrap] [justify-content:space-between] [gap:8px] [padding-top:10px] [margin-top:4px]"}>

@@ -7,8 +7,10 @@ import { enrichAgentRuns, isLocalUserMessage, resolveAgentRunVisibility, type Ag
   type Identity,
   type LocalAgentProviderStatus,
   type Message,
+  type MessageBlock,
   type Participant,
   type PrivateTaskSnapshot,
+  type RuntimeProfile,
   type Room,
   type StreamEvent,
   type UpdateIdentityRequest,
@@ -56,7 +58,6 @@ import { Composer } from "./components/chat/Composer.js";
 import { BackgroundTaskBar } from "./components/chat/BackgroundTaskBar.js";
 import { AppNavRail } from "./components/nav/AppNavRail.js";
 import { ProfileMenu } from "./components/settings/ProfileMenu.js";
-import { SettingsDialog } from "./components/settings/SettingsDialog.js";
 import { createDraftLocalAgent } from "./identity-draft.js";
 import { loadUserProfile, hydrateUserProfile, refreshUserProfileForLocale, saveUserProfile, type LocalUserProfile } from "./user-profile.js";
 import {
@@ -67,7 +68,7 @@ import {
   type ConversationReadAtMap,
 } from "./conversation-read-state.js";
 import { applyEvent, applyRoomUpdate, emptyState, normalizeSnapshot, removeActiveRun, removeDeletedRoom, removeHiddenMessages, upsert, upsertIdentity, upsertMany, upsertMessage, upsertParticipant, type AppState } from "./state.js";
-import { backgroundTaskFromSnapshot, createOptimisticBackgroundTask, createPendingAgentReplyTargets, enrichBackgroundTask, isPendingAgentRunId, loadDismissedBackgroundTaskIds, loadLocalTaskBarTaskIds, mergeBackgroundTask, pendingAgentReplyKey, removeLocalTaskBarTaskId, saveDismissedBackgroundTaskIds, addLocalTaskBarTaskId, type AgentRunTaskItem, type BackgroundTask, type PendingAgentReplyTarget } from "./background-tasks.js";
+import { backgroundTaskFromSnapshot, createOptimisticBackgroundTask, createPendingAgentReplyTargets, enrichBackgroundTask, isBackgroundTaskVisibleInConversation, isPendingAgentRunId, loadDismissedBackgroundTaskIds, loadLocalTaskBarTaskIds, mergeBackgroundTask, pendingAgentReplyKey, removeLocalTaskBarTaskId, saveDismissedBackgroundTaskIds, addLocalTaskBarTaskId, type AgentRunTaskItem, type BackgroundTask, type PendingAgentReplyTarget } from "./background-tasks.js";
 import { formatSummaryLink, primaryMessageLinkId, resolveAgentProfileParticipant, resolveMessageAgentParticipant, resolveMessageSenderLabel, messageSenderLabel } from "./chat-links.js";
 import { attachmentLabel, subscribeI18n, t } from "./i18n/index.js";
 import { collectMessageProcess } from "./agent-thinking.js";
@@ -107,7 +108,7 @@ export type ComposerRequest =
   | { type: "insertSummaryLink"; seq: number; taskId: string }
   | { type: "quote"; seq: number; quote: ComposerQuote }
   | { type: "quotes"; seq: number; quotes: ComposerQuote[] }
-  | { type: "edit"; seq: number; messageId: string; content: string; mentions: Message["mentions"] };
+  | { type: "edit"; seq: number; messageId: string; content: string; mentions: Message["mentions"]; blocks: MessageBlock[] };
 
 export interface ComposerQuote {
   messageId: string;
@@ -133,7 +134,6 @@ export function App() {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [profileMenuPlacement, setProfileMenuPlacement] = useState<"rail" | "mobile" | "chat">("rail");
   const [profileMenuAnchorEl, setProfileMenuAnchorEl] = useState<HTMLElement | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<LocalUserProfile>(() => loadUserProfile());
   const saveUserProfileState = useCallback((profile: LocalUserProfile) => {
     setUserProfile(profile);
@@ -502,11 +502,14 @@ export function App() {
   const currentBackgroundTasks = useMemo(() => {
     const localTaskIds = loadLocalTaskBarTaskIds();
     return backgroundTasks.filter(
-      (task) =>
-        localTaskIds.has(task.id)
-        && !dismissedBackgroundTaskIds.has(task.id),
+      (task) => isBackgroundTaskVisibleInConversation(
+        task,
+        currentConversation?.id,
+        localTaskIds,
+        dismissedBackgroundTaskIds,
+      ),
     );
-  }, [backgroundTasks, dismissedBackgroundTaskIds]);
+  }, [backgroundTasks, currentConversation?.id, dismissedBackgroundTaskIds]);
   const openBackgroundTask = useMemo(
     () => openBackgroundTaskId && currentConversation && !dismissedBackgroundTaskIds.has(openBackgroundTaskId)
       ? backgroundTasks.find(
@@ -748,23 +751,29 @@ export function App() {
     const result = (await addParticipant(conversationId, input)) as {
       participant: Participant;
       systemMessage?: Message | null;
+      runtimeProfile?: RuntimeProfile | null;
     };
     setState((current) => ({
       ...current,
       participants: upsert(current.participants, result.participant),
+      runtimeProfiles: upsert(current.runtimeProfiles, result.runtimeProfile),
       messages: result.systemMessage ? upsert(current.messages, result.systemMessage) : current.messages,
     }));
     return result;
   };
 
   const onUpdateParticipant = async (participantId: string, input: UpdateParticipantRequest) => {
-    const result = (await updateParticipant(participantId, input)) as { participant: Participant | null };
+    const result = (await updateParticipant(participantId, input)) as {
+      participant: Participant | null;
+      runtimeProfile?: RuntimeProfile | null;
+    };
     if (!result.participant) {
       throw new Error(t("app.updateAgentFailed"));
     }
     setState((current) => ({
       ...current,
       participants: upsert(current.participants, result.participant),
+      runtimeProfiles: upsert(current.runtimeProfiles, result.runtimeProfile),
     }));
     return result;
   };
@@ -807,24 +816,29 @@ export function App() {
   };
 
   const onCreateIdentity = async (input: CreateIdentityRequest) => {
-    const result = (await createIdentity(input)) as { identity: Identity };
+    const result = (await createIdentity(input)) as { identity: Identity; runtimeProfile?: RuntimeProfile | null };
     if (result.identity) {
       setState((current) => ({
         ...current,
         identities: upsertIdentity(current.identities, result.identity),
+        runtimeProfiles: upsert(current.runtimeProfiles, result.runtimeProfile),
       }));
     }
     return result;
   };
 
   const onUpdateIdentity = async (identityId: string, input: UpdateIdentityRequest) => {
-    const result = (await updateIdentity(identityId, input)) as { identity: Identity | null };
+    const result = (await updateIdentity(identityId, input)) as {
+      identity: Identity | null;
+      runtimeProfile?: RuntimeProfile | null;
+    };
     if (!result.identity) {
       throw new Error(t("app.agentSaveFailed"));
     }
     setState((current) => ({
       ...current,
       identities: upsertIdentity(current.identities, result.identity),
+      runtimeProfiles: upsert(current.runtimeProfiles, result.runtimeProfile),
     }));
     return result;
   };
@@ -1106,12 +1120,24 @@ export function App() {
   const onUpdateMessage = useCallback(
     async (messageId: string, input: UpdateMessageRequest) => {
       const result = await updateMessage(messageId, input);
-      mergeSentMessage(result);
+      setState((current) => {
+        const messages = upsertMessage(current.messages, result.message);
+        return {
+          ...current,
+          messages,
+          messageBlocks: upsertMany(
+            current.messageBlocks.filter((block) => block.messageId !== result.message.id),
+            result.blocks ?? [],
+          ),
+          artifacts: upsertMany(current.artifacts, result.artifacts ?? []),
+          activeRuns: enrichAgentRuns(current.activeRuns, messages),
+        };
+      });
       registerPendingReplyTargets(result);
       window.setTimeout(() => void refreshSnapshot(), 900);
       return result;
     },
-    [mergeSentMessage, registerPendingReplyTargets, refreshSnapshot],
+    [registerPendingReplyTargets, refreshSnapshot],
   );
 
 
@@ -1234,6 +1260,7 @@ export function App() {
       messageId: message.id,
       content: message.content,
       mentions: message.mentions,
+      blocks: state.messageBlocks.filter((block) => block.messageId === message.id),
     }));
   };
 
@@ -1352,7 +1379,6 @@ export function App() {
       <AppNavRail
         profileMenuOpen={profileMenuOpen && profileMenuPlacement === "rail"}
         onToggleProfileMenu={() => toggleProfileMenu("rail")}
-        onOpenSettings={() => setSettingsOpen(true)}
         profileButtonRef={profileButtonRef}
         profileMenuRef={profileMenuRef}
         userProfile={userProfile}
@@ -1598,6 +1624,7 @@ export function App() {
                   runtimeProfile={agentProfileRuntime}
                   runtimeProfiles={state.runtimeProfiles}
                   localAgentProviders={localAgentProviders}
+                  onRefreshLocalAgentProviders={refreshLocalAgentProviders}
                   showRemove={agentProfileShowRemove}
                   onClose={clearAgentProfileDialog}
                   onMention={(participant) => {
@@ -1702,20 +1729,6 @@ export function App() {
             closeProfileMenu();
           }}
           onClose={closeProfileMenu}
-        />
-      ) : null}
-      {settingsOpen ? (
-        <SettingsDialog
-          runtimeProfiles={state.runtimeProfiles}
-          localAgentProviders={localAgentProviders}
-          localAgentProvidersRefreshing={refreshingLocalAgentProviders}
-          onRefreshLocalAgentProviders={refreshLocalAgentProviders}
-          userProfile={userProfile}
-          onSaveProfile={(profile) => {
-            saveUserProfileState(profile);
-            setSettingsOpen(false);
-          }}
-          onClose={() => setSettingsOpen(false)}
         />
       ) : null}
       {deletePrompt ? (

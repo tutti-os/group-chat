@@ -96,6 +96,19 @@ try {
   assert(duplicateArtifactResult.artifact.filename === "brief2.txt", "duplicate upload did not get numeric display suffix");
   assert(duplicateArtifactResult.artifact.localPath.endsWith("/brief2.txt"), "duplicate upload did not get numeric disk suffix");
 
+  const streamUploadBody = new FormData();
+  streamUploadBody.append(
+    "file",
+    new Blob([Buffer.from("Multipart stream attachment.", "utf8")], { type: "text/plain" }),
+    "stream.txt",
+  );
+  const streamArtifactResult = await api(`/api/conversations/${conversation.id}/artifacts`, {
+    method: "POST",
+    body: streamUploadBody,
+  });
+  assert(streamArtifactResult.artifact.filename === "stream.txt", "stream upload did not keep original filename");
+  assert(streamArtifactResult.artifact.sizeBytes === 28, "stream upload did not persist expected byte size");
+
   const sendResult = await api(`/api/conversations/${conversation.id}/messages`, {
     method: "POST",
     body: JSON.stringify({
@@ -308,10 +321,11 @@ async function waitForHealth(baseUrl, timeoutMs) {
 }
 
 async function api(path, init) {
+  const isFormDataBody = typeof FormData !== "undefined" && init?.body instanceof FormData;
   const response = await fetch(`${baseUrl}${path}`, {
     ...init,
     headers: {
-      ...(init?.body ? { "content-type": "application/json" } : {}),
+      ...(init?.body && !isFormDataBody ? { "content-type": "application/json" } : {}),
       ...(init?.headers ?? {}),
     },
   });

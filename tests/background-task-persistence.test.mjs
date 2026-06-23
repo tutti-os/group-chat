@@ -57,3 +57,25 @@ test("legacy session task ids migrate to persistent storage", async () => {
   assert.equal(globalThis.localStorage.getItem(key), JSON.stringify(["summary-legacy"]));
   assert.equal(globalThis.sessionStorage.getItem(key), null);
 });
+
+test("background task bar visibility is scoped to the current conversation", async () => {
+  globalThis.localStorage = createMemoryStorage();
+  globalThis.sessionStorage = createMemoryStorage();
+  const tasks = await loadBackgroundTasksModule();
+  const task = { id: "summary-1", conversationId: "conversation-1" };
+  const localTaskIds = new Set(["summary-1"]);
+  const dismissedTaskIds = new Set();
+
+  assert.equal(
+    tasks.isBackgroundTaskVisibleInConversation(task, "conversation-1", localTaskIds, dismissedTaskIds),
+    true,
+  );
+  assert.equal(
+    tasks.isBackgroundTaskVisibleInConversation(task, "conversation-2", localTaskIds, dismissedTaskIds),
+    false,
+  );
+  assert.equal(
+    tasks.isBackgroundTaskVisibleInConversation(task, null, localTaskIds, dismissedTaskIds),
+    false,
+  );
+});

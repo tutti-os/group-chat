@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Braces, BrainCircuit, CheckSquare, ChevronDown, ChevronRight, ChevronsDown, Copy, Edit3, Ear, FileText, MoreHorizontal, Reply, RotateCcw, SendHorizontal, Terminal, Trash2, Wrench, X } from "lucide-react";
 import type { Artifact, AgentRun, AgentRunEvent, Conversation, Identity, Message, MessageBlock, Participant, Room, RuntimeProfile } from "@group-chat/shared";
-import { isLocalUserMessage, resolveMessageVisibility, enrichAssistantContentWithWorkspaceResourceLinks, resolveTriggerUserMentions } from "@group-chat/shared";
+import { isLocalUserMessage, resolveMessageVisibility, enrichAssistantContentWithWorkspaceResourceLinks, resolveTriggerUserMentions, stripAssistantSkillDetails } from "@group-chat/shared";
 import { getArtifactCategory, revealArtifactInTuttiFileManager } from "../../artifact-actions.js";
 import { enrichMessageContentForCopy } from "../../composer-paste-content.js";
 import { formatBytes, formatMessageStatus, formatMessageTime } from "../../formatting.js";
@@ -553,7 +553,8 @@ export function MessageTimeline(props: {
       const block = props.blocks.find(
         (item) => item.id === scope.blockId && visibleMessageIds.has(item.messageId),
       );
-      const blockText = block?.content.trim() ?? "";
+      const blockMessage = block ? visibleMessages.find((message) => message.id === block.messageId) ?? null : null;
+      const blockText = block ? enrichMessageContentForCopy(block.content.trim(), blockMessage?.mentions ?? []) : "";
       const messageArtifacts = collectImageFileArtifactsForMessages(visibleMessages, props.blocks, props.artifacts);
       if (!hasMeaningfulMessageCopyText(blockText) && messageArtifacts.length === 1) {
         await copyMessagesToClipboard({
@@ -765,9 +766,29 @@ export function MessageTimeline(props: {
     if (!openMessageMenu) return;
     const container = scrollRef.current;
     if (!container) return;
+    const previousOverflowY = container.style.overflowY;
+    const lockedScrollTop = container.scrollTop;
+    const preventTimelineScroll = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest(MESSAGE_MORE_MENU_SELECTOR)) return;
+      event.preventDefault();
+    };
+    const restoreLockedScrollTop = () => {
+      if (container.scrollTop !== lockedScrollTop) container.scrollTop = lockedScrollTop;
+    };
     const handleSelectStart = () => closeOpenMessageMenu();
+    container.style.overflowY = "hidden";
+    container.addEventListener("wheel", preventTimelineScroll, { passive: false });
+    container.addEventListener("touchmove", preventTimelineScroll, { passive: false });
+    container.addEventListener("scroll", restoreLockedScrollTop);
     container.addEventListener("selectstart", handleSelectStart);
-    return () => container.removeEventListener("selectstart", handleSelectStart);
+    return () => {
+      container.style.overflowY = previousOverflowY;
+      container.removeEventListener("wheel", preventTimelineScroll);
+      container.removeEventListener("touchmove", preventTimelineScroll);
+      container.removeEventListener("scroll", restoreLockedScrollTop);
+      container.removeEventListener("selectstart", handleSelectStart);
+    };
   }, [openMessageMenu, closeOpenMessageMenu]);
 
   return (
@@ -955,7 +976,6 @@ export function MessageTimeline(props: {
             })
               .then(() => {
                 showCopyTip(position);
-                props.onInsertSummaryLink?.(task.id);
               })
               .catch(() => window.alert(t("app.copyFailed")));
           }}
@@ -971,7 +991,7 @@ export function MessageTimeline(props: {
       ) : null}
       {copyTipPosition ? (
         <div
-          className={"[position:fixed] [z-index:80] [border-radius:999px] [padding:7px_12px] [color:#ffffff] [background:rgb(17_24_39_/_88%)] [box-shadow:0_10px_30px_rgb(0_0_0_/_18%)] [font-size:12px] [font-weight:650] [pointer-events:none]"}
+          className={"[position:fixed] [z-index:80] [width:max-content] [white-space:nowrap] [border-radius:999px] [padding:7px_12px] [color:#ffffff] [background:rgb(17_24_39_/_88%)] [box-shadow:0_10px_30px_rgb(0_0_0_/_18%)] [font-size:12px] [font-weight:650] [pointer-events:none]"}
           style={{
             left: copyTipPosition.x,
             top: copyTipPosition.y - COPY_TIP_OFFSET_PX,
@@ -1516,7 +1536,13 @@ function MessageRow(props: {
       data-failed={props.message.status === "error" || undefined}
       data-selected={props.selected || undefined}
       data-group-continuation={!props.showHeader || undefined}
-      className={`group/message [position:relative] [display:grid] ${props.selectionMode ? "[grid-template-columns:22px_34px_minmax(0,_1fr)]" : "[grid-template-columns:34px_minmax(0,_1fr)]"} [gap:8px] [align-items:start] [border-radius:18px] [transition:background-color_0.2s_ease,_box-shadow_0.2s_ease] ${props.isLastInGroup ? "[margin-bottom:18px]" : "[margin-bottom:4px]"} [&_[data-slot=message-avatar]]:[user-select:none] [&[data-selected=true]]:[background:#eaf2ff66] [&[data-flash=true]]:[background:#fef3c7] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-whisper=true]:not([data-failed=true])_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#d0d3d6] [&[data-whisper=true][data-failed=true]_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#f59e0b] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[border-radius:8px] [&[data-whisper=true][data-role=assistant]_[data-slot=message-block]:not([data-link-only])]:[background:#f8f9fb] [&[data-role=user][data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[background:#eef6ff] ${messageRoleContentClassName}`}
+      className={`group/message [position:relative] [display:grid] ${props.selectionMode ? "[grid-template-columns:22px_34px_minmax(0,_1fr)]" : "[grid-template-columns:34px_minmax(0,_1fr)]"} [gap:8px] [align-items:start] [border-radius:18px] [transition:background-color_0.2s_ease,_box-shadow_0.2s_ease] ${props.isLastInGroup ? "[margin-bottom:18px]" : "[margin-bottom:4px]"} ${props.selectionMode && !isRemoved ? "[cursor:pointer]" : ""} [&_[data-slot=message-avatar]]:[user-select:none] [&[data-selected=true]]:[background:#eaf2ff66] [&[data-flash=true]]:[background:#fef3c7] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-whisper=true]:not([data-failed=true])_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#d0d3d6] [&[data-whisper=true][data-failed=true]_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#f59e0b] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[border-radius:8px] [&[data-whisper=true][data-role=assistant]_[data-slot=message-block]:not([data-link-only])]:[background:#f8f9fb] [&[data-role=user][data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[background:#eef6ff] ${messageRoleContentClassName}`}
+      onClickCapture={(event) => {
+        if (!props.selectionMode || isRemoved) return;
+        event.preventDefault();
+        event.stopPropagation();
+        props.onToggleSelected();
+      }}
     >
       {props.selectionMode ? (
       <div
@@ -2238,148 +2264,164 @@ function SummaryPanel(props: {
     props.blocks,
     props.artifacts,
   ).filter((artifact) => summaryContent.includes(artifact.filename));
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") props.onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [props.onClose]);
+
   return (
-    <aside className={"[position:fixed] [top:56px] [right:0] [bottom:0] [z-index:70] [display:grid] [width:min(420px,_calc(100vw_-_28px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border)] [background:var(--panel)] [box-shadow:-18px_0_50px_rgb(0_0_0_/_14%)]"} aria-label={t("messageActions.summarySidebar")}>
-      <header className={"[display:grid] [grid-template-columns:minmax(0,_1fr)_auto] [align-items:center] [gap:8px] [border-bottom:1px_solid_var(--border)] [padding:14px] [background:#ffffff]"}>
-        <span className={"[display:grid] [gap:2px] [min-width:0]"}>
-          <strong className={"[color:var(--text)] [font-size:15px] [font-weight:750]"}>{t("messageActions.messageSummary")}</strong>
-          <small className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap] [color:var(--muted)] [font-size:12px]"}>
-            {isMultiSource
-              ? t("messageActions.summaryByMulti", { name: props.task.participantName, count: props.task.sourceMessageIds.length })
-              : t("messageActions.summaryBySingle", { name: props.task.participantName })}
-          </small>
-        </span>
-        <button type="button" className={"[display:grid] [width:30px] [height:30px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:#00000008]"} aria-label={t("messageActions.closeSummary")} onClick={props.onClose}>
-          <X size={15} />
-        </button>
-      </header>
-      <div className={"[min-height:0] [overflow:auto] [padding:14px] [display:grid] [align-content:start] [gap:12px]"}>
-        <section className={"[display:grid] [gap:8px] [border:1px_solid_var(--border)] [border-radius:12px] [padding:10px] [background:#f8fafc]"}>
-          <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:8px]"}>
-            <strong className={"[font-size:12px] [font-weight:750] [color:var(--muted)]"}>{t("summary.htmlSource")}</strong>
-            {props.task.sourceMessageId ? (
-              <button
-                type="button"
-                className={"[height:28px] [border:0] [border-radius:8px] [padding:0_10px] [color:#ffffff] [background:#111827] [font-size:12px] [font-weight:700] [white-space:nowrap]"}
-                onClick={props.onBackToSource}
-              >
-                {t("messageActions.backToSource")}
-              </button>
-            ) : null}
-          </div>
-          {props.sourceMessages.length ? (
-            <div className={"[display:grid] [gap:10px]"}>
-              {props.sourceMessages.map((message) => (
-                <SummarySourceMessage
-                  key={message.id}
-                  message={message}
-                  blocks={props.blocks.filter((block) => block.messageId === message.id && !isRuntimeEventBlock(block)).sort(compareMessageBlocks)}
-                  artifacts={props.artifacts}
-                  allMessages={props.allMessages}
-                  allParticipants={props.allParticipants}
-                  identities={props.identities}
-                  conversations={props.conversations}
-                  rooms={props.rooms}
-                  summaryTasks={props.summaryTasks}
-                  runtimeProfiles={props.runtimeProfiles}
-                  userProfile={props.userProfile}
-                  onOpenArtifact={props.onOpenArtifact}
-                  onOpenMessageLink={props.onOpenMessageLink}
-                  onOpenSummaryLink={props.onOpenSummaryLink}
-                  onEnsureSummaryTask={props.onEnsureSummaryTask}
-                  onOpenAgentProfile={props.onOpenAgentProfile}
-                />
-              ))}
-            </div>
-          ) : (
-            <p className={"[margin:0] [color:var(--text)] [font-size:13px] [line-height:1.55]"}>
-              {compactInline(props.task.sourcePreview || attachmentLabel())}
-            </p>
-          )}
-        </section>
-        <section className={"[display:grid] [gap:8px]"}>
-          <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:8px]"}>
-            <strong className={"[font-size:12px] [font-weight:750] [color:var(--muted)]"}>{loading ? t("messageActions.summarizing") : t("messageActions.summaryResult")}</strong>
-            {!loading && summaryContent ? (
-              <span className={"[display:flex] [align-items:center] [gap:6px]"}>
-                <ForwardToAgentToolbarItem
-                  targets={props.agentForwardTargets}
-                  onForward={(provider) => void props.onForwardToAgent(provider)}
-                />
+    <div
+      className={"[position:fixed] [top:56px] [right:0] [bottom:0] [left:0] [z-index:70] [display:flex] [justify-content:flex-end] [background:transparent]"}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) props.onClose();
+      }}
+    >
+      <aside className={"[display:grid] [width:min(420px,_calc(100vw_-_28px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border)] [background:var(--panel)] [box-shadow:-18px_0_50px_rgb(0_0_0_/_14%)]"} aria-label={t("messageActions.summarySidebar")}>
+        <header className={"[display:grid] [grid-template-columns:minmax(0,_1fr)_auto] [align-items:center] [gap:8px] [border-bottom:1px_solid_var(--border)] [padding:14px] [background:#ffffff]"}>
+          <span className={"[display:grid] [gap:2px] [min-width:0]"}>
+            <strong className={"[color:var(--text)] [font-size:15px] [font-weight:750]"}>{t("messageActions.messageSummary")}</strong>
+            <small className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap] [color:var(--muted)] [font-size:12px]"}>
+              {isMultiSource
+                ? t("messageActions.summaryByMulti", { name: props.task.participantName, count: props.task.sourceMessageIds.length })
+                : t("messageActions.summaryBySingle", { name: props.task.participantName })}
+            </small>
+          </span>
+          <button type="button" className={"[display:grid] [width:30px] [height:30px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:#00000008]"} aria-label={t("messageActions.closeSummary")} onClick={props.onClose}>
+            <X size={15} />
+          </button>
+        </header>
+        <div className={"[min-height:0] [overflow:auto] [padding:14px] [display:grid] [align-content:start] [gap:12px]"}>
+          <section className={"[display:grid] [gap:8px] [border:1px_solid_var(--border)] [border-radius:12px] [padding:10px] [background:#f8fafc]"}>
+            <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:8px]"}>
+              <strong className={"[font-size:12px] [font-weight:750] [color:var(--muted)]"}>{t("summary.htmlSource")}</strong>
+              {props.task.sourceMessageId ? (
                 <button
                   type="button"
-                  className={"[height:28px] [border:0] [border-radius:8px] [padding:0_10px] [color:var(--text)] [background:#00000008] [font-size:12px] [font-weight:650]"}
-                  onClick={(event) => props.onCopy({ x: event.clientX, y: event.clientY })}
+                  className={"[height:28px] [border:0] [border-radius:8px] [padding:0_10px] [color:#ffffff] [background:#111827] [font-size:12px] [font-weight:700] [white-space:nowrap]"}
+                  onClick={props.onBackToSource}
                 >
-                  {t("common.copy")}
+                  {t("messageActions.backToSource")}
                 </button>
-              </span>
-            ) : null}
-          </div>
-          <div
-            data-role="assistant"
-            className={`[display:grid] [min-height:160px] [align-content:start] [justify-items:start] [gap:2px] [border:1px_solid_var(--border)] [border-radius:12px] [padding:12px] [background:#ffffff] [color:var(--text)] [font-size:13px] [line-height:1.65] ${messageRoleContentClassName}`}
-          >
-            {props.task.status === "failed" ? (
-              <p className={"[margin:0] [color:var(--danger)]"}>{props.task.error ? translateAgentError(props.task.error) : t("messageActions.summaryFailed")}</p>
-            ) : summaryContent ? (
-              <>
-                <MessageBlockRenderer
-                  block={{
-                    id: `${props.task.id}-summary-result`,
-                    messageId: props.task.sourceMessageId || props.task.id,
-                    type: "main_text",
-                    content: richSummaryContent,
-                    status: "success",
-                    metadata: null,
-                    sortOrder: 0,
-                    createdAt: props.task.createdAt,
-                    updatedAt: props.task.updatedAt,
-                  }}
-                  artifacts={props.artifacts}
-                  allBlocks={props.blocks}
-                  allMessages={props.allMessages}
-                  allParticipants={props.allParticipants}
-                  identities={props.identities}
-                  userProfile={props.userProfile}
-                  conversations={props.conversations}
-                  rooms={props.rooms}
-                  summaryTasks={props.summaryTasks}
-                  referenceMentions={sourceMentions}
-                  messageRole="assistant"
-                  runtimeProfiles={props.runtimeProfiles}
-                  onOpenArtifact={props.onOpenArtifact}
-                  onOpenMessageLink={props.onOpenMessageLink}
-                  onOpenSummaryLink={props.onOpenSummaryLink}
-                  onEnsureSummaryTask={props.onEnsureSummaryTask}
-                  onOpenAgentProfile={props.onOpenAgentProfile}
-                />
-                {referencedArtifacts.map((artifact, index) => (
+              ) : null}
+            </div>
+            {props.sourceMessages.length ? (
+              <div className={"[display:grid] [gap:10px]"}>
+                {props.sourceMessages.map((message) => (
+                  <SummarySourceMessage
+                    key={message.id}
+                    message={message}
+                    blocks={props.blocks.filter((block) => block.messageId === message.id && !isRuntimeEventBlock(block)).sort(compareMessageBlocks)}
+                    artifacts={props.artifacts}
+                    allMessages={props.allMessages}
+                    allParticipants={props.allParticipants}
+                    identities={props.identities}
+                    conversations={props.conversations}
+                    rooms={props.rooms}
+                    summaryTasks={props.summaryTasks}
+                    runtimeProfiles={props.runtimeProfiles}
+                    userProfile={props.userProfile}
+                    onOpenArtifact={props.onOpenArtifact}
+                    onOpenMessageLink={props.onOpenMessageLink}
+                    onOpenSummaryLink={props.onOpenSummaryLink}
+                    onEnsureSummaryTask={props.onEnsureSummaryTask}
+                    onOpenAgentProfile={props.onOpenAgentProfile}
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className={"[margin:0] [color:var(--text)] [font-size:13px] [line-height:1.55]"}>
+                {compactInline(props.task.sourcePreview || attachmentLabel())}
+              </p>
+            )}
+          </section>
+          <section className={"[display:grid] [gap:8px]"}>
+            <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:8px]"}>
+              <strong className={"[font-size:12px] [font-weight:750] [color:var(--muted)]"}>{loading ? t("messageActions.summarizing") : t("messageActions.summaryResult")}</strong>
+              {!loading && summaryContent ? (
+                <span className={"[display:flex] [align-items:center] [gap:6px]"}>
+                  <ForwardToAgentToolbarItem
+                    targets={props.agentForwardTargets}
+                    onForward={(provider) => void props.onForwardToAgent(provider)}
+                  />
+                  <button
+                    type="button"
+                    className={"[height:28px] [border:0] [border-radius:8px] [padding:0_10px] [color:var(--text)] [background:#00000008] [font-size:12px] [font-weight:650]"}
+                    onClick={(event) => props.onCopy({ x: event.clientX, y: event.clientY })}
+                  >
+                    {t("common.copy")}
+                  </button>
+                </span>
+              ) : null}
+            </div>
+            <div
+              data-role="assistant"
+              className={`[display:grid] [min-height:160px] [align-content:start] [justify-items:start] [gap:2px] [border:1px_solid_var(--border)] [border-radius:12px] [padding:12px] [background:#ffffff] [color:var(--text)] [font-size:13px] [line-height:1.65] ${messageRoleContentClassName}`}
+            >
+              {props.task.status === "failed" ? (
+                <p className={"[margin:0] [color:var(--danger)]"}>{props.task.error ? translateAgentError(props.task.error) : t("messageActions.summaryFailed")}</p>
+              ) : summaryContent ? (
+                <>
                   <MessageBlockRenderer
-                    key={artifact.id}
                     block={{
-                      id: `${props.task.id}-summary-artifact-${artifact.id}`,
+                      id: `${props.task.id}-summary-result`,
                       messageId: props.task.sourceMessageId || props.task.id,
-                      type: artifact.mimeType.startsWith("image/") ? "image" : "file",
-                      content: "",
+                      type: "main_text",
+                      content: richSummaryContent,
                       status: "success",
-                      metadata: { artifactId: artifact.id },
-                      sortOrder: index + 1,
+                      metadata: null,
+                      sortOrder: 0,
                       createdAt: props.task.createdAt,
                       updatedAt: props.task.updatedAt,
                     }}
                     artifacts={props.artifacts}
+                    allBlocks={props.blocks}
+                    allMessages={props.allMessages}
+                    allParticipants={props.allParticipants}
+                    identities={props.identities}
+                    userProfile={props.userProfile}
+                    conversations={props.conversations}
+                    rooms={props.rooms}
+                    summaryTasks={props.summaryTasks}
+                    referenceMentions={sourceMentions}
+                    messageRole="assistant"
+                    runtimeProfiles={props.runtimeProfiles}
                     onOpenArtifact={props.onOpenArtifact}
+                    onOpenMessageLink={props.onOpenMessageLink}
+                    onOpenSummaryLink={props.onOpenSummaryLink}
+                    onEnsureSummaryTask={props.onEnsureSummaryTask}
+                    onOpenAgentProfile={props.onOpenAgentProfile}
                   />
-                ))}
-              </>
-            ) : (
-              <p className={"[margin:0] [color:var(--muted)]"}>{t("messageActions.waitingSummary")}</p>
-            )}
-          </div>
-        </section>
-      </div>
-    </aside>
+                  {referencedArtifacts.map((artifact, index) => (
+                    <MessageBlockRenderer
+                      key={artifact.id}
+                      block={{
+                        id: `${props.task.id}-summary-artifact-${artifact.id}`,
+                        messageId: props.task.sourceMessageId || props.task.id,
+                        type: artifact.mimeType.startsWith("image/") ? "image" : "file",
+                        content: "",
+                        status: "success",
+                        metadata: { artifactId: artifact.id },
+                        sortOrder: index + 1,
+                        createdAt: props.task.createdAt,
+                        updatedAt: props.task.updatedAt,
+                      }}
+                      artifacts={props.artifacts}
+                      onOpenArtifact={props.onOpenArtifact}
+                    />
+                  ))}
+                </>
+              ) : (
+                <p className={"[margin:0] [color:var(--muted)]"}>{t("messageActions.waitingSummary")}</p>
+              )}
+            </div>
+          </section>
+        </div>
+      </aside>
+    </div>
   );
 }
 
@@ -3087,9 +3129,14 @@ export function MessageBlockRenderer(props: {
   const bodyContent = props.whisperMentionsToStrip?.length
     ? stripLeadingMentionsFromContent(rawBodyContent, props.whisperMentionsToStrip)
     : rawBodyContent;
+  const strippedBodyContent = props.messageRole === "assistant" ? stripAssistantSkillDetails(bodyContent) : bodyContent;
+  const displayBodyContent =
+    props.messageRole === "assistant" && bodyContent.trim() && !strippedBodyContent
+      ? "Skill invoked."
+      : strippedBodyContent;
   const workspaceResourceLinks = props.messageRole === "assistant"
-    ? enrichAssistantContentWithWorkspaceResourceLinks(bodyContent, props.triggerUserMentions ?? [])
-    : { content: bodyContent, mentions: [] as Message["mentions"] };
+    ? enrichAssistantContentWithWorkspaceResourceLinks(displayBodyContent, props.triggerUserMentions ?? [])
+    : { content: displayBodyContent, mentions: [] as Message["mentions"] };
   const workspaceLinkedContent = workspaceResourceLinks.content;
   const mergedReferenceMentions = [
     ...(props.referenceMentions ?? []),

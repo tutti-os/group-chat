@@ -1,5 +1,8 @@
 import { AlertCircle } from "lucide-react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "../../i18n/index.js";
+
+const DELETE_MESSAGE_DIALOG_Z_INDEX = 2147483010;
 
 export function DeleteMessageConfirmDialog(props: {
   count: number;
@@ -9,9 +12,10 @@ export function DeleteMessageConfirmDialog(props: {
 }) {
   const { t } = useTranslation();
 
-  return (
+  return createPortal(
     <div
-      className={"[position:fixed] [inset:0] [z-index:80] [display:grid] [place-items:center] [padding:24px] [background:rgb(15_23_42_/_52%)]"}
+      className={"[position:fixed] [inset:0] [display:grid] [place-items:center] [padding:24px] [background:rgb(15_23_42_/_52%)]"}
+      style={{ zIndex: DELETE_MESSAGE_DIALOG_Z_INDEX }}
       role="presentation"
       onPointerDown={(event) => {
         if (event.target === event.currentTarget && !props.deleting) props.onCancel();
@@ -60,6 +64,7 @@ export function DeleteMessageConfirmDialog(props: {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

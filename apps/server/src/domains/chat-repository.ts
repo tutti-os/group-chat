@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { basename, extname, join, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { basename, extname, join, relative, resolve } from "node:path";
 import { nanoid } from "nanoid";
 import {
   DEFAULT_PARTICIPANT_LISTEN_MODE,
@@ -36,7 +36,7 @@ import {
 } from "@group-chat/shared";
 import { getDb, json, parseJson } from "../db/database.js";
 import { ensureRoomDirs, roomArtifactRoot } from "../local/paths.js";
-import { sha256ForBytes } from "./artifact-content-hash.js";
+import { sha256ForBytes, sha256ForFile } from "./artifact-content-hash.js";
 
 export interface PendingReplyQueueItem {
   id: string;
@@ -685,6 +685,46 @@ export class ChatRepository {
     return { message, block };
   }
 
+  replaceUserMessageBlocks(
+    messageId: string,
+    parts: NonNullable<UpdateMessageRequest["parts"]>,
+  ): { blocks: MessageBlock[]; artifacts: Artifact[] } {
+    const current = this.getMessage(messageId);
+    if (!current) return { blocks: [], artifacts: [] };
+    if (current.role !== "user") throw new Error("Only user message blocks can be edited");
+
+    getDb().prepare(`DELETE FROM message_blocks WHERE message_id = ?`).run(messageId);
+
+    const blocks: MessageBlock[] = [];
+    const artifacts: Artifact[] = [];
+    parts.forEach((part, index) => {
+      if (part.type === "text") {
+        const content = part.content.trim();
+        if (!content) return;
+        blocks.push(this.createMessageBlock({
+          messageId,
+          type: "main_text",
+          content,
+          sortOrder: index,
+        }));
+        return;
+      }
+
+      const artifact = this.attachArtifactToMessage(part.artifactId, messageId);
+      if (!artifact) return;
+      artifacts.push(artifact);
+      blocks.push(this.createMessageBlock({
+        messageId,
+        type: artifact.mimeType.startsWith("image/") ? "image" : "file",
+        content: artifact.textPreview ?? "",
+        metadata: { artifactId: artifact.id },
+        sortOrder: index,
+      }));
+    });
+
+    return { blocks, artifacts };
+  }
+
   markMessageStatus(messageId: string, status: "deleted" | "recalled") {
     const current = this.getMessage(messageId);
     if (!current) return null;
@@ -818,6 +858,17 @@ export class ChatRepository {
     return rows.map(rowToAgentRun);
   }
 
+  listActiveAgentRunsForParticipant(participantId: string): AgentRun[] {
+    const rows = getDb()
+      .prepare(
+        `SELECT * FROM agent_runs
+         WHERE participant_id = ? AND status IN ('accepted', 'running')
+         ORDER BY created_at ASC`,
+      )
+      .all(participantId) as any[];
+    return rows.map(rowToAgentRun);
+  }
+
   updateAgentRun(runId: string, updates: Partial<Pick<AgentRun, "status" | "assistantMessageId" | "error">>) {
     const current = this.getAgentRun(runId);
     if (!current) return null;
@@ -941,6 +992,10 @@ export class ChatRepository {
     getDb().prepare(`DELETE FROM reply_queue WHERE message_id = ?`).run(messageId);
   }
 
+  deletePendingRepliesForParticipant(participantId: string) {
+    getDb().prepare(`DELETE FROM reply_queue WHERE participant_id = ?`).run(participantId);
+  }
+
   listPendingReplies(): PendingReplyQueueItem[] {
     const rows = getDb().prepare(`SELECT * FROM reply_queue ORDER BY updated_at ASC`).all() as any[];
     return rows.map(rowToPendingReplyQueueItem);
@@ -959,8 +1014,8 @@ export class ChatRepository {
     mkdirSync(join(roomRoot, "uploads"), { recursive: true });
     const id = nanoid();
     const uploadRoot = join(roomRoot, "uploads");
-    const filename = availableUploadFilename(uploadRoot, input.filename);
-    const localPath = join(uploadRoot, filename);
+    const diskFilename = availableUploadFilename(uploadRoot, input.filename);
+    const localPath = join(uploadRoot, diskFilename);
     const bytes = Buffer.from(input.dataBase64, "base64");
     const contentHash = sha256ForBytes(bytes);
     writeFileSync(localPath, bytes);
@@ -980,9 +1035,72 @@ export class ChatRepository {
         options.messageId ?? null,
         options.sourceRunId ?? null,
         options.kind ?? "upload",
-        filename,
+        diskFilename,
         input.mimeType,
         bytes.length,
+        contentHash,
+        localPath,
+        publicUrl,
+        textPreview,
+        now,
+      );
+    return this.getArtifact(id)!;
+  }
+
+  prepareArtifactUpload(conversationId: string, filename: string): { filename: string; localPath: string } {
+    const conversation = this.getConversation(conversationId);
+    if (!conversation) throw new Error("Conversation not found");
+    const room = this.getRoom(conversation.roomId);
+    if (!room) throw new Error("Room not found");
+    const roomRoot = existsSync(room.artifactRoot) ? room.artifactRoot : ensureRoomDirs(room.id);
+    const uploadRoot = join(roomRoot, "uploads");
+    mkdirSync(uploadRoot, { recursive: true });
+    const safeUploadFilename = availableUploadFilename(uploadRoot, filename);
+    return {
+      filename: safeUploadFilename,
+      localPath: join(uploadRoot, safeUploadFilename),
+    };
+  }
+
+  createArtifactFromFile(
+    conversationId: string,
+    input: { filename: string; mimeType: string; localPath: string },
+    options: { kind?: ArtifactKind; messageId?: string | null; sourceRunId?: string | null } = {},
+  ): Artifact {
+    const conversation = this.getConversation(conversationId);
+    if (!conversation) throw new Error("Conversation not found");
+    const room = this.getRoom(conversation.roomId);
+    if (!room) throw new Error("Room not found");
+    const roomRoot = existsSync(room.artifactRoot) ? room.artifactRoot : ensureRoomDirs(room.id);
+    const uploadRoot = resolve(join(roomRoot, "uploads"));
+    const localPath = resolve(input.localPath);
+    const localPathRelative = relative(uploadRoot, localPath);
+    if (localPathRelative.startsWith("..") || localPathRelative === "" || resolve(uploadRoot, localPathRelative) !== localPath) {
+      throw new Error("Invalid upload path");
+    }
+    const stat = statSync(localPath);
+    if (!stat.isFile()) throw new Error("Uploaded artifact is not a file");
+    const id = nanoid();
+    const contentHash = sha256ForFile(localPath);
+    const textPreview = buildTextPreview(localPath, input.mimeType);
+    const publicUrl = `/local-assets/${id}`;
+    const now = new Date().toISOString();
+    getDb()
+      .prepare(
+        `INSERT INTO artifacts
+         (id, room_id, conversation_id, message_id, source_run_id, kind, filename, mime_type, size_bytes, content_hash, local_path, public_url, text_preview, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        room.id,
+        conversationId,
+        options.messageId ?? null,
+        options.sourceRunId ?? null,
+        options.kind ?? "upload",
+        input.filename,
+        input.mimeType,
+        stat.size,
         contentHash,
         localPath,
         publicUrl,

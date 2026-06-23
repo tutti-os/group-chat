@@ -1,6 +1,9 @@
-import { createReadStream, existsSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync } from "node:fs";
+import { unlink } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { join, resolve } from "node:path";
+import { pipeline } from "node:stream/promises";
+import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import fastifyWebsocket from "@fastify/websocket";
 import Fastify from "fastify";
@@ -44,6 +47,7 @@ const webDist = process.env.GROUP_CHAT_WEB_DIST
   : resolve(process.cwd(), "../web/dist");
 const port = Number(process.env.PORT ?? 8788);
 const host = process.env.HOST ?? "127.0.0.1";
+const maxUploadBytes = parsePositiveInteger(process.env.GROUP_CHAT_MAX_UPLOAD_BYTES) ?? 1024 * 1024 * 1024;
 
 const server = Fastify({ logger: true, bodyLimit: 25 * 1024 * 1024 });
 const events = new EventHub();
@@ -53,6 +57,13 @@ const chat = new ChatService(repo, events, agentToolTokens);
 const agentTools = new AgentToolGateway(repo, events, agentToolTokens);
 
 await server.register(fastifyWebsocket);
+await server.register(multipart, {
+  throwFileSizeLimit: true,
+  limits: {
+    files: 1,
+    fileSize: maxUploadBytes,
+  },
+});
 
 if (existsSync(webDist)) {
   await server.register(fastifyStatic, {
@@ -130,20 +141,22 @@ server.delete<{ Params: { roomId: string } }>("/api/rooms/:roomId", async (reque
   return { room };
 });
 
-server.post<{ Body: CreateIdentityRequest }>("/api/identities", async (request) => ({
-  identity: chat.createIdentity(request.body),
-}));
+server.post<{ Body: CreateIdentityRequest }>("/api/identities", async (request) => {
+  const identity = chat.createIdentity(request.body);
+  return { identity, runtimeProfile: chat.getRuntimeProfile(identity.defaultRuntimeProfileId) };
+});
 
 server.patch<{ Params: { identityId: string }; Body: UpdateIdentityRequest }>(
   "/api/identities/:identityId",
-  async (request) => ({
-    identity: chat.updateIdentity(request.params.identityId, request.body),
-  }),
+  async (request) => {
+    const identity = chat.updateIdentity(request.params.identityId, request.body);
+    return { identity, runtimeProfile: chat.getRuntimeProfile(identity?.defaultRuntimeProfileId) };
+  },
 );
 
 server.delete<{ Params: { identityId: string } }>("/api/identities/:identityId", async (request, reply) => {
   try {
-    return { identity: chat.deleteIdentity(request.params.identityId) };
+    return { identity: await chat.deleteIdentity(request.params.identityId) };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to delete team member";
     return reply.code(400).send({ error: message });
@@ -152,9 +165,46 @@ server.delete<{ Params: { identityId: string } }>("/api/identities/:identityId",
 
 server.post<{ Params: { conversationId: string }; Body: UploadArtifactRequest }>(
   "/api/conversations/:conversationId/artifacts",
-  async (request) => ({
-    artifact: chat.uploadArtifact(request.params.conversationId, request.body),
-  }),
+  async (request, reply) => {
+    if (!request.isMultipart()) {
+      return {
+        artifact: chat.uploadArtifact(request.params.conversationId, request.body),
+      };
+    }
+
+    let target: { filename: string; localPath: string } | null = null;
+    try {
+      const upload = await request.file({
+        limits: {
+          files: 1,
+          fileSize: maxUploadBytes,
+        },
+      });
+      if (!upload) return reply.code(400).send({ error: "File is required" });
+
+      target = chat.prepareArtifactUpload(request.params.conversationId, upload.filename || "upload.bin");
+      await pipeline(upload.file, createWriteStream(target.localPath));
+      if (upload.file.truncated) {
+        await unlink(target.localPath).catch(() => undefined);
+        return reply.code(413).send({ error: `File exceeds ${maxUploadBytes} bytes` });
+      }
+
+      return {
+        artifact: chat.uploadArtifactFromFile(request.params.conversationId, {
+          filename: target.filename,
+          mimeType: upload.mimetype || "application/octet-stream",
+          localPath: target.localPath,
+        }),
+      };
+    } catch (error) {
+      if (target) await unlink(target.localPath).catch(() => undefined);
+      const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
+      if (code === "FST_REQ_FILE_TOO_LARGE") {
+        return reply.code(413).send({ error: `File exceeds ${maxUploadBytes} bytes` });
+      }
+      throw error;
+    }
+  },
 );
 
 server.post<{ Params: { conversationId: string }; Body: PrivateTaskRequest }>(
@@ -268,7 +318,10 @@ server.patch<{ Params: { conversationId: string }; Body: UpdateConversationPinRe
 
 server.post<{ Params: { conversationId: string }; Body: AddParticipantRequest }>(
   "/api/conversations/:conversationId/participants",
-  async (request) => chat.addParticipant(request.params.conversationId, request.body),
+  async (request) => {
+    const result = chat.addParticipant(request.params.conversationId, request.body);
+    return { ...result, runtimeProfile: chat.getRuntimeProfile(result.participant.runtimeProfileId) };
+  },
 );
 
 server.patch<{ Params: { participantId: string }; Body: { muted: boolean } }>(
@@ -299,7 +352,7 @@ server.patch<{ Params: { participantId: string }; Body: UpdateParticipantRequest
       }
       const participant = chat.updateParticipant(request.params.participantId, request.body);
       if (!participant) return reply.code(404).send({ error: "Participant not found" });
-      return { participant };
+      return { participant, runtimeProfile: chat.getRuntimeProfile(participant.runtimeProfileId) };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to update participant";
       return reply.code(message.includes("not found") ? 404 : 400).send({ error: message });
@@ -308,7 +361,7 @@ server.patch<{ Params: { participantId: string }; Body: UpdateParticipantRequest
 );
 
 server.delete<{ Params: { participantId: string } }>("/api/participants/:participantId", async (request, reply) => {
-  const participant = chat.removeParticipant(request.params.participantId);
+  const participant = await chat.removeParticipant(request.params.participantId);
   if (!participant) return reply.code(404).send({ error: "Participant not found" });
   return { participant };
 });
@@ -454,6 +507,11 @@ function readAgentToolCredential(request: { headers: Record<string, string | str
 function normalizeCliEnvelope(value: unknown) {
   if (value === undefined) return {};
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value : { input: null };
+}
+
+function parsePositiveInteger(value: string | undefined) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function sendCliOutput(

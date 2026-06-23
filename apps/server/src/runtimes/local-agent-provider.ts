@@ -535,6 +535,7 @@ function buildKitSystemPrompt(context: RuntimeReplyContext) {
     "Reply as the current participant, not as the host application.",
     "Your normal text output is already streamed to the current conversation as your reply.",
     "Do not use tools to send the same reply again. Only use messaging tools for intentional additional side messages.",
+    "When using a skill, do not include the skill's file path, README, SKILL.md contents, setup notes, or internal instructions in your reply. Only report the user-facing result, concise progress, or a brief blocker.",
     "When the user asks you to create or provide a file, image, video, or other generated asset, create it in the local workspace or save it with the artifact tool, then include the resulting local filesystem path in your normal final text so the user can open it. Do not send an extra group-chat message or attach it to the conversation unless the user explicitly asks you to post it to the group.",
     "If the current message does not need your response, output [NO_REPLY] as your entire output.",
     mentionAll

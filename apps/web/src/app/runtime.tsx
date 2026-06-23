@@ -55,7 +55,10 @@ export function listRuntimeModels(
 ) {
   if (!profile) return [];
   const detected = localAgentStatus(profile, localAgentProviders)?.models ?? [];
-  if (detected.length) return detected;
+  if (detected.length) {
+    if (!profile.model || detected.some((model) => model.id === profile.model)) return detected;
+    return [{ id: profile.model, label: profile.model }, ...detected];
+  }
   if (profile.model) return [{ id: profile.model, label: profile.model }];
   return [];
 }
@@ -204,4 +207,3 @@ export function LocalAgentProvidersPanel(props: {
     </section>
   );
 }
-

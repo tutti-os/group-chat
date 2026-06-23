@@ -13,9 +13,11 @@ import {
 import { formatBytes, formatShortDate } from "../../formatting.js";
 import { messageSenderLabel } from "../../chat-links.js";
 import { t, useTranslation } from "../../i18n/index.js";
+import { ToastTip } from "../ui/ToastTip.js";
 
 const PAGE_SIZE = 30;
 const SINGLE_CLICK_DELAY_MS = 250;
+const DOWNLOAD_TIP_MS = 1600;
 
 function getCategoryTabs() {
   return [
@@ -40,8 +42,10 @@ export function ConversationFilesPanel(props: {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<ArtifactFilterCategory>("all");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [downloadTip, setDownloadTip] = useState<string | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
   const pendingClickTimerRef = useRef<number | null>(null);
+  const downloadTipTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!props.open) return;
@@ -53,6 +57,7 @@ export function ConversationFilesPanel(props: {
   useEffect(() => {
     return () => {
       if (pendingClickTimerRef.current) window.clearTimeout(pendingClickTimerRef.current);
+      if (downloadTipTimerRef.current) window.clearTimeout(downloadTipTimerRef.current);
     };
   }, []);
 
@@ -89,12 +94,7 @@ export function ConversationFilesPanel(props: {
       .filter((artifact) => matchesArtifactCategory(artifact, category))
       .filter((artifact) => {
         if (!normalizedQuery) return true;
-        const messageId = resolveArtifactLinkedMessageId(artifact, props.agentRuns, props.messages);
-        const message = messageId ? props.messages.find((item) => item.id === messageId) ?? null : null;
-        const sender = message ? formatMessageSender(message) : "";
-        return [artifact.filename, artifact.mimeType, artifact.textPreview, sender]
-          .filter(Boolean)
-          .some((value) => value!.toLowerCase().includes(normalizedQuery));
+        return artifact.filename.toLowerCase().includes(normalizedQuery);
       })
       .slice()
       .sort((left, right) => artifactChatSortMs(right, props.messages, props.agentRuns) - artifactChatSortMs(left, props.messages, props.agentRuns));
@@ -160,9 +160,19 @@ export function ConversationFilesPanel(props: {
     revealInTuttiFileManager(artifact);
   };
 
-  const handleDownload = (artifact: Artifact, event: MouseEvent<HTMLButtonElement>) => {
+  const showDownloadStartedTip = () => {
+    setDownloadTip(t("files.downloadStarted"));
+    if (downloadTipTimerRef.current) window.clearTimeout(downloadTipTimerRef.current);
+    downloadTipTimerRef.current = window.setTimeout(() => {
+      setDownloadTip(null);
+      downloadTipTimerRef.current = null;
+    }, DOWNLOAD_TIP_MS);
+  };
+
+  const handleDownload = async (artifact: Artifact, event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
-    void downloadArtifactFile(artifact);
+    await downloadArtifactFile(artifact);
+    showDownloadStartedTip();
   };
 
   if (!props.open) return null;
@@ -175,6 +185,7 @@ export function ConversationFilesPanel(props: {
       : t("files.emptyCategory", { category: categoryTabs.find((tab) => tab.id === category)?.label ?? t("files.file") });
 
   return (
+    <>
     <aside
       ref={panelRef}
       className={"[position:absolute] [top:56px] [right:0] [bottom:0] [z-index:36] [display:grid] [width:min(360px,_calc(100vw_-_24px))] [grid-template-rows:auto_auto_auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border)] [background:var(--panel)] [box-shadow:-18px_0_40px_rgb(0_0_0_/_8%)]"}
@@ -297,7 +308,7 @@ export function ConversationFilesPanel(props: {
                   aria-label={t("files.downloadFile", { filename: artifact.filename })}
                   title={t("files.download")}
                   onPointerDown={stopPanelPointerBubble}
-                  onClick={(event) => handleDownload(artifact, event)}
+                  onClick={(event) => void handleDownload(artifact, event)}
                 >
                   <Download size={13} />
                 </button>
@@ -312,6 +323,8 @@ export function ConversationFilesPanel(props: {
         ) : null}
       </div>
     </aside>
+    <ToastTip message={downloadTip} />
+    </>
   );
 }
 

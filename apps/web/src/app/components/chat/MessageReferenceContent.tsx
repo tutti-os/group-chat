@@ -1,6 +1,6 @@
 import type { Artifact, MentionTarget, Participant, RuntimeProfile } from "@group-chat/shared";
 import type { ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { contentHasReferenceMentions, findArtifactForFileReference, isFileReferenceProvider, parseReferenceMentionHref, splitContentByReferenceMentions } from "../../reference-mentions.js";
 import { ArtifactBlock } from "./MessageTimeline.js";
@@ -10,13 +10,25 @@ const INLINE_MARKDOWN_COMPONENTS = {
   p: ({ children }: { children?: ReactNode }) => <span className="[display:contents]">{children}</span>,
 };
 
+function messageReferenceUrlTransform(value: string) {
+  const trimmed = value.trim();
+  if (trimmed.startsWith("group-chat://") || trimmed.startsWith("mention://")) {
+    return value;
+  }
+  return defaultUrlTransform(value);
+}
+
 function renderMarkdownSegment(
   text: string,
   markdownComponents: ReturnType<typeof createReferenceMentionMarkdownComponents> | undefined,
 ) {
   if (!text) return null;
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents ?? INLINE_MARKDOWN_COMPONENTS}>
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={markdownComponents ?? INLINE_MARKDOWN_COMPONENTS}
+      urlTransform={messageReferenceUrlTransform}
+    >
       {text}
     </ReactMarkdown>
   );
