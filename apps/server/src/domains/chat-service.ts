@@ -4,6 +4,7 @@ import {
   type AddParticipantRequest,
   type AgentRun,
   type AgentRunEvent,
+  type Artifact,
   type Conversation,
   type CreateIdentityRequest,
   type CreateRoomRequest,
@@ -27,15 +28,22 @@ import {
   type RuntimeProfile,
   resolveMentionSpeakingOrder,
 } from "@group-chat/shared";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { basename, isAbsolute, relative, resolve } from "node:path";
 import { nanoid } from "nanoid";
 import { enrichAssistantContentWithWorkspaceResourceLinks } from "./assistant-reference-enrichment.js";
+import { sha256ForFile } from "./artifact-content-hash.js";
 import { AgentToolTokenStore } from "./agent-tool-tokens.js";
 import { AgentWorkspaceService } from "./agent-workspace.js";
 import { ChatRepository } from "./chat-repository.js";
+import { extractLocalFilePathsFromContent, inferMimeTypeForPath, linkRunFileArtifactPathsInContent } from "./run-file-artifacts.js";
+import { roomArtifactRoot } from "../local/paths.js";
 import { NO_REPLY_MARKER } from "../runtimes/local-agent-protocol.js";
 import { createRuntimeProviderRegistry } from "../runtimes/runtime-registry.js";
 import { RuntimeProviderUnsupportedError, type RuntimeReplyContext, type RuntimeStreamEvent } from "../runtimes/runtime-provider.js";
 import { EventHub } from "../ws/event-hub.js";
+
+const AUTO_IMPORT_RUN_FILE_MAX_BYTES = 50 * 1024 * 1024;
 
 export class ChatService {
   private readonly workspaces = new AgentWorkspaceService();
@@ -55,11 +63,13 @@ export class ChatService {
 
   warmup() {
     this.repo.ensureSeedData();
+    this.backfillAssistantFilePathArtifacts();
     this.scheduleBootstrapMaintenance();
   }
 
   bootstrap() {
     this.repo.ensureSeedData();
+    this.backfillAssistantFilePathArtifacts();
     this.scheduleBootstrapMaintenance();
     return this.repo.filterHiddenFromSnapshot(this.repo.snapshot());
   }
@@ -653,6 +663,49 @@ export class ChatService {
     }
   }
 
+  private backfillAssistantFilePathArtifacts() {
+    const snapshot = this.repo.snapshot();
+    const conversationsById = new Map(snapshot.conversations.map((conversation) => [conversation.id, conversation]));
+    for (const message of snapshot.messages) {
+      if (message.role !== "assistant" || !message.runId || !message.content.includes("/")) continue;
+      const conversation = conversationsById.get(message.conversationId);
+      if (!conversation) continue;
+      const paths = extractLocalFilePathsFromContent(message.content);
+      if (!paths.length) continue;
+      const fileArtifacts = this.importRunFileWriteArtifacts({
+        roomId: conversation.roomId,
+        conversationId: conversation.id,
+        runId: message.runId,
+        messageId: message.id,
+        paths,
+      });
+      if (!fileArtifacts.length) continue;
+      const nextContent = linkRunFileArtifactPathsInContent(message.content, fileArtifacts);
+      if (nextContent === message.content) continue;
+      const updatedMessage = this.repo.updateMessage(message.id, { content: nextContent });
+      if (updatedMessage) {
+        this.events.emit({
+          type: "message.updated",
+          roomId: conversation.roomId,
+          conversationId: conversation.id,
+          runId: message.runId,
+          payload: { message: updatedMessage },
+        });
+      }
+      for (const block of this.repo.listMessageBlocks(message.id).filter((item) => item.type === "main_text")) {
+        const updatedBlock = this.repo.updateMessageBlock(block.id, { content: nextContent });
+        if (!updatedBlock) continue;
+        this.events.emit({
+          type: "message_block.updated",
+          roomId: conversation.roomId,
+          conversationId: conversation.id,
+          runId: message.runId,
+          payload: { block: updatedBlock },
+        });
+      }
+    }
+  }
+
   private scheduleBootstrapMaintenance() {
     if (this.bootstrapMaintenanceStarted) return;
     this.bootstrapMaintenanceStarted = true;
@@ -1054,6 +1107,7 @@ export class ChatService {
     }
 
     let content = "";
+    const runFileWritePaths = new Set<string>();
     const createRunEvent = (
       type: Parameters<ChatRepository["createAgentRunEvent"]>[0]["type"],
       input: Omit<Parameters<ChatRepository["createAgentRunEvent"]>[0], "runId" | "conversationId" | "type"> = {},
@@ -1247,6 +1301,8 @@ export class ChatService {
         return;
       }
       if (event.type === "file_write") {
+        const filePath = event.path.trim();
+        if (filePath) runFileWritePaths.add(filePath);
         createRunEvent("file_write", {
           content: `Wrote file: ${event.path}`,
           status: "success",
@@ -1349,7 +1405,14 @@ export class ChatService {
     }
 
     const enrichedReply = enrichAssistantContentWithWorkspaceResourceLinks(content, userMessage.mentions);
-    const finalContent = enrichedReply.content;
+    const runFileArtifacts = this.importRunFileWriteArtifacts({
+      roomId,
+      conversationId,
+      runId: run.id,
+      messageId: visibleReply.message.id,
+      paths: [...runFileWritePaths, ...extractLocalFilePathsFromContent(enrichedReply.content)],
+    });
+    const finalContent = linkRunFileArtifactPathsInContent(enrichedReply.content, runFileArtifacts);
     const finalBlock = this.repo.updateMessageBlock(visibleReply.block.id, { content: finalContent, status: "success" });
     appendThinking("", true);
     const finalMessage = this.repo.updateMessage(visibleReply.message.id, {
@@ -1702,6 +1765,77 @@ export class ChatService {
     this.toolTokens.revokeRun(params.runId);
   }
 
+  private importRunFileWriteArtifacts(params: {
+    roomId: string;
+    conversationId: string;
+    runId: string;
+    messageId: string;
+    paths: string[];
+  }): Array<{ path: string; artifact: Artifact }> {
+    const linked: Array<{ path: string; artifact: Artifact }> = [];
+    const seenPaths = new Set<string>();
+    const allowedRoot = roomArtifactRoot(params.roomId);
+
+    for (const rawPath of params.paths) {
+      const filePath = rawPath.replace(/\\/g, "/").trim();
+      if (!filePath || seenPaths.has(filePath)) continue;
+      seenPaths.add(filePath);
+      if (!isPathInsideDirectory(filePath, allowedRoot)) continue;
+      if (!existsSync(filePath)) continue;
+
+      let sizeBytes = 0;
+      try {
+        const stat = statSync(filePath);
+        if (!stat.isFile()) continue;
+        sizeBytes = stat.size;
+      } catch {
+        continue;
+      }
+      if (sizeBytes > AUTO_IMPORT_RUN_FILE_MAX_BYTES) continue;
+
+      const contentHash = sha256ForFile(filePath);
+      const existingArtifact = this.repo.listArtifactsForRun(params.runId).find((artifact) => {
+        const localPath = artifact.localPath.replace(/\\/g, "/");
+        return localPath === filePath || Boolean(contentHash && artifact.contentHash === contentHash);
+      });
+      if (existingArtifact) {
+        linked.push({ path: filePath, artifact: existingArtifact });
+        continue;
+      }
+
+      let artifact: Artifact;
+      try {
+        const data = readFileSync(filePath);
+        artifact = this.repo.createArtifact(
+          params.conversationId,
+          {
+            filename: basename(filePath),
+            mimeType: inferMimeTypeForPath(filePath),
+            dataBase64: data.toString("base64"),
+          },
+          {
+            kind: "run-output",
+            messageId: params.messageId,
+            sourceRunId: params.runId,
+          },
+        );
+      } catch {
+        continue;
+      }
+
+      this.events.emit({
+        type: "artifact.created",
+        roomId: params.roomId,
+        conversationId: params.conversationId,
+        runId: params.runId,
+        payload: { artifact },
+      });
+      linked.push({ path: filePath, artifact });
+    }
+
+    return linked;
+  }
+
   private publishRunArtifactLinks(params: {
     roomId: string;
     conversationId: string;
@@ -1777,6 +1911,11 @@ export class ChatService {
     return { run: finalRun };
   }
 
+}
+
+function isPathInsideDirectory(filePath: string, directory: string) {
+  const relativePath = relative(resolve(directory), resolve(filePath));
+  return Boolean(relativePath) && !relativePath.startsWith("..") && !isAbsolute(relativePath);
 }
 
 function resolveReplySpeakingOrder(
