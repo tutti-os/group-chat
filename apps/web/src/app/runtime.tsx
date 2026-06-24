@@ -89,6 +89,17 @@ export function preferredRuntimeModelId(
   return options[0]?.id ?? "";
 }
 
+export function resolveRuntimeModelId(
+  profile: RuntimeProfile | null,
+  localAgentProviders: LocalAgentProviderStatus[],
+  modelId: string | null | undefined,
+) {
+  const options = listRuntimeModels(profile, localAgentProviders);
+  const normalized = normalizeRuntimeModelId(profile, modelId);
+  if (normalized && options.some((option) => option.id === normalized)) return normalized;
+  return preferredRuntimeModelId(profile, localAgentProviders);
+}
+
 export function normalizeRuntimeModelId(profile: RuntimeProfile | null, modelId: string | null | undefined) {
   const trimmed = modelId?.trim() ?? "";
   if (!trimmed) return "";
@@ -112,11 +123,15 @@ export function listRuntimeReasoningOptions(
 ) {
   const provider = localAgentStatus(profile, localAgentProviders);
   const model = provider?.models.find((item) => item.id === modelId);
-  const supported = model?.supportedReasoningEfforts;
-  if (!supported?.length) return allOptions;
+  const supported = model?.supportedReasoningEfforts ?? provider?.reasoningEfforts;
+  if (!supported?.length) {
+    return profile?.kind === "local-agent"
+      ? allOptions.filter((option) => option.value)
+      : allOptions;
+  }
   const allowed = new Set<ReasoningEffort>(supported);
-  const filtered = allOptions.filter((option) => option.value === "" || allowed.has(option.value));
-  return filtered.length > 1 ? filtered : allOptions;
+  const filtered = allOptions.filter((option) => option.value && allowed.has(option.value));
+  return filtered.length ? filtered : allOptions;
 }
 
 export function listRuntimeSpeedOptions(

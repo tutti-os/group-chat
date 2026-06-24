@@ -110,7 +110,7 @@
   "composer.quoteCount": "Quote {count} messages",
   "composer.quoteMore": " and {count} more",
   "composer.replyTo": "Reply {sender}: {content}",
-  "composer.replyQuoteBlock": "> Reply {sender}: {content}",
+  "composer.replyQuoteBlock": "Reply {sender}: {content}",
   "composer.previewFile": "Preview {filename}",
   "composer.uploadPending": "Pending",
   "composer.uploadUploading": "Uploading",

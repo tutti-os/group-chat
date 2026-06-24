@@ -110,7 +110,7 @@
   "composer.quoteCount": "引用 {count} 条消息",
   "composer.quoteMore": " 等 {count} 条",
   "composer.replyTo": "回复 {sender}: {content}",
-  "composer.replyQuoteBlock": "> 回复 {sender}: {content}",
+  "composer.replyQuoteBlock": "回复 {sender}: {content}",
   "composer.previewFile": "预览 {filename}",
   "composer.uploadPending": "待发送",
   "composer.uploadUploading": "上传中",

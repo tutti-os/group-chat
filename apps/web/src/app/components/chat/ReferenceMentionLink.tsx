@@ -1,5 +1,5 @@
 import type { Artifact, MentionTarget, Participant, RuntimeProfile } from "@group-chat/shared";
-import type { ReactNode } from "react";
+import { isValidElement, type ReactNode } from "react";
 import { openAgentGuiProvider } from "../../agent-gui-dispatch.js";
 import {
   resolveAgentGuiProviderFromAppId,
@@ -43,10 +43,13 @@ function resolveMentionMeta(
   }) ?? null;
 }
 
-function referenceLabel(children: ReactNode) {
-  if (typeof children === "string") return children;
+function referenceLabel(children: ReactNode): string {
+  if (typeof children === "string" || typeof children === "number") return String(children);
   if (Array.isArray(children)) {
-    return children.map((child) => (typeof child === "string" ? child : "")).join("");
+    return children.map((child) => referenceLabel(child)).join("");
+  }
+  if (isValidElement<{ children?: ReactNode }>(children)) {
+    return referenceLabel(children.props.children);
   }
   return "";
 }
@@ -207,13 +210,14 @@ export function createReferenceMentionMarkdownComponents(options?: {
   tightSpacing?: boolean;
 }) {
   return {
-    ...(options?.tightSpacing
-      ? {
-          p: ({ children }: { children?: ReactNode }) => (
-            <span data-slot="whisper-body" className="[display:block] [margin:0] [line-height:1.35] [white-space:pre-wrap]">{children}</span>
-          ),
-        }
-      : {}),
+    p: ({ children }: { children?: ReactNode }) => (
+      <span
+        data-slot={options?.tightSpacing ? "whisper-body" : undefined}
+        className={`${options?.tightSpacing ? "[line-height:1.35]" : "[line-height:1.45]"} [display:inline] [margin:0] [white-space:pre-wrap]`}
+      >
+        {children}
+      </span>
+    ),
     a: ({ href, children }: { href?: string; children?: ReactNode }) => (
       <ReferenceMentionLink
         href={href}

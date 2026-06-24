@@ -34,6 +34,7 @@ import {
   localAgentStatus,
   normalizeRuntimeModelId,
   preferredRuntimeModelId,
+  resolveRuntimeModelId,
   resolveRuntimeSpeedMode,
   resolveCanonicalRuntimeProfile,
   runtimeOptionLabel,
@@ -104,17 +105,20 @@ export function AgentManageForm(props: {
   const canonicalRuntime = resolveCanonicalRuntimeProfile(selectedRuntime ?? null, props.runtimeProfiles);
   const listedModelOptions = listRuntimeModels(selectedRuntime ?? null, props.localAgentProviders);
   const normalizedModel = normalizeRuntimeModelId(selectedRuntime ?? null, model);
-  const modelOptions =
-    normalizedModel && !listedModelOptions.some((option) => option.id === normalizedModel)
-      ? [{ id: normalizedModel, label: normalizedModel }, ...listedModelOptions]
-      : listedModelOptions;
+  const selectedModel = resolveRuntimeModelId(selectedRuntime ?? null, props.localAgentProviders, model);
+  const modelOptions = listedModelOptions;
+  const providerStatus = localAgentStatus(selectedRuntime ?? null, props.localAgentProviders);
   const reasoningOptions = listRuntimeReasoningOptions(
     selectedRuntime ?? null,
     props.localAgentProviders,
-    normalizedModel,
+    selectedModel,
     getReasoningEffortOptions(),
   );
-  const providerStatus = localAgentStatus(selectedRuntime ?? null, props.localAgentProviders);
+  const selectedReasoningEffort = reasoningOptions.some((option) => option.value === reasoningEffort)
+    ? reasoningEffort
+    : providerStatus?.defaultReasoningEffort && reasoningOptions.some((option) => option.value === providerStatus.defaultReasoningEffort)
+      ? providerStatus.defaultReasoningEffort
+      : reasoningOptions[0]?.value ?? "";
   const speedOptions = listRuntimeSpeedOptions(selectedRuntime ?? null, props.localAgentProviders);
   const selectedSpeed = resolveRuntimeSpeedMode(selectedRuntime ?? null, props.localAgentProviders, speedMode);
   const hasRoomInstructions = Boolean(roomInstructions.trim());
@@ -135,7 +139,7 @@ export function AgentManageForm(props: {
 
   useEffect(() => {
     if (!selectedRuntime) return;
-    if (model) return;
+    if (model && normalizedModel === selectedModel) return;
     const nextModel = preferredRuntimeModelId(selectedRuntime, props.localAgentProviders);
     if (!nextModel) return;
     setModel(nextModel);
@@ -143,16 +147,11 @@ export function AgentManageForm(props: {
     if (nextProvider?.defaultReasoningEffort) {
       setReasoningEffort(nextProvider.defaultReasoningEffort);
     }
-  }, [model, props.localAgentProviders, selectedRuntime]);
+  }, [model, normalizedModel, props.localAgentProviders, selectedModel, selectedRuntime]);
 
   useEffect(() => {
-    if (!reasoningOptions.some((option) => option.value === reasoningEffort)) {
-      const providerDefault = providerStatus?.defaultReasoningEffort ?? "";
-      setReasoningEffort(
-        reasoningOptions.some((option) => option.value === providerDefault) ? providerDefault : "",
-      );
-    }
-  }, [normalizedModel, providerStatus?.defaultReasoningEffort, reasoningEffort, reasoningOptions]);
+    if (reasoningEffort !== selectedReasoningEffort) setReasoningEffort(selectedReasoningEffort);
+  }, [reasoningEffort, selectedReasoningEffort]);
 
   useEffect(() => {
     if (speedMode !== selectedSpeed) setSpeedMode(selectedSpeed);
@@ -165,9 +164,9 @@ export function AgentManageForm(props: {
     stylePrompt: "",
     defaultRuntimeProfileId: canonicalRuntime?.id ?? (runtimeProfileId || null),
     defaultListenMode: DEFAULT_PARTICIPANT_LISTEN_MODE,
-    defaultReasoningEffort: reasoningEffort || null,
+    defaultReasoningEffort: selectedReasoningEffort || null,
     defaultSpeedMode: selectedSpeed || null,
-    model: normalizedModel || undefined,
+    model: selectedModel || undefined,
   });
 
   const save = async () => {
@@ -209,8 +208,8 @@ export function AgentManageForm(props: {
         avatar: props.avatar,
         listenMode: DEFAULT_PARTICIPANT_LISTEN_MODE,
         runtimeProfileId: canonicalRuntime?.id ?? (runtimeProfileId || undefined),
-        model: normalizedModel || undefined,
-        reasoningEffort: reasoningEffort || null,
+        model: selectedModel || undefined,
+        reasoningEffort: selectedReasoningEffort || null,
         speedMode: selectedSpeed || null,
         roomInstructions: roomInstructions.trim(),
       };
@@ -225,7 +224,7 @@ export function AgentManageForm(props: {
           displayName: resolvedDisplayName,
           listenMode: DEFAULT_PARTICIPANT_LISTEN_MODE,
           roomInstructions: roomInstructions.trim(),
-          reasoningEffort: reasoningEffort || null,
+          reasoningEffort: selectedReasoningEffort || null,
           speedMode: selectedSpeed || null,
         });
         await props.onUpdateParticipant(result.participant.id, participantPayload);
@@ -306,7 +305,7 @@ export function AgentManageForm(props: {
           {modelOptions.length ? (
             <AgentSelect
               id="model"
-              value={normalizedModel}
+              value={selectedModel}
               disabled={readOnly}
               onChange={setModel}
               ariaLabel={t("agentForm.modelAria", { name: participant.displayName })}
@@ -323,10 +322,10 @@ export function AgentManageForm(props: {
           )}
         </label>
         <label>
-          <span>{reasoningModeFieldLabel(reasoningEffort)}</span>
+          <span>{reasoningModeFieldLabel(selectedReasoningEffort)}</span>
           <AgentSelect
             id="reasoning"
-            value={reasoningEffort}
+            value={selectedReasoningEffort}
             disabled={readOnly}
             onChange={(value) => setReasoningEffort(value as "" | ReasoningEffort)}
             ariaLabel={t("agentForm.reasoningAria", { name: participant.displayName })}
@@ -474,10 +473,23 @@ function AgentSelect(props: {
     const button = buttonRef.current;
     if (!button) return;
     const rect = button.getBoundingClientRect();
+    const viewportPadding = 8;
+    const estimatedContentWidth = Math.max(
+      132,
+      Math.min(
+        rect.width,
+        Math.max(...props.options.map((option) => option.label.length), selected?.label.length ?? 0) * 14 + 52,
+      ),
+    );
+    const width = Math.min(estimatedContentWidth, Math.max(132, window.innerWidth - viewportPadding * 2));
+    const left = Math.min(
+      Math.max(viewportPadding, rect.left),
+      Math.max(viewportPadding, window.innerWidth - width - viewportPadding),
+    );
     setPosition({
       top: rect.bottom + 8,
-      left: rect.left,
-      width: rect.width,
+      left,
+      width,
     });
   };
 
@@ -536,7 +548,7 @@ function AgentSelect(props: {
           ref={menuRef}
           role="listbox"
           aria-label={props.ariaLabel}
-          className={"[position:fixed] [z-index:10000] [display:grid] [max-height:260px] [overflow:auto] [border:1px_solid_#2f2f2f] [border-radius:14px] [padding:6px] [color:#f7f7f7] [background:#4f4f4f] [box-shadow:0_18px_44px_rgb(0_0_0_/_22%)]"}
+          className={"[position:fixed] [z-index:10000] [display:grid] [max-height:220px] [overflow:auto] [border:1px_solid_#2f2f2f] [border-radius:10px] [padding:4px] [color:#f7f7f7] [background:#4f4f4f] [font-size:13px] [font-weight:600] [line-height:1.2] [box-shadow:0_14px_34px_rgb(0_0_0_/_20%)]"}
           style={{ top: position.top, left: position.left, width: position.width }}
         >
           {props.options.map((option) => {
@@ -547,7 +559,7 @@ function AgentSelect(props: {
                 type="button"
                 role="option"
                 aria-selected={active}
-                className={`[display:grid] [grid-template-columns:20px_minmax(0,_1fr)] [align-items:center] [gap:6px] [min-height:34px] [border:0] [border-radius:10px] [padding:0_10px] [color:inherit] [background:transparent] [font:inherit] [text-align:left] [cursor:pointer] hover:[background:#ffffff1f] focus-visible:[outline:none] focus-visible:[background:#ffffff2b] ${active ? "[background:#4f8fea]" : ""}`}
+                className={`[display:grid] [grid-template-columns:18px_minmax(0,_1fr)] [align-items:center] [gap:6px] [min-height:30px] [border:0] [border-radius:8px] [padding:0_8px] [color:inherit] [background:transparent] [font:inherit] [line-height:1.2] [text-align:left] [cursor:pointer] hover:[background:#ffffff1f] focus-visible:[outline:none] focus-visible:[background:#ffffff2b] ${active ? "[background:#4f8fea]" : ""}`}
                 onClick={() => {
                   props.onChange(option.value);
                   props.onOpenChange(false);

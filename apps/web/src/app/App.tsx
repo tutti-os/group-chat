@@ -1433,6 +1433,15 @@ export function App() {
                   room={currentRoom}
                   conversation={currentConversation}
                   participants={currentParticipants}
+                  allParticipants={state.participants}
+                  identities={state.identities}
+                  runtimeProfiles={state.runtimeProfiles}
+                  conversations={state.conversations}
+                  rooms={state.rooms}
+                  artifacts={state.artifacts}
+                  allMessages={state.messages}
+                  allBlocks={state.messageBlocks}
+                  summaryTasks={backgroundTasks}
                   agentCount={currentAgents.length}
                   messages={currentMessages}
                   agentsOpen={membersPanelOpen}
@@ -1463,6 +1472,15 @@ export function App() {
                       messageId,
                       seq: (current?.seq ?? 0) + 1,
                     }));
+                  }}
+                  onOpenMessageLink={openMessageLink}
+                  onOpenSummaryLink={(taskId) => void openSummaryLink(taskId)}
+                  onEnsureSummaryTask={ensureBackgroundTask}
+                  onOpenArtifact={(artifact) => revealArtifactInTuttiFileManager(artifact)}
+                  onOpenAgentProfile={(participant) => {
+                    setPendingNewAgentDraft(null);
+                    setAgentProfileShowRemove(true);
+                    setAgentProfileParticipantId(participant.id);
                   }}
                 />
                 {isReconnecting ? <ReconnectingBanner /> : null}

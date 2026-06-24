@@ -23,14 +23,22 @@ function renderMarkdownSegment(
   markdownComponents: ReturnType<typeof createReferenceMentionMarkdownComponents> | undefined,
 ) {
   if (!text) return null;
+  const leadingWhitespace = text.match(/^[ \t]+/)?.[0] ?? "";
+  const trailingWhitespace = text.match(/[ \t]+$/)?.[0] ?? "";
+  const markdownText = text.slice(leadingWhitespace.length, text.length - trailingWhitespace.length);
+  if (!markdownText) return text;
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      components={markdownComponents ?? INLINE_MARKDOWN_COMPONENTS}
-      urlTransform={messageReferenceUrlTransform}
-    >
-      {text}
-    </ReactMarkdown>
+    <>
+      {leadingWhitespace}
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={markdownComponents ?? INLINE_MARKDOWN_COMPONENTS}
+        urlTransform={messageReferenceUrlTransform}
+      >
+        {markdownText}
+      </ReactMarkdown>
+      {trailingWhitespace}
+    </>
   );
 }
 

@@ -54,6 +54,10 @@ export type LocalAgentOutputEvent =
 export function buildLocalAgentInput(context: RuntimeReplyContext): LocalAgentInput {
   const workspaceRoot = participantWorkspaceRoot(context.conversation.roomId, context.participant.id);
   const baseUrl = localToolBaseUrl();
+  const userMessage = {
+    ...context.userMessage,
+    content: stripGeneratedReplyQuoteMarkers(context.userMessage.content),
+  };
   return {
     protocolVersion: LOCAL_AGENT_PROTOCOL_VERSION,
     runId: context.runId,
@@ -64,7 +68,7 @@ export function buildLocalAgentInput(context: RuntimeReplyContext): LocalAgentIn
     runtimeProfile: context.runtimeProfile,
     turn: {
       kind: "message",
-      userMessage: context.userMessage,
+      userMessage,
       attachments: context.attachments,
     },
     workspaceFiles: {
@@ -94,6 +98,10 @@ export function buildLocalAgentInput(context: RuntimeReplyContext): LocalAgentIn
       },
     },
   };
+}
+
+export function stripGeneratedReplyQuoteMarkers(content: string) {
+  return content.replace(/^[ \t]*>\s?(?=(?:回复|Reply)\s+[^:：]+[:：])/gim, "");
 }
 
 export async function* decodeLocalAgentStdout(stream: AsyncIterable<string | Buffer>) {

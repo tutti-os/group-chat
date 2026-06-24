@@ -1566,28 +1566,37 @@ function isRuntimeEventBlock(block: MessageBlock) {
 
 const MESSAGE_ACTION_BAR_Z_INDEX = 2147483000;
 const MESSAGE_MORE_MENU_Z_INDEX = MESSAGE_ACTION_BAR_Z_INDEX + 1;
-const MESSAGE_MORE_MENU_BOTTOM_RESERVE_PX = 96;
 const MESSAGE_MORE_MENU_MIN_WIDTH = 196;
 
-function computeMessageMoreMenuPosition(anchorRect: DOMRect, menuHeight: number) {
+function computeMessageMoreMenuPosition(anchorRect: DOMRect, menuWidth: number, menuHeight: number) {
   const viewportPadding = 12;
-  const maxBottom = window.innerHeight - MESSAGE_MORE_MENU_BOTTOM_RESERVE_PX;
-  const maxMenuHeight = Math.max(160, maxBottom - viewportPadding);
+  const viewport = window.visualViewport;
+  const viewportLeft = viewport?.offsetLeft ?? 0;
+  const viewportTop = viewport?.offsetTop ?? 0;
+  const viewportWidth = viewport?.width ?? window.innerWidth;
+  const viewportHeight = viewport?.height ?? window.innerHeight;
+  const minLeft = viewportLeft + viewportPadding;
+  const minTop = viewportTop + viewportPadding;
+  const maxRight = viewportLeft + viewportWidth - viewportPadding;
+  const maxBottom = viewportTop + viewportHeight - viewportPadding;
+  const maxMenuHeight = Math.max(120, maxBottom - minTop);
   const effectiveHeight = Math.min(menuHeight, maxMenuHeight);
+  const effectiveWidth = Math.min(menuWidth, Math.max(MESSAGE_MORE_MENU_MIN_WIDTH, maxRight - minLeft));
 
-  let top = anchorRect.top;
-  if (top + effectiveHeight > maxBottom) {
-    top = Math.max(viewportPadding, maxBottom - effectiveHeight);
-  }
+  const preferredLeft = anchorRect.right;
+  const flippedLeft = anchorRect.left - effectiveWidth;
+  const left = clampNumber(
+    preferredLeft + effectiveWidth <= maxRight ? preferredLeft : flippedLeft,
+    minLeft,
+    Math.max(minLeft, maxRight - effectiveWidth),
+  );
+  const top = clampNumber(
+    anchorRect.top,
+    minTop,
+    Math.max(minTop, maxBottom - effectiveHeight),
+  );
 
-  let left = anchorRect.right;
-  let transform: string | undefined;
-  if (left + MESSAGE_MORE_MENU_MIN_WIDTH > window.innerWidth - viewportPadding) {
-    left = anchorRect.left;
-    transform = "translateX(-100%)";
-  }
-
-  return { top, left, transform, maxMenuHeight };
+  return { top, left, width: effectiveWidth, maxMenuHeight };
 }
 
 const MESSAGE_ACTION_BAR_BUTTON_CLASS =
@@ -1848,27 +1857,28 @@ function MessageMoreMenu(props: {
     const anchorRect = anchor.getBoundingClientRect();
     if (anchorRect.width === 0 && anchorRect.height === 0) return;
 
-    const maxBottom = window.innerHeight - MESSAGE_MORE_MENU_BOTTOM_RESERVE_PX;
-    const maxMenuHeight = Math.max(160, maxBottom - 12);
     menu.style.position = "fixed";
     menu.style.visibility = "hidden";
     menu.style.pointerEvents = "none";
     menu.style.left = "-9999px";
     menu.style.top = "0px";
     menu.style.transform = "none";
-    menu.style.maxHeight = `${maxMenuHeight}px`;
+    menu.style.maxHeight = `${Math.max(120, (window.visualViewport?.height ?? window.innerHeight) - 24)}px`;
     if (baseMenuWidthRef.current === null) {
       baseMenuWidthRef.current = Math.max(menu.offsetWidth, MESSAGE_MORE_MENU_MIN_WIDTH);
     }
     menu.style.width = `${baseMenuWidthRef.current}px`;
     menu.style.maxWidth = `${baseMenuWidthRef.current}px`;
     menu.style.overflowX = "hidden";
+    const menuWidth = baseMenuWidthRef.current;
     const menuHeight = menu.offsetHeight || menu.scrollHeight || 280;
-    const position = computeMessageMoreMenuPosition(anchorRect, menuHeight);
+    const position = computeMessageMoreMenuPosition(anchorRect, menuWidth, menuHeight);
 
     menu.style.top = `${position.top}px`;
     menu.style.left = `${position.left}px`;
-    menu.style.transform = position.transform ?? "none";
+    menu.style.width = `${position.width}px`;
+    menu.style.maxWidth = `${position.width}px`;
+    menu.style.transform = "none";
     menu.style.zIndex = String(MESSAGE_MORE_MENU_Z_INDEX);
     menu.style.maxHeight = `${position.maxMenuHeight}px`;
     menu.style.overflowY = "auto";
@@ -3262,7 +3272,7 @@ export function MessageBlockRenderer(props: {
       data-slot="message-block"
       data-block-id={props.block.id}
       data-link-only={isLinkOnly || undefined}
-      className={`message-prose [box-sizing:border-box] [width:fit-content] [min-width:0] [max-width:100%] [overflow-wrap:anywhere] [word-break:break-word] [border:0] [color:var(--text)] ${isLinkOnly ? "[display:grid] [gap:6px] [padding:0] [background:transparent] [border-radius:0]" : hasWhisperFooter ? "[display:flex] [flex-direction:column] [gap:4px] [padding:10px_12px] [border-radius:8px]" : "[padding:10px_13px] [border-radius:4px_6px_6px_4px]"} ${props.block.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${props.block.status === "error" && !hasWhisperFooter ? "[border:1px_solid_#fecaca] [color:var(--danger)] [background:#fef2f2]" : ""}`}
+      className={`message-prose [box-sizing:border-box] [width:fit-content] [min-width:0] [max-width:100%] [overflow-wrap:break-word] [word-break:normal] [white-space:pre-wrap] [border:0] [color:var(--text)] ${isLinkOnly ? "[display:grid] [gap:6px] [padding:0] [background:transparent] [border-radius:0]" : hasWhisperFooter ? "[display:flex] [flex-direction:column] [gap:4px] [padding:10px_12px] [border-radius:8px]" : "[padding:10px_13px] [border-radius:4px_6px_6px_4px]"} ${props.block.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${props.block.status === "error" && !hasWhisperFooter ? "[border:1px_solid_#fecaca] [color:var(--danger)] [background:#fef2f2]" : ""}`}
     >
       {props.quotedMessage ? (
         <ReferencedMessagePreview
@@ -3324,7 +3334,7 @@ export function MessageBlockRenderer(props: {
           tightSpacing={hasWhisperFooter}
         />
       ) : whisperPlainText ? (
-        <span data-slot="whisper-body" className="[display:block] [min-width:0] [max-width:100%] [overflow-wrap:anywhere] [word-break:break-word] [line-height:1.35] [white-space:pre-wrap]">{bodyWithoutLinks}</span>
+        <span data-slot="whisper-body" className="[display:block] [min-width:0] [max-width:100%] [overflow-wrap:break-word] [word-break:normal] [line-height:1.35] [white-space:pre-wrap]">{bodyWithoutLinks}</span>
       ) : bodyWithoutLinks ? (
         <MessageReferenceContent
           content={bodyWithoutLinks}

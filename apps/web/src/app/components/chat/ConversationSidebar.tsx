@@ -218,7 +218,7 @@ function buildRecentMessagePreview(conversation: Conversation, room: Room, messa
   if (!message) {
     return {
       sender: "",
-      content: conversation.lastMessage || room.description || t("sidebar.noMessagesYet"),
+      content: stripGeneratedReplyQuoteMarkers(conversation.lastMessage || "") || room.description || t("sidebar.noMessagesYet"),
     };
   }
   if (message.status === "deleted") {
@@ -235,11 +235,17 @@ function buildRecentMessagePreview(conversation: Conversation, room: Room, messa
   }
   return {
     sender: messageSenderLabel(message),
-    content: message.content.trim() || conversation.lastMessage || t("common.attachment"),
+    content: stripGeneratedReplyQuoteMarkers(message.content).trim()
+      || stripGeneratedReplyQuoteMarkers(conversation.lastMessage || "")
+      || t("common.attachment"),
   };
 }
 
 function messageSenderLabel(message: Message) {
   if (message.role === "user") return "";
   return message.senderName || message.role;
+}
+
+function stripGeneratedReplyQuoteMarkers(content: string) {
+  return content.replace(/^[ \t]*>\s?(?=(?:回复|Reply)\s+[^:：]+[:：])/gim, "");
 }

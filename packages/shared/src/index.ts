@@ -194,6 +194,7 @@ export interface LocalAgentProviderStatus {
   configDir?: string;
   models: LocalAgentProviderModel[];
   defaultModelId?: string;
+  reasoningEfforts?: ReasoningEffort[];
   defaultReasoningEffort?: ReasoningEffort | null;
   speedModes?: LocalAgentProviderSpeedMode[];
   defaultSpeedMode?: string | null;

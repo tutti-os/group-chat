@@ -36,7 +36,7 @@ const codexProfile = {
 };
 
 test("local agent model options use detected provider models instead of provider-prefixed defaults", async () => {
-  const { listRuntimeModels, preferredRuntimeModelId } = await loadModule();
+  const { listRuntimeModels, preferredRuntimeModelId, resolveRuntimeModelId } = await loadModule();
   const providers = [{
     provider: "codex",
     displayName: "Codex",
@@ -57,6 +57,7 @@ test("local agent model options use detected provider models instead of provider
     ["gpt-5.5", "gpt-5.4"],
   );
   assert.equal(preferredRuntimeModelId(codexProfile, providers), "gpt-5.5");
+  assert.equal(resolveRuntimeModelId(codexProfile, providers, "codex:default"), "gpt-5.5");
 });
 
 test("local agent model options normalize canonical default profiles to CLI default", async () => {
@@ -79,4 +80,35 @@ test("codex speed options fall back to standard and fast", async () => {
   );
   assert.equal(resolveRuntimeSpeedMode(codexProfile, [], "fast"), "fast");
   assert.equal(resolveRuntimeSpeedMode(codexProfile, [], "unknown"), "standard");
+});
+
+test("local agent reasoning options follow provider options without auto", async () => {
+  const { listRuntimeReasoningOptions } = await loadModule();
+  const allOptions = [
+    { value: "", label: "Auto", description: "" },
+    { value: "low", label: "Low", description: "" },
+    { value: "medium", label: "Medium", description: "" },
+    { value: "high", label: "High", description: "" },
+    { value: "xhigh", label: "Very high", description: "" },
+  ];
+  const providers = [{
+    provider: "codex",
+    displayName: "Codex",
+    available: true,
+    authState: "ok",
+    executablePath: "/usr/local/bin/codex",
+    version: "1.2.3",
+    models: [
+      {
+        id: "gpt-5.5",
+        label: "GPT-5.5",
+        supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
+      },
+    ],
+  }];
+
+  assert.deepEqual(
+    listRuntimeReasoningOptions(codexProfile, providers, "gpt-5.5", allOptions).map((option) => option.value),
+    ["low", "medium", "high", "xhigh"],
+  );
 });

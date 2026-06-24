@@ -1,6 +1,7 @@
 import { useEffect, useState, type RefObject } from "react";
 import { Bot, Files, Search, UserPlus } from "lucide-react";
-import type { Conversation, Message, Participant, Room, UpdateRoomRequest } from "@group-chat/shared";
+import type { Artifact, Conversation, Identity, Message, MessageBlock, Participant, Room, RuntimeProfile, UpdateRoomRequest } from "@group-chat/shared";
+import type { BackgroundTask } from "../../background-tasks.js";
 import type { LocalUserProfile } from "../../user-profile.js";
 import { useTranslation } from "../../i18n/index.js";
 import { ChatMessageSearch } from "./ChatMessageSearch.js";
@@ -13,6 +14,15 @@ export function ChatHeader(props: {
   room: Room;
   conversation: Conversation;
   participants: Participant[];
+  allParticipants: Participant[];
+  identities: Identity[];
+  runtimeProfiles: RuntimeProfile[];
+  conversations: Conversation[];
+  rooms: Room[];
+  artifacts: Artifact[];
+  allMessages: Message[];
+  allBlocks: MessageBlock[];
+  summaryTasks: BackgroundTask[];
   agentCount: number;
   messages: Message[];
   agentsOpen: boolean;
@@ -28,6 +38,11 @@ export function ChatHeader(props: {
   onToggleFiles: () => void;
   onInvitePeople: () => void;
   onFocusMessage: (messageId: string) => void;
+  onOpenMessageLink: (messageIdSegment: string) => void;
+  onOpenSummaryLink: (taskId: string) => void;
+  onEnsureSummaryTask?: (taskId: string) => Promise<BackgroundTask | null>;
+  onOpenArtifact?: (artifact: Artifact) => void;
+  onOpenAgentProfile?: (participant: Participant) => void;
 }) {
   const { t } = useTranslation();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -128,8 +143,23 @@ export function ChatHeader(props: {
         <ChatMessageSearch
           open={searchOpen}
           messages={props.messages}
+          allMessages={props.allMessages}
+          allBlocks={props.allBlocks}
+          artifacts={props.artifacts}
+          participants={props.allParticipants}
+          identities={props.identities}
+          runtimeProfiles={props.runtimeProfiles}
+          conversations={props.conversations}
+          rooms={props.rooms}
+          summaryTasks={props.summaryTasks}
+          userDisplayName={props.userProfile.displayName}
           onClose={() => setSearchOpen(false)}
           onFocusMessage={props.onFocusMessage}
+          onOpenMessageLink={props.onOpenMessageLink}
+          onOpenSummaryLink={props.onOpenSummaryLink}
+          onEnsureSummaryTask={props.onEnsureSummaryTask}
+          onOpenArtifact={props.onOpenArtifact}
+          onOpenAgentProfile={props.onOpenAgentProfile}
         />
       </header>
       {settingsOpen ? (

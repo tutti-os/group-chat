@@ -19,7 +19,7 @@ import { buildEffectiveRoleDescription } from "../domains/agent-instructions.js"
 import { participantWorkspaceRoot } from "../local/paths.js";
 import { enrichLocalAgentProviderStatus } from "./local-agent-config-catalog.js";
 import { acpPromptFromLocalAgentInput } from "./local-agent-acp.js";
-import { buildLocalAgentInput, decodeLocalAgentStdout, localToolBaseUrl } from "./local-agent-protocol.js";
+import { buildLocalAgentInput, decodeLocalAgentStdout, localToolBaseUrl, stripGeneratedReplyQuoteMarkers } from "./local-agent-protocol.js";
 import type { RuntimeProvider, RuntimeReplyContext, RuntimeStreamEvent } from "./runtime-provider.js";
 import { RuntimeProviderUnsupportedError } from "./runtime-provider.js";
 
@@ -42,6 +42,11 @@ type TuttiAgentProviderStatus = {
     status?: string;
   };
   models?: unknown;
+  reasoningEfforts?: unknown;
+  reasoningOptions?: unknown;
+  reasoningLevels?: unknown;
+  supportedReasoningEfforts?: unknown;
+  supportedReasoningLevels?: unknown;
   speedModes?: unknown;
   speedOptions?: unknown;
   speeds?: unknown;
@@ -115,6 +120,14 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
     const detections = await this.localAgentRuntime.detect();
     const kitStatuses = detections.map(({ provider, displayName, result }) => {
       const available = Boolean(result && result.supported !== false);
+      const resultRecord = toRecord(result);
+      const reasoningEfforts = parseReasoningEfforts(
+        resultRecord?.reasoningEfforts
+        ?? resultRecord?.reasoningOptions
+        ?? resultRecord?.reasoningLevels
+        ?? resultRecord?.supportedReasoningEfforts
+        ?? resultRecord?.supportedReasoningLevels,
+      );
       const status: LocalAgentProviderStatus = {
         provider,
         displayName,
@@ -133,6 +146,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
             ? { supportedReasoningEfforts: model.supportedReasoningEfforts }
             : {}),
         })),
+        ...(reasoningEfforts?.length ? { reasoningEfforts } : {}),
         reason: available ? undefined : localAgentUnavailableReason(displayName, result),
       };
       return enrichLocalAgentProviderStatus(status);
@@ -492,6 +506,7 @@ function mergeTuttiAgentProviderStatuses(
       configDir: kitStatus?.configDir,
       models: parseTuttiAgentProviderModels(tuttiStatus) ?? kitStatus?.models ?? [],
       defaultModelId: parseTuttiAgentProviderDefaultModelId(tuttiStatus) ?? kitStatus?.defaultModelId,
+      reasoningEfforts: parseTuttiAgentProviderReasoningEfforts(tuttiStatus) ?? kitStatus?.reasoningEfforts,
       defaultReasoningEffort: parseTuttiAgentProviderDefaultReasoningEffort(tuttiStatus) ?? kitStatus?.defaultReasoningEffort,
       speedModes: parseTuttiAgentProviderSpeedModes(tuttiStatus) ?? kitStatus?.speedModes,
       defaultSpeedMode: parseTuttiAgentProviderDefaultSpeedMode(tuttiStatus) ?? kitStatus?.defaultSpeedMode,
@@ -603,6 +618,17 @@ function parseTuttiAgentProviderDefaultReasoningEffort(status: TuttiAgentProvide
   return parseReasoningEffort(readString(root, "defaultReasoningEffort", "reasoningEffort", "reasoning"))
     ?? parseReasoningEffort(readString(configuration, "defaultReasoningEffort", "reasoningEffort", "reasoning"))
     ?? parseReasoningEffort(readString(defaults, "reasoningEffort", "reasoning"));
+}
+
+function parseTuttiAgentProviderReasoningEfforts(status: TuttiAgentProviderStatus) {
+  const root = toRecord(status);
+  const configuration = toRecord(status.configuration);
+  const defaults = toRecord(status.defaults);
+  return parseReasoningEfforts(
+    readArray(root, "reasoningEfforts", "reasoningOptions", "reasoningLevels", "supportedReasoningEfforts", "supportedReasoningLevels", "reasoning")
+    ?? readArray(configuration, "reasoningEfforts", "reasoningOptions", "reasoningLevels", "supportedReasoningEfforts", "supportedReasoningLevels", "reasoning")
+    ?? readArray(defaults, "reasoningEfforts", "reasoningOptions", "reasoningLevels", "supportedReasoningEfforts", "supportedReasoningLevels", "reasoning"),
+  );
 }
 
 function parseTuttiAgentProviderSpeedModes(status: TuttiAgentProviderStatus): LocalAgentProviderSpeedMode[] | undefined {
@@ -809,7 +835,7 @@ function buildKitHistory(context: RuntimeReplyContext): AgentRunMessage[] {
 
 function formatHistoryMessage(message: RuntimeReplyContext["userMessage"]) {
   const sender = message.senderName ?? (message.role === "assistant" ? "Agent" : "User");
-  return `[${sender}] ${message.content}`;
+  return `[${sender}] ${stripGeneratedReplyQuoteMarkers(message.content)}`;
 }
 
 function stripLocalAgentProviderPrefix(model: string, provider: string) {
