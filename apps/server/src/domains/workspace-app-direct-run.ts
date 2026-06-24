@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { MentionTarget } from "@group-chat/shared";
+import { resolveMentionTargetReferenceLabel, resolveMentionTargetReferenceScope, type MentionTarget } from "@group-chat/shared";
 
 const execFileAsync = promisify(execFile);
 const TUTTI_CLI_TIMEOUT_MS = 20 * 60 * 1000;
@@ -45,12 +45,8 @@ export function resolveDirectWorkspaceAppIntent(
   if (!appMention?.referenceEntityId) return null;
 
   const appId = appMention.referenceEntityId.trim();
-  const label = appMention.displayNameSnapshot.trim()
-    || (appMention.referenceInsert?.kind === "mention" ? appMention.referenceInsert.label.trim() : "")
-    || appId;
-  const scope = appMention.referenceInsert?.kind === "mention"
-    ? appMention.referenceInsert.scope
-    : appMention.referenceScope;
+  const label = resolveMentionTargetReferenceLabel(appMention) || appId;
+  const scope = resolveMentionTargetReferenceScope(appMention);
   const prompt = stripWorkspaceAppMentionText(content, {
     appId,
     label,
@@ -99,9 +95,11 @@ export function workspaceAppMentionTarget(result: DirectWorkspaceAppRunResult): 
     referenceScope: scope,
     referenceInsert: {
       kind: "mention",
-      entityId: result.appId,
-      label: result.label,
-      scope,
+      mention: {
+        entityId: result.appId,
+        label: result.label,
+        scope,
+      },
     },
   }];
 }

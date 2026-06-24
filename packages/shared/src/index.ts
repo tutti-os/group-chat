@@ -417,6 +417,32 @@ export function sanitizeMentionTargetsForAgentContext(mentions: readonly Mention
   return mentions.map((mention) => sanitizeMentionTargetForAgentContext(mention));
 }
 
+export function resolveMentionTargetReferenceScope(
+  mention: Pick<MentionTarget, "referenceInsert" | "referenceScope">,
+): Readonly<Record<string, string>> | undefined {
+  const insert = mention.referenceInsert;
+  if (insert?.kind !== "mention") return mention.referenceScope;
+  const legacyInsert = insert as unknown as {
+    mention?: { scope?: Readonly<Record<string, string>> };
+    scope?: Readonly<Record<string, string>>;
+  };
+  return legacyInsert.mention?.scope ?? legacyInsert.scope ?? mention.referenceScope;
+}
+
+export function resolveMentionTargetReferenceLabel(
+  mention: Pick<MentionTarget, "displayNameSnapshot" | "referenceEntityId" | "referenceInsert">,
+): string {
+  const displayName = mention.displayNameSnapshot.trim();
+  if (displayName) return displayName;
+  const insert = mention.referenceInsert;
+  if (insert?.kind === "mention") {
+    const legacyInsert = insert as unknown as { mention?: { label?: string }; label?: string };
+    const insertLabel = (legacyInsert.mention?.label ?? legacyInsert.label ?? "").trim();
+    if (insertLabel) return insertLabel;
+  }
+  return mention.referenceEntityId?.trim() ?? "";
+}
+
 function sanitizeReferenceInsertForAgentContext(
   insert: TuttiReferenceInsert | undefined,
 ): Pick<MentionTarget, "referenceInsert"> {
@@ -424,6 +450,7 @@ function sanitizeReferenceInsertForAgentContext(
   if (insert.kind !== "mention") {
     return { referenceInsert: insert };
   }
+  if (!insert.mention) return {};
   const entityId = insert.mention.entityId.trim();
   const label = insert.mention.label.trim().replace(/^@+/, "").trim() || entityId;
   if (!entityId || !label) return {};

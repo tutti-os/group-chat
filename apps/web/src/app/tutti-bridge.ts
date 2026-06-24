@@ -1,4 +1,4 @@
-import type { Artifact, TuttiAtProviderId, TuttiReferenceInsert } from "@group-chat/shared";
+import { resolveMentionTargetReferenceScope, type Artifact, type TuttiAtProviderId, type TuttiReferenceInsert } from "@group-chat/shared";
 import type {
   TuttiExternalAtQueryInput,
   TuttiExternalAtQueryResult
@@ -188,11 +188,7 @@ export function resolveReferenceMentionScope(
   referenceInsert?: TuttiReferenceInsert,
   referenceScope?: Readonly<Record<string, string>>,
 ) {
-  if (referenceInsert?.kind === "mention") {
-    const legacyScope = (referenceInsert as { scope?: Readonly<Record<string, string>> }).scope;
-    return referenceInsert.mention?.scope ?? legacyScope ?? referenceScope;
-  }
-  return referenceScope;
+  return resolveMentionTargetReferenceScope({ referenceInsert, referenceScope });
 }
 
 let cachedTuttiWorkspaceId: string | null = null;
