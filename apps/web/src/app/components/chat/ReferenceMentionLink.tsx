@@ -140,7 +140,6 @@ export function ReferenceMentionLink(props: {
 
   const mention = resolveMentionMeta(href, props.mentions ?? []);
   const label = referenceLabel(props.children) || String(props.children ?? "");
-  const pasteMarkdown = `[${label}](${href})`;
   const parsed = href.startsWith("mention://")
     ? (() => {
         try {
@@ -162,6 +161,15 @@ export function ReferenceMentionLink(props: {
   const entityId = mention?.referenceEntityId?.trim() || parsed?.entityId || "";
   const guiProvider = providerId === "workspace-app" ? resolveAgentGuiProviderFromAppId(entityId) : null;
   const launcherRuntimeProvider = resolveAgentLauncherRuntimeProvider(entityId);
+  const mentionHref = href.startsWith("mention://")
+    ? href
+    : isOpenableTuttiReferenceProvider(providerId)
+      ? buildTuttiMentionHref(providerId, entityId, {
+          referenceInsert: mention?.referenceInsert,
+          referenceScope: mention?.referenceScope,
+        }) ?? href
+      : href;
+  const pasteMarkdown = `[${label}](${mentionHref})`;
 
   if (guiProvider && launcherRuntimeProvider) {
     return (
@@ -175,15 +183,6 @@ export function ReferenceMentionLink(props: {
       />
     );
   }
-
-  const mentionHref = href.startsWith("mention://")
-    ? href
-    : isOpenableTuttiReferenceProvider(providerId)
-      ? buildTuttiMentionHref(providerId, mention?.referenceEntityId?.trim() || parsed?.entityId || "", {
-          referenceInsert: mention?.referenceInsert,
-          referenceScope: mention?.referenceScope,
-        }) ?? href
-      : href;
 
   const handleOpen = () => {
     openReferenceMentionTarget(mentionHref, label, mention, props.artifacts ?? []);

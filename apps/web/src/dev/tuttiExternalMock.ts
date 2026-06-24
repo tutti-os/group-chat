@@ -252,7 +252,7 @@ function createMockBridge() {
       },
     },
     files: {
-      async open(input: { path: string; name?: string; mode?: string }) {
+      async open(input: { path: string; name?: string; mode?: string; previewUrl?: string; publicUrl?: string; mimeType?: string }) {
         console.info("[tuttiExternal mock] files.open", input);
       },
     },

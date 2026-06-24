@@ -57,6 +57,7 @@ import { createSummaryLinkChipElement } from "../../summary-link-card.js";
 import { mentionTabProviders } from "../../mention-panel-tabs.js";
 import { createTuttiMessageLinkIconElement, createTuttiReferenceIconElement } from "../../tutti-reference-icons.js";
 import { AGENT_LAUNCHER_MENTION_ICON_CLASS, PARTICIPANT_MENTION_CLASS, REFERENCE_MENTION_CHIP_CLASS, REFERENCE_MENTION_ICON_CLASS, REFERENCE_MENTION_LABEL_CLASS, splitAgentLauncherMentionLabel } from "./reference-mention-chip.js";
+import { MessageReferenceContent } from "./MessageReferenceContent.js";
 import {
   MENTION_PANEL_TABS,
   mentionTabI18nKey,
@@ -1986,7 +1987,15 @@ export function Composer(props: {
           />
         </label>
         <div className={"[display:grid] [min-height:40px] [align-content:start] [gap:6px] [padding:2px_0]"}>
-          {quotes.length ? <QuoteComposerBar quotes={quotes} onRemove={() => setQuotes([])} /> : null}
+          {quotes.length ? (
+            <QuoteComposerBar
+              quotes={quotes}
+              artifacts={props.allArtifacts}
+              participants={props.allParticipants}
+              runtimeProfiles={props.runtimeProfiles}
+              onRemove={() => setQuotes([])}
+            />
+          ) : null}
           <div className={"[display:flex] [min-height:28px] [min-width:0] [flex-wrap:wrap] [align-items:flex-start] [gap:4px_6px]"}>
             <div className={"[position:relative] [min-width:0] [flex:1_1_180px] [min-height:28px] [display:grid] [align-items:start] [overflow:hidden] [&:has([data-upload-item-id])_[data-slot=composer-placeholder]]:[display:none] [&:has([data-mention-chip])_[data-slot=composer-placeholder]]:[display:none] [&:has([data-message-link-id])_[data-slot=composer-placeholder]]:[display:none] [&:has([data-summary-link-id])_[data-slot=composer-placeholder]]:[display:none]"}>
             {!text && uploadItems.length === 0 && t("composer.placeholder").trim() ? (
@@ -3435,6 +3444,7 @@ function createMentionChip(label: string, mentionId: string, reference?: TuttiAt
     chip.dataset.mentionKind = "reference";
     chip.dataset.mentionDisplayMode = "reference-link";
     chip.dataset.mentionReferenceProvider = reference.providerId;
+    chip.dataset.mentionReferenceEntityId = reference.itemId;
     chip.dataset.mentionReferenceInsert = JSON.stringify(reference.insert);
     chip.dataset.mentionLinkHref = referenceLinkHref(reference);
     const iconUrl = resolveMentionThumbnailUrl(reference.thumbnailUrl);
@@ -4216,6 +4226,7 @@ interface ComposerQuote {
   messageId: string;
   sender: string;
   content: string;
+  mentions: Message["mentions"];
 }
 
 interface ComposerMentionParticipant {
@@ -4267,7 +4278,13 @@ function shouldReplaceSelectedUploadItems(
   );
 }
 
-function QuoteComposerBar(props: { quotes: ComposerQuote[]; onRemove: () => void }) {
+function QuoteComposerBar(props: {
+  quotes: ComposerQuote[];
+  artifacts: Artifact[];
+  participants: Participant[];
+  runtimeProfiles: RuntimeProfile[];
+  onRemove: () => void;
+}) {
   const { t } = useTranslation();
   const [firstQuote, ...restQuotes] = props.quotes;
   if (!firstQuote) return null;
@@ -4284,18 +4301,55 @@ function QuoteComposerBar(props: { quotes: ComposerQuote[]; onRemove: () => void
       </button>
       <span className={"[display:grid] [min-width:0] [gap:2px]"}>
         <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>
-          {props.quotes.length > 1
-            ? t("composer.quoteCount", { count: props.quotes.length })
-            : t("composer.replyTo", { sender: firstQuote.sender, content: compactQuoteContent(firstQuote.content) })}
+          {props.quotes.length > 1 ? (
+            t("composer.quoteCount", { count: props.quotes.length })
+          ) : (
+            <QuoteContentPreview
+              prefix={t("composer.replyTo", { sender: firstQuote.sender, content: "" })}
+              quote={firstQuote}
+              artifacts={props.artifacts}
+              participants={props.participants}
+              runtimeProfiles={props.runtimeProfiles}
+            />
+          )}
         </span>
         {props.quotes.length > 1 ? (
           <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap] [color:#9aa1ad] [font-size:12px]"}>
-            {firstQuote.sender}: {compactQuoteContent(firstQuote.content)}
+            <QuoteContentPreview
+              prefix={`${firstQuote.sender}: `}
+              quote={firstQuote}
+              artifacts={props.artifacts}
+              participants={props.participants}
+              runtimeProfiles={props.runtimeProfiles}
+            />
             {restQuotes.length ? t("composer.quoteMore", { count: restQuotes.length + 1 }) : ""}
           </span>
         ) : null}
       </span>
     </div>
+  );
+}
+
+function QuoteContentPreview(props: {
+  prefix: string;
+  quote: ComposerQuote;
+  artifacts: Artifact[];
+  participants: Participant[];
+  runtimeProfiles: RuntimeProfile[];
+}) {
+  return (
+    <>
+      {props.prefix}
+      <MessageReferenceContent
+        content={compactQuotePreviewContent(props.quote.content)}
+        mentions={props.quote.mentions}
+        artifacts={props.artifacts}
+        participants={props.participants}
+        runtimeProfiles={props.runtimeProfiles}
+        onOpenArtifact={(artifact) => revealArtifactInTuttiFileManager(artifact)}
+        tightSpacing
+      />
+    </>
   );
 }
 
@@ -4307,6 +4361,10 @@ function formatQuotesForMessage(quotes: ComposerQuote[]) {
 
 function compactQuoteContent(content: string) {
   return content.replace(/\s+/g, " ").trim().slice(0, 120);
+}
+
+function compactQuotePreviewContent(content: string) {
+  return content.replace(/\s+/g, " ").trim();
 }
 
 function uploadItemIdsCrossedByLeftDrag(

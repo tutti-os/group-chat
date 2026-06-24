@@ -49,6 +49,16 @@ export interface PendingReplyQueueItem {
   updatedAt: string;
 }
 
+export interface ConversationMessagePage {
+  conversationId: string;
+  messages: Message[];
+  messageBlocks: MessageBlock[];
+  artifacts: Artifact[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  limit: number;
+}
+
 export class ChatRepository {
   ensureSeedData() {
     this.ensureRuntimeProfiles();
@@ -61,13 +71,22 @@ export class ChatRepository {
     });
   }
 
-  snapshot(): ChatSnapshot {
+  snapshot(options: { messageLimitPerConversation?: number } = {}): ChatSnapshot {
     const db = getDb();
+    const conversations = (
+      db.prepare(`SELECT * FROM conversations ORDER BY updated_at DESC`).all() as any[]
+    ).map(rowToConversation);
+    const messageLimit = normalizeMessagePageLimit(options.messageLimitPerConversation);
+    const messages = messageLimit
+      ? this.listRecentVisibleMessagesForConversations(conversations.map((conversation) => conversation.id), messageLimit)
+      : (db.prepare(`SELECT * FROM messages ORDER BY created_at ASC`).all() as any[]).map(rowToMessage);
+    const messageBlocks = messageLimit
+      ? this.listMessageBlocksForMessages(messages.map((message) => message.id))
+      : (db.prepare(`SELECT * FROM message_blocks ORDER BY sort_order ASC, created_at ASC`).all() as any[])
+          .map(rowToMessageBlock);
     return {
       rooms: (db.prepare(`SELECT * FROM rooms ORDER BY created_at ASC`).all() as any[]).map(rowToRoom),
-      conversations: (
-        db.prepare(`SELECT * FROM conversations ORDER BY updated_at DESC`).all() as any[]
-      ).map(rowToConversation),
+      conversations,
       participants: (
         db.prepare(`SELECT * FROM participants ORDER BY conversation_id ASC, sort_order ASC`).all() as any[]
       ).map(rowToParticipant),
@@ -77,12 +96,8 @@ export class ChatRepository {
       runtimeProfiles: (
         db.prepare(`SELECT * FROM runtime_profiles ORDER BY created_at ASC`).all() as any[]
       ).map(rowToRuntimeProfile),
-      messages: (db.prepare(`SELECT * FROM messages ORDER BY created_at ASC`).all() as any[]).map(
-        rowToMessage,
-      ),
-      messageBlocks: (
-        db.prepare(`SELECT * FROM message_blocks ORDER BY sort_order ASC, created_at ASC`).all() as any[]
-      ).map(rowToMessageBlock),
+      messages,
+      messageBlocks,
       agentRunEvents: (
         db.prepare(`SELECT * FROM agent_run_events ORDER BY created_at ASC`).all() as any[]
       ).map(rowToAgentRunEvent),
@@ -131,7 +146,7 @@ export class ChatRepository {
       messages,
       messageBlocks: snapshot.messageBlocks.filter((block) => visibleMessageIds.has(block.messageId)),
       artifacts: snapshot.artifacts.filter(
-        (artifact) => !artifact.messageId || visibleMessageIds.has(artifact.messageId),
+        (artifact) => !artifact.messageId || !hiddenIds.has(artifact.messageId),
       ),
     };
   }
@@ -668,6 +683,79 @@ export class ChatRepository {
       )
       .all(conversationId, limit) as any[];
     return rows.reverse().map(rowToMessage);
+  }
+
+  listConversationMessagePage(
+    conversationId: string,
+    options: { limit?: number; cursor?: string | null } = {},
+  ): ConversationMessagePage | null {
+    if (!this.getConversation(conversationId)) return null;
+    const limit = normalizeMessagePageLimit(options.limit) ?? 10;
+    const cursor = parseMessagePageCursor(options.cursor);
+    const params: Array<string | number> = [conversationId];
+    let cursorClause = "";
+    if (cursor) {
+      cursorClause = "AND (created_at < ? OR (created_at = ? AND id < ?))";
+      params.push(cursor.createdAt, cursor.createdAt, cursor.id);
+    }
+    params.push(limit + 1);
+    const rows = getDb()
+      .prepare(
+        `SELECT * FROM messages
+         WHERE conversation_id = ?
+           AND id NOT IN (SELECT message_id FROM hidden_messages)
+           ${cursorClause}
+         ORDER BY created_at DESC, id DESC
+         LIMIT ?`,
+      )
+      .all(...params) as any[];
+    const hasMore = rows.length > limit;
+    const messages = rows.slice(0, limit).reverse().map(rowToMessage);
+    const messageIds = messages.map((message) => message.id);
+    const oldestMessage = messages[0] ?? null;
+    return {
+      conversationId,
+      messages,
+      messageBlocks: this.listMessageBlocksForMessages(messageIds),
+      artifacts: this.listArtifactsForMessages(messageIds),
+      nextCursor: hasMore && oldestMessage ? formatMessagePageCursor(oldestMessage) : null,
+      hasMore,
+      limit,
+    };
+  }
+
+  private listRecentVisibleMessagesForConversations(conversationIds: string[], limit: number): Message[] {
+    if (conversationIds.length === 0) return [];
+    const pages = conversationIds.flatMap((conversationId) =>
+      this.listConversationMessagePage(conversationId, { limit })?.messages ?? [],
+    );
+    return pages.sort(compareMessagesAscending);
+  }
+
+  private listMessageBlocksForMessages(messageIds: string[]): MessageBlock[] {
+    if (messageIds.length === 0) return [];
+    const placeholders = messageIds.map(() => "?").join(", ");
+    const rows = getDb()
+      .prepare(
+        `SELECT * FROM message_blocks
+         WHERE message_id IN (${placeholders})
+         ORDER BY sort_order ASC, created_at ASC`,
+      )
+      .all(...messageIds) as any[];
+    return rows.map(rowToMessageBlock);
+  }
+
+  private listArtifactsForMessages(messageIds: string[]): Artifact[] {
+    if (messageIds.length === 0) return [];
+    const placeholders = messageIds.map(() => "?").join(", ");
+    const rows = getDb()
+      .prepare(
+        `SELECT * FROM artifacts
+         WHERE message_id IN (${placeholders})
+         ORDER BY created_at ASC`,
+      )
+      .all(...messageIds) as any[];
+    return rows.map(rowToArtifact);
   }
 
   updateMessage(
@@ -1572,6 +1660,26 @@ function rowToPrivateTask(row: any): PrivateTaskSnapshot {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function normalizeMessagePageLimit(limit: number | null | undefined) {
+  if (!Number.isInteger(limit) || !limit || limit <= 0) return null;
+  return Math.min(limit, 50);
+}
+
+function formatMessagePageCursor(message: Pick<Message, "createdAt" | "id">) {
+  return `${message.createdAt}\t${message.id}`;
+}
+
+function parseMessagePageCursor(cursor: string | null | undefined): { createdAt: string; id: string } | null {
+  if (!cursor) return null;
+  const [createdAt, id] = cursor.split("\t");
+  if (!createdAt || !id) return null;
+  return { createdAt, id };
+}
+
+function compareMessagesAscending(left: Message, right: Message) {
+  return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
 }
 
 function safeFilename(filename: string) {

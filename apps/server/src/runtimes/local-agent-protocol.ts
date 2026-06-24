@@ -4,6 +4,20 @@ import type { RuntimeReplyContext } from "./runtime-provider.js";
 export const LOCAL_AGENT_PROTOCOL_VERSION = "group-chat.local-agent.v1";
 export const NO_REPLY_MARKER = "[NO_REPLY]";
 
+type WorkspaceAppIntent = {
+  addressedAgent: {
+    participantId: string;
+    displayName: string;
+  };
+  requestText: string;
+  workspaceApps: Array<{
+    appId: string;
+    label: string;
+    scope?: Readonly<Record<string, string>>;
+  }>;
+  instruction: string;
+};
+
 export interface LocalAgentInput {
   protocolVersion: typeof LOCAL_AGENT_PROTOCOL_VERSION;
   runId: string | undefined;
@@ -16,6 +30,7 @@ export interface LocalAgentInput {
     kind: "message";
     userMessage: RuntimeReplyContext["userMessage"];
     attachments: RuntimeReplyContext["attachments"];
+    intent?: WorkspaceAppIntent;
   };
   workspaceFiles: {
     instructions: "AGENTS.md";
@@ -58,6 +73,7 @@ export function buildLocalAgentInput(context: RuntimeReplyContext): LocalAgentIn
     ...context.userMessage,
     content: stripGeneratedReplyQuoteMarkers(context.userMessage.content),
   };
+  const intent = resolveWorkspaceAppIntent(context, userMessage.content);
   return {
     protocolVersion: LOCAL_AGENT_PROTOCOL_VERSION,
     runId: context.runId,
@@ -70,6 +86,7 @@ export function buildLocalAgentInput(context: RuntimeReplyContext): LocalAgentIn
       kind: "message",
       userMessage,
       attachments: context.attachments,
+      ...(intent ? { intent } : {}),
     },
     workspaceFiles: {
       instructions: "AGENTS.md",
@@ -100,8 +117,89 @@ export function buildLocalAgentInput(context: RuntimeReplyContext): LocalAgentIn
   };
 }
 
+export function resolveWorkspaceAppIntent(
+  context: RuntimeReplyContext,
+  content = context.userMessage.content,
+): WorkspaceAppIntent | null {
+  const workspaceApps = context.userMessage.mentions
+    .filter((mention) =>
+      mention.mentionType === "reference"
+      && mention.referenceProviderId === "workspace-app"
+      && mention.referenceEntityId?.trim()
+    )
+    .map((mention) => ({
+      appId: mention.referenceEntityId!.trim(),
+      label: mention.displayNameSnapshot.trim()
+        || (mention.referenceInsert?.kind === "mention" ? mention.referenceInsert.label : "")
+        || mention.referenceEntityId!.trim(),
+      scope: mention.referenceInsert?.kind === "mention" ? mention.referenceInsert.scope : mention.referenceScope,
+    }));
+  if (!workspaceApps.length) return null;
+
+  const addressed = context.userMessage.mentions.some((mention) =>
+    mention.mentionType === "participant" && mention.participantId === context.participant.id,
+  );
+  if (!addressed && !context.userMessage.mentions.some((mention) => mention.mentionType === "all")) return null;
+
+  const requestText = stripLeadingIntentMentions(stripGeneratedReplyQuoteMarkers(content), context);
+  const appLabels = workspaceApps.map((app) => `${app.label} (${app.appId})`).join(", ");
+  return {
+    addressedAgent: {
+      participantId: context.participant.id,
+      displayName: context.participant.displayName,
+    },
+    requestText,
+    workspaceApps,
+    instruction: [
+      `The user addressed ${context.participant.displayName} and referenced workspace app(s): ${appLabels}.`,
+      `Interpret the remaining request as: ${requestText || "(empty request)"}.`,
+      "The Group Chat host invokes directly supported workspace app(s) when possible. Do not start a duplicate app run only because the app was mentioned; use visible app status/result if present, and reply with concise process and result context for the user.",
+      "Do not treat the app label as a generic design keyword, Figma document, shell command, or MCP server name.",
+      workspaceApps.some((app) => app.appId === "vibe-design")
+        ? "For vibe-design, the intended execution path is the Tutti Prototype Design workspace app workflow for creating or editing a prototype/site/app."
+        : "",
+    ].filter(Boolean).join(" "),
+  };
+}
+
 export function stripGeneratedReplyQuoteMarkers(content: string) {
   return content.replace(/^[ \t]*>\s?(?=(?:回复|Reply)\s+[^:：]+[:：])/gim, "");
+}
+
+function stripLeadingIntentMentions(content: string, context: RuntimeReplyContext) {
+  let result = content.trim();
+  const mentionLabels = context.userMessage.mentions
+    .filter((mention) => mention.mentionType === "participant" || mention.referenceProviderId === "workspace-app")
+    .map((mention) => mention.displayNameSnapshot.trim())
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length);
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const before = result;
+    result = result
+      .replace(/^\s*\[[^\]]+\]\((?:mention:\/\/workspace-app\/|group-chat:\/\/reference\/workspace-app\/)[^)]+\)\s*/i, "")
+      .replace(/^\s*@[^\s@]+\s*/u, "")
+      .trim();
+    for (const label of mentionLabels) {
+      result = stripLeadingPlainLabel(result, label);
+    }
+    changed = result !== before;
+  }
+  return result.trim();
+}
+
+function stripLeadingPlainLabel(value: string, label: string) {
+  const normalized = value.trimStart();
+  const escaped = escapeRegExp(label);
+  return normalized
+    .replace(new RegExp(`^@?${escaped}\\s*`, "u"), "")
+    .trimStart();
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export async function* decodeLocalAgentStdout(stream: AsyncIterable<string | Buffer>) {

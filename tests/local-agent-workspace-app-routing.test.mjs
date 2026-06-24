@@ -2,14 +2,126 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 
 const execFileAsync = promisify(execFile);
 const providerModuleUrl = new URL("../apps/server/src/runtimes/local-agent-provider.ts", import.meta.url).href;
+const protocolModuleUrl = new URL("../apps/server/src/runtimes/local-agent-protocol.ts", import.meta.url).href;
+const acpModuleUrl = new URL("../apps/server/src/runtimes/local-agent-acp.ts", import.meta.url).href;
 
-test("workspace app mentions are routed through the mentioned agent instead of a hard-coded app command", async () => {
+test("workspace app and agent mentions produce a clean intent prompt", async () => {
+  const checkScript = join(await mkdtemp(join(tmpdir(), "group-chat-workspace-app-intent-")), "check-intent.ts");
+  await writeFile(
+    checkScript,
+    `
+      import assert from "node:assert/strict";
+      async function main() {
+        const { buildLocalAgentInput } = await import(${JSON.stringify(protocolModuleUrl)});
+        const { acpPromptFromLocalAgentInput } = await import(${JSON.stringify(acpModuleUrl)});
+        const content = "[Vibe Design](mention://workspace-app/vibe-design?workspaceId=ws-1) @产品 你去做一个音乐网站";
+        const context = {
+          runId: "run-1",
+          conversation: {
+            id: "conversation-1",
+            roomId: "room-1",
+            type: "group",
+            title: "AI 讨论室",
+            groupSystemPrompt: "",
+            collaborationRules: "",
+            collaborationRulesVersion: 1,
+            replyPolicy: { mode: "mentioned", order: "sequential", maxRounds: 1, mentionFollowupRounds: 0 },
+            activeBranchId: null,
+            pinned: false,
+            lastMessage: content,
+            lastMessageAt: "2026-06-24T00:00:00.000Z",
+            createdAt: "2026-06-24T00:00:00.000Z",
+            updatedAt: "2026-06-24T00:00:00.000Z",
+          },
+          participant: {
+            id: "product-agent",
+            conversationId: "conversation-1",
+            kind: "ai",
+            displayName: "产品",
+            avatar: null,
+            runtimeProfileId: "local-agent:codex",
+            identityId: "identity-product",
+            roomInstructions: "",
+            status: "active",
+            listenMode: "passive",
+            sortOrder: 0,
+            reasoningEffort: null,
+            createdAt: "2026-06-24T00:00:00.000Z",
+            updatedAt: "2026-06-24T00:00:00.000Z",
+          },
+          identity: null,
+          runtimeProfile: null,
+          userMessage: {
+            id: "msg-1",
+            conversationId: "conversation-1",
+            role: "user",
+            senderParticipantId: null,
+            senderName: "老板111",
+            content,
+            mentions: [
+              {
+                mentionType: "reference",
+                referenceProviderId: "workspace-app",
+                referenceEntityId: "vibe-design",
+                displayNameSnapshot: "Vibe Design",
+                referenceScope: { workspaceId: "ws-1" },
+                referenceInsert: {
+                  kind: "mention",
+                  entityId: "vibe-design",
+                  label: "Vibe Design",
+                  scope: { workspaceId: "ws-1" },
+                },
+              },
+              {
+                mentionType: "participant",
+                participantId: "product-agent",
+                displayNameSnapshot: "产品",
+              },
+            ],
+            visibility: "public",
+            status: "success",
+            branchId: null,
+            parentMessageId: null,
+            runId: null,
+            tokenUsage: null,
+            createdAt: "2026-06-24T00:00:00.000Z",
+            updatedAt: "2026-06-24T00:00:00.000Z",
+          },
+          recentMessages: [],
+          attachments: [],
+        };
+        const input = buildLocalAgentInput(context);
+        assert.equal(input.turn.intent.requestText, "你去做一个音乐网站");
+        assert.equal(input.turn.intent.workspaceApps[0].appId, "vibe-design");
+        const prompt = acpPromptFromLocalAgentInput(input);
+        assert.match(prompt, /<intent>/);
+        assert.match(prompt, /request_text: 你去做一个音乐网站/);
+        assert.match(prompt, /The Group Chat host invokes directly supported workspace app\\(s\\) when possible/);
+        assert.match(prompt, /Do not treat the app label as a generic design keyword, Figma document, shell command, or MCP server name/);
+      }
+      main().catch((error) => {
+        console.error(error);
+        process.exit(1);
+      });
+    `,
+  );
+
+  try {
+    await execFileAsync("pnpm", ["--filter", "@group-chat/server", "exec", "tsx", checkScript], {
+      cwd: new URL("..", import.meta.url),
+    });
+  } finally {
+    await rm(dirname(checkScript), { recursive: true, force: true });
+  }
+});
+
+test("workspace app mentions keep structured context for the mentioned agent", async () => {
   const home = await mkdtemp(join(tmpdir(), "group-chat-workspace-app-routing-"));
   const agentScript = join(home, "agent-command.mjs");
   const checkScript = join(home, "check-workspace-app-routing.ts");
@@ -35,6 +147,17 @@ test("workspace app mentions are routed through the mentioned agent instead of a
         );
         if (!hasVibeDesign || !hasProductAgent) {
           console.error("missing structured mentions", JSON.stringify(mentions));
+          process.exit(1);
+        }
+        const intent = payload.turn.intent;
+        if (
+          !intent
+          || intent.requestText !== "做一个贪食蛇网站"
+          || !intent.instruction.includes("Vibe Design")
+          || !intent.instruction.includes("vibe-design")
+          || !intent.instruction.includes("Group Chat host invokes directly supported workspace app")
+        ) {
+          console.error("missing workspace app intent", JSON.stringify(intent));
           process.exit(1);
         }
         console.log(JSON.stringify({ type: "final_text", text: "agent-ok" }));

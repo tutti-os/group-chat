@@ -1,7 +1,7 @@
-import { createReadStream, createWriteStream, existsSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync, readFileSync, statSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
@@ -26,6 +26,7 @@ import type {
   WsServerMessage,
 } from "@group-chat/shared";
 import { AgentToolGateway } from "./domains/agent-tool-gateway.js";
+import { inferMimeTypeForPath } from "./domains/run-file-artifacts.js";
 import { readUserProfile, writeUserProfile, type StoredUserProfile } from "./domains/user-profile-store.js";
 import { AgentToolTokenStore, AgentToolUnauthorizedError } from "./domains/agent-tool-tokens.js";
 import { ChatRepository } from "./domains/chat-repository.js";
@@ -77,7 +78,11 @@ server.get("/api/health", async () => ({
   app: "group-chat",
 }));
 
-server.get("/api/bootstrap", async () => chat.bootstrap());
+server.get<{ Querystring: { messageLimit?: string } }>("/api/bootstrap", async (request) =>
+  chat.bootstrap({
+    messageLimitPerConversation: parsePositiveInteger(request.query.messageLimit) ?? undefined,
+  }),
+);
 
 server.get("/api/user-profile", async () => ({
   profile: readUserProfile(),
@@ -239,6 +244,18 @@ server.get<{ Params: { conversationId: string } }>(
 server.post<{ Params: { conversationId: string }; Body: SendMessageRequest }>(
   "/api/conversations/:conversationId/messages",
   async (request) => chat.sendMessage(request.params.conversationId, request.body),
+);
+
+server.get<{ Params: { conversationId: string }; Querystring: { limit?: string; cursor?: string } }>(
+  "/api/conversations/:conversationId/messages",
+  async (request, reply) => {
+    const page = chat.listConversationMessages(request.params.conversationId, {
+      limit: parsePositiveInteger(request.query.limit) ?? undefined,
+      cursor: request.query.cursor ?? null,
+    });
+    if (!page) return reply.code(404).send({ error: "Conversation not found" });
+    return page;
+  },
 );
 
 server.patch<{ Params: { messageId: string }; Body: UpdateMessageRequest }>(
@@ -418,13 +435,16 @@ server.post<{ Params: { participantId: string }; Body: UploadArtifactRequest & {
   },
 );
 
+server.get<{ Params: { artifactId: string; "*": string } }>("/local-assets/:artifactId/*", async (request, reply) => {
+  const artifact = repo.getArtifact(request.params.artifactId);
+  if (!artifact) return reply.code(404).send({ error: "Artifact not found" });
+  return serveLocalAsset(reply, artifact, request.params["*"]);
+});
+
 server.get<{ Params: { artifactId: string } }>("/local-assets/:artifactId", async (request, reply) => {
   const artifact = repo.getArtifact(request.params.artifactId);
   if (!artifact) return reply.code(404).send({ error: "Artifact not found" });
-  reply.header("Content-Type", artifact.mimeType);
-  reply.header("Content-Length", artifact.sizeBytes);
-  reply.header("Content-Disposition", `inline; filename="${encodeURIComponent(artifact.filename)}"`);
-  return reply.send(createReadStream(artifact.localPath));
+  return serveLocalAsset(reply, artifact, null);
 });
 
 server.post<{ Params: { artifactId: string } }>("/api/artifacts/:artifactId/open", async (request, reply) => {
@@ -502,6 +522,54 @@ function readAgentToolCredential(request: { headers: Record<string, string | str
   const headerToken = Array.isArray(header) ? header[0] : header;
   const query = request.query as { toolToken?: string } | undefined;
   return { token: headerToken ?? query?.toolToken ?? null };
+}
+
+function serveLocalAsset(reply: {
+  code: (statusCode: number) => { send: (payload: unknown) => unknown };
+  header: (name: string, value: string | number) => unknown;
+  send: (payload: unknown) => unknown;
+}, artifact: { id: string; filename: string; mimeType: string; sizeBytes: number; localPath: string }, assetPath: string | null) {
+  const filePath = resolveLocalAssetPath(artifact.localPath, assetPath);
+  if (!filePath) return reply.code(404).send({ error: "Not found" });
+  if (!existsSync(filePath)) return reply.code(404).send({ error: "Not found" });
+  const stat = statSync(filePath);
+  if (!stat.isFile()) return reply.code(404).send({ error: "Not found" });
+
+  const isRootArtifact = filePath === resolve(artifact.localPath);
+  const mimeType = isRootArtifact ? artifact.mimeType : inferMimeTypeForPath(filePath);
+  reply.header("Content-Type", mimeType);
+  reply.header("Content-Disposition", `inline; filename="${encodeURIComponent(isRootArtifact ? artifact.filename : filePath.split(/[\\/]/).pop() ?? "asset")}"`);
+
+  if (isRootArtifact && mimeType === "text/html") {
+    const html = readFileSync(filePath, "utf8");
+    const baseHref = `/local-assets/${encodeURIComponent(artifact.id)}/`;
+    const withBase = injectHtmlBaseHref(html, baseHref);
+    reply.header("Content-Length", Buffer.byteLength(withBase));
+    return reply.send(withBase);
+  }
+
+  reply.header("Content-Length", stat.size);
+  return reply.send(createReadStream(filePath));
+}
+
+function resolveLocalAssetPath(rootArtifactPath: string, assetPath: string | null) {
+  const rootPath = resolve(rootArtifactPath);
+  if (!assetPath) return rootPath;
+  const normalizedAssetPath = assetPath.replace(/^\/+/, "");
+  if (!normalizedAssetPath || normalizedAssetPath.includes("\0")) return null;
+  const rootDir = dirname(rootPath);
+  const resolved = resolve(rootDir, normalizedAssetPath);
+  if (resolved !== rootDir && !resolved.startsWith(`${rootDir}${sep}`)) return null;
+  return resolved;
+}
+
+function injectHtmlBaseHref(html: string, baseHref: string) {
+  if (/<base\b/i.test(html)) return html;
+  const baseTag = `<base href="${baseHref}">`;
+  if (/<head\b[^>]*>/i.test(html)) {
+    return html.replace(/<head\b[^>]*>/i, (head) => `${head}\n${baseTag}`);
+  }
+  return `${baseTag}\n${html}`;
 }
 
 function normalizeCliEnvelope(value: unknown) {

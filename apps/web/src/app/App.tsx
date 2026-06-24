@@ -3,6 +3,7 @@ import { Bot, Loader2 } from "lucide-react";
 import { enrichAgentRuns, isLocalUserMessage, resolveAgentRunVisibility, type AgentRun,
   type ChatSnapshot,
   type Conversation,
+  type ConversationMessagesPage,
   type CreateIdentityRequest,
   type Identity,
   type LocalAgentProviderStatus,
@@ -27,6 +28,7 @@ import {
   deleteMessage,
   deleteParticipant,
   deleteRoom,
+  fetchConversationMessages,
   fetchLocalAgentProviders,
   fetchSnapshot,
   type SendMessageResponse,
@@ -97,6 +99,9 @@ const MIN_CHAT_PANE_WIDTH = 460;
 const SPLITTER_WIDTH = 4;
 const DESKTOP_NAV_WIDTH = 60;
 const COMPACT_NAV_WIDTH = 56;
+const MESSAGE_PAGE_SIZE = 10;
+const MESSAGE_PRERENDER_PAGE_COUNT = 1;
+const MESSAGE_PREFETCH_PAGE_COUNT = 2;
 
 function sameLocalAgentProviders(left: LocalAgentProviderStatus[], right: LocalAgentProviderStatus[]) {
   if (left.length !== right.length) return false;
@@ -114,6 +119,7 @@ export interface ComposerQuote {
   messageId: string;
   sender: string;
   content: string;
+  mentions: Message["mentions"];
 }
 
 export interface ComposerMentionParticipant {
@@ -121,9 +127,36 @@ export interface ComposerMentionParticipant {
   displayName: string;
 }
 
+interface TimelinePageState {
+  initialized: boolean;
+  visibleMessageIds: string[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  loadingOlder: boolean;
+}
+
 function toChatSnapshot(state: AppState): ChatSnapshot {
   const { ready: _ready, ...snapshot } = state;
   return snapshot;
+}
+
+function messagePageCacheKey(conversationId: string, cursor: string | null | undefined) {
+  return `${conversationId}:${cursor ?? "__latest__"}`;
+}
+
+function mergeVisibleMessageIds(existing: string[], nextPageIds: string[]) {
+  if (nextPageIds.length === 0) return existing;
+  const existingIds = new Set(existing);
+  return [
+    ...nextPageIds.filter((id) => !existingIds.has(id)),
+    ...existing,
+  ];
+}
+
+interface TimelinePageWindow {
+  messageIds: string[];
+  nextCursor: string | null;
+  hasMore: boolean;
 }
 
 export function App() {
@@ -169,7 +202,7 @@ export function App() {
   const mobileProfileMenuRef = useRef<HTMLDivElement | null>(null);
   const chatProfileMenuRef = useRef<HTMLDivElement | null>(null);
   const deleteDialogRef = useRef<{ resolve: () => void; reject: (reason?: unknown) => void } | null>(null);
-  const timelineScrollPreserverRef = useRef<{ capture: () => void } | null>(null);
+  const timelineScrollPreserverRef = useRef<{ capture: (mode?: "absolute" | "prepend") => void } | null>(null);
   const [deletePrompt, setDeletePrompt] = useState<{ ids: string[] } | null>(null);
   const [deletingMessages, setDeletingMessages] = useState(false);
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
@@ -198,6 +231,9 @@ export function App() {
   const [openMessageLinkSegment, setOpenMessageLinkSegment] = useState<string | null>(null);
   const [conversationReadAt, setConversationReadAt] = useState<ConversationReadAtMap>(() => loadConversationReadAt());
   const previousConversationIdRef = useRef<string | null>(null);
+  const [timelinePageStateByConversationId, setTimelinePageStateByConversationId] = useState<Record<string, TimelinePageState>>({});
+  const messagePageCacheRef = useRef<Map<string, ConversationMessagesPage>>(new Map());
+  const messagePageInFlightRef = useRef<Map<string, Promise<ConversationMessagesPage | null>>>(new Map());
 
   const refreshLocalAgentProviders = useCallback(async () => {
     setRefreshingLocalAgentProviders(true);
@@ -216,6 +252,154 @@ export function App() {
       setAvailableAgentLauncherAppIds((current) => sameStringSet(current, ids) ? current : new Set(ids));
     });
   }, []);
+
+  const mergeConversationMessagePage = useCallback((page: ConversationMessagesPage) => {
+    setState((current) => {
+      let messages = current.messages;
+      for (const message of page.messages) {
+        messages = upsertMessage(messages, message);
+      }
+      return {
+        ...current,
+        messages,
+        messageBlocks: upsertMany(current.messageBlocks, page.messageBlocks),
+        artifacts: upsertMany(current.artifacts, page.artifacts),
+        activeRuns: enrichAgentRuns(current.activeRuns, messages),
+      };
+    });
+  }, []);
+
+  const loadConversationMessagePage = useCallback(async (
+    conversationId: string,
+    cursor: string | null,
+  ): Promise<ConversationMessagesPage | null> => {
+    const key = messagePageCacheKey(conversationId, cursor);
+    const cached = messagePageCacheRef.current.get(key);
+    if (cached) return cached;
+    const inFlight = messagePageInFlightRef.current.get(key);
+    if (inFlight) return inFlight;
+
+    const request = fetchConversationMessages(conversationId, { limit: MESSAGE_PAGE_SIZE, cursor })
+      .then((page) => {
+        messagePageCacheRef.current.set(key, page);
+        mergeConversationMessagePage(page);
+        return page;
+      })
+      .catch(() => null)
+      .finally(() => {
+        messagePageInFlightRef.current.delete(key);
+      });
+    messagePageInFlightRef.current.set(key, request);
+    return request;
+  }, [mergeConversationMessagePage]);
+
+  const prefetchConversationMessagePages = useCallback(async (conversationId: string, cursor: string | null) => {
+    let nextCursor = cursor;
+    for (let index = 0; index < MESSAGE_PREFETCH_PAGE_COUNT && nextCursor; index += 1) {
+      const page = await loadConversationMessagePage(conversationId, nextCursor);
+      if (!page?.hasMore || !page.nextCursor) break;
+      nextCursor = page.nextCursor;
+    }
+  }, [loadConversationMessagePage]);
+
+  const loadConversationMessagePageWindow = useCallback(async (
+    conversationId: string,
+    cursor: string | null,
+    pageCount: number,
+  ): Promise<TimelinePageWindow> => {
+    let messageIds: string[] = [];
+    let nextCursor = cursor;
+    let hasMore = Boolean(cursor);
+    for (let index = 0; index < pageCount && nextCursor; index += 1) {
+      const page = await loadConversationMessagePage(conversationId, nextCursor);
+      if (!page) break;
+      messageIds = mergeVisibleMessageIds(
+        messageIds,
+        page.messages.map((message) => message.id),
+      );
+      nextCursor = page.nextCursor;
+      hasMore = page.hasMore;
+      if (!page.hasMore || !page.nextCursor) break;
+    }
+    return { messageIds, nextCursor, hasMore };
+  }, [loadConversationMessagePage]);
+
+  const initializeConversationMessages = useCallback(async (conversationId: string) => {
+    if (timelinePageStateByConversationId[conversationId]?.initialized) {
+      const cursor = timelinePageStateByConversationId[conversationId]?.nextCursor ?? null;
+      void prefetchConversationMessagePages(conversationId, cursor);
+      return;
+    }
+    const page = await loadConversationMessagePage(conversationId, null);
+    if (!page) return;
+    const prerenderWindow = await loadConversationMessagePageWindow(
+      conversationId,
+      page.nextCursor,
+      MESSAGE_PRERENDER_PAGE_COUNT,
+    );
+    const visibleMessageIds = mergeVisibleMessageIds(
+      page.messages.map((message) => message.id),
+      prerenderWindow.messageIds,
+    );
+    const nextCursor = prerenderWindow.messageIds.length ? prerenderWindow.nextCursor : page.nextCursor;
+    const hasMore = prerenderWindow.messageIds.length ? prerenderWindow.hasMore : page.hasMore;
+    setTimelinePageStateByConversationId((current) => {
+      if (current[conversationId]?.initialized) return current;
+      return {
+        ...current,
+        [conversationId]: {
+          initialized: true,
+          visibleMessageIds,
+          nextCursor,
+          hasMore,
+          loadingOlder: false,
+        },
+      };
+    });
+    void prefetchConversationMessagePages(conversationId, nextCursor);
+  }, [loadConversationMessagePage, loadConversationMessagePageWindow, prefetchConversationMessagePages, timelinePageStateByConversationId]);
+
+  const loadOlderConversationMessages = useCallback(async (conversationId: string) => {
+    const pageState = timelinePageStateByConversationId[conversationId];
+    if (!pageState?.hasMore || !pageState.nextCursor || pageState.loadingOlder) return;
+    setTimelinePageStateByConversationId((current) => ({
+      ...current,
+      [conversationId]: current[conversationId] ? {
+        ...current[conversationId],
+        loadingOlder: true,
+      } : pageState,
+    }));
+    timelineScrollPreserverRef.current?.capture("prepend");
+    const prerenderWindow = await loadConversationMessagePageWindow(
+      conversationId,
+      pageState.nextCursor,
+      MESSAGE_PRERENDER_PAGE_COUNT,
+    );
+    if (!prerenderWindow.messageIds.length) {
+      setTimelinePageStateByConversationId((current) => current[conversationId]
+        ? { ...current, [conversationId]: { ...current[conversationId]!, loadingOlder: false } }
+        : current);
+      return;
+    }
+    setTimelinePageStateByConversationId((current) => {
+      const currentPageState = current[conversationId];
+      if (!currentPageState) return current;
+      return {
+        ...current,
+        [conversationId]: {
+          initialized: true,
+          visibleMessageIds: mergeVisibleMessageIds(
+            currentPageState.visibleMessageIds,
+            prerenderWindow.messageIds,
+          ),
+          nextCursor: prerenderWindow.nextCursor,
+          hasMore: prerenderWindow.hasMore,
+          loadingOlder: false,
+        },
+      };
+    });
+    void prefetchConversationMessagePages(conversationId, prerenderWindow.nextCursor);
+  }, [loadConversationMessagePageWindow, prefetchConversationMessagePages, timelinePageStateByConversationId]);
 
   useEffect(() => initTuttiWorkspaceContextCache(), []);
 
@@ -243,7 +427,7 @@ export function App() {
     const launcherRefreshTimers = [0, 250, 900, 1800].map((delayMs) => window.setTimeout(() => {
       if (!cancelled) refreshAvailableAgentLauncherApps({ force: true });
     }, delayMs));
-    fetchSnapshot()
+    fetchSnapshot(MESSAGE_PAGE_SIZE)
       .then((snapshot) => {
         if (cancelled) return;
         lastSeqRef.current = Math.max(lastSeqRef.current, snapshot.lastSeq);
@@ -275,6 +459,11 @@ export function App() {
       window.clearTimeout(saveTimer);
     };
   }, [state]);
+
+  useEffect(() => {
+    if (!state.ready || !currentConversationId) return;
+    void initializeConversationMessages(currentConversationId);
+  }, [currentConversationId, initializeConversationMessages, state.ready]);
 
   const applyEvents = useCallback((events: StreamEvent[]) => {
     if (events.length === 0) return;
@@ -427,7 +616,7 @@ export function App() {
     () => currentParticipants.filter((item) => item.kind === "ai"),
     [currentParticipants],
   );
-  const currentMessages = useMemo(
+  const currentConversationMessages = useMemo(
     () => currentConversation
       ? state.messages
           .filter((item) => item.conversationId === currentConversation.id)
@@ -435,6 +624,27 @@ export function App() {
       : [],
     [currentConversation, state.messages],
   );
+  const currentTimelinePageState = currentConversation
+    ? timelinePageStateByConversationId[currentConversation.id] ?? null
+    : null;
+  const currentMessages = useMemo(() => {
+    if (!currentTimelinePageState?.initialized) {
+      return currentConversationMessages.slice(-MESSAGE_PAGE_SIZE);
+    }
+    const visibleIds = new Set(currentTimelinePageState.visibleMessageIds);
+    const newestVisibleMessage = [...currentTimelinePageState.visibleMessageIds]
+      .reverse()
+      .map((id) => currentConversationMessages.find((message) => message.id === id) ?? null)
+      .find((message): message is Message => Boolean(message));
+    return currentConversationMessages.filter((message) => {
+      if (visibleIds.has(message.id)) return true;
+      if (!newestVisibleMessage) return false;
+      return (
+        message.createdAt.localeCompare(newestVisibleMessage.createdAt) > 0
+        || (message.createdAt === newestVisibleMessage.createdAt && message.id.localeCompare(newestVisibleMessage.id) > 0)
+      );
+    });
+  }, [currentConversationMessages, currentTimelinePageState]);
   const currentMessageIdSet = useMemo(
     () => new Set(currentMessages.map((message) => message.id)),
     [currentMessages],
@@ -1190,6 +1400,7 @@ export function App() {
           messageId: message.id,
           sender: messageSenderLabel(message, state.participants, state.identities, userProfile.displayName),
           content: message.content.trim() || attachmentLabel(),
+          mentions: message.mentions,
         }));
       if (quotes.length === 1) {
         const sourceMessage = messages.find((message) => message.id === quotes[0]!.messageId);
@@ -1589,6 +1800,9 @@ export function App() {
                   agentForwardTargets={agentForwardTargets}
                   focusMessageRequest={focusMessageRequest}
                   scrollToBottomRequest={scrollToBottomRequest}
+                  hasMoreBefore={Boolean(currentTimelinePageState?.hasMore)}
+                  loadingBefore={Boolean(currentTimelinePageState?.loadingOlder)}
+                  onLoadBefore={() => void loadOlderConversationMessages(currentConversation.id)}
                   bulkToolbarHost={bulkToolbarHost}
                   userProfile={userProfile}
                   identities={state.identities}

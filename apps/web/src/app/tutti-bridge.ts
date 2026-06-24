@@ -11,9 +11,12 @@ export interface TuttiAtQueryResult {
 
 export interface TuttiWorkspaceAppOpenFileRequest {
   mode?: "auto" | "preview" | "reveal";
+  mimeType?: string;
   mtimeMs?: number | null;
   name?: string;
   path: string;
+  previewUrl?: string;
+  publicUrl?: string;
   sizeBytes?: number | null;
   location?: {
     type: "app-data-relative" | "app-package-relative" | "workspace-relative";
@@ -99,9 +102,14 @@ export function extractAppDataRelativePath(localPath: string): string | null {
 }
 
 export function buildTuttiOpenFileRequest(
-  artifact: Pick<Artifact, "localPath" | "filename" | "createdAt" | "sizeBytes">,
+  artifact: Pick<Artifact, "localPath" | "filename" | "createdAt" | "sizeBytes"> & Partial<Pick<Artifact, "mimeType" | "publicUrl">>,
   mode: TuttiWorkspaceAppOpenFileRequest["mode"] = "reveal",
 ): TuttiWorkspaceAppOpenFileRequest | null {
+  const publicUrl = artifact.publicUrl ? resolvePublicUrlForBridge(artifact.publicUrl) : null;
+  const metadata = {
+    ...(artifact.mimeType ? { mimeType: artifact.mimeType } : {}),
+    ...(publicUrl ? { publicUrl, previewUrl: publicUrl } : {}),
+  };
   const relativePath = extractAppDataRelativePath(artifact.localPath);
   if (relativePath) {
     return {
@@ -111,6 +119,7 @@ export function buildTuttiOpenFileRequest(
       mtimeMs: Date.parse(artifact.createdAt),
       sizeBytes: artifact.sizeBytes,
       mode,
+      ...metadata,
     };
   }
 
@@ -123,7 +132,14 @@ export function buildTuttiOpenFileRequest(
     mtimeMs: Date.parse(artifact.createdAt),
     sizeBytes: artifact.sizeBytes,
     mode,
+    ...metadata,
   };
+}
+
+function resolvePublicUrlForBridge(publicUrl: string) {
+  if (publicUrl.startsWith("http://") || publicUrl.startsWith("https://")) return publicUrl;
+  if (typeof window === "undefined") return publicUrl;
+  return `${window.location.origin}${publicUrl}`;
 }
 
 export function tryOpenFileInTuttiSync(input: TuttiWorkspaceAppOpenFileRequest): boolean {
@@ -219,6 +235,9 @@ export function buildTuttiMentionHref(
 
   const url = new URL(`mention://${providerId}/${encodeURIComponent(normalizedEntityId)}`);
   url.searchParams.set("workspaceId", workspaceId);
+  if (providerId === "workspace-app" && scope?.iconUrl?.trim()) {
+    url.searchParams.set("iconUrl", scope.iconUrl.trim());
+  }
   if (providerId === "agent-session" && scope?.provider?.trim()) {
     url.searchParams.set("provider", scope.provider.trim());
   }

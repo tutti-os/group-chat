@@ -3,7 +3,15 @@ export function acpPromptFromLocalAgentInput(input: {
   workspaceRoot: string;
   conversation: { id: string; type: string; title: string; collaborationRules?: string; collaborationRulesVersion?: number };
   participant: { id: string; displayName: string; listenMode?: string };
-  turn: { userMessage: { id: string; senderName: string | null; content: string; mentions: unknown[] }; attachments: unknown[] };
+  turn: {
+    userMessage: { id: string; senderName: string | null; content: string; mentions: unknown[] };
+    attachments: unknown[];
+    intent?: {
+      requestText: string;
+      instruction: string;
+      workspaceApps: Array<{ appId: string; label: string; scope?: Readonly<Record<string, string>> }>;
+    };
+  };
   tools: { contextUrl: string; artifactUrlTemplate?: string; sendMessageUrl: string; saveArtifactUrl: string };
 }) {
   const contextLines = [
@@ -19,10 +27,14 @@ export function acpPromptFromLocalAgentInput(input: {
   const collaborationRules = input.conversation.collaborationRules?.trim()
     ? `\n<collaboration_rules>\n${input.conversation.collaborationRules.trim()}\n</collaboration_rules>\n`
     : "";
+  const intent = input.turn.intent
+    ? `\n<intent>\n${input.turn.intent.instruction}\nrequest_text: ${input.turn.intent.requestText}\nworkspace_apps: ${JSON.stringify(input.turn.intent.workspaceApps)}\n</intent>\n`
+    : "";
   return `<im_context>
 ${contextLines.join("\n")}
 </im_context>
 ${collaborationRules}
+${intent}
 <message sender="${escapeAttribute(input.turn.userMessage.senderName ?? "user")}" message_id="${escapeAttribute(input.turn.userMessage.id)}">
 ${input.turn.userMessage.content}
 </message>

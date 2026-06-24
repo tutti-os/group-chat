@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -92,6 +92,21 @@ test("Tutti CLI handlers expose public conversation data only", async (t) => {
     [publicArtifact.body.artifact.id],
   );
   assert.equal(artifacts.body.value.warnings[0].omittedWhisperArtifactCount, 1);
+
+  const htmlArtifact = await postJson(server.baseUrl, `/api/conversations/${conversationId}/artifacts`, {
+    filename: "index.html",
+    mimeType: "text/html",
+    dataBase64: Buffer.from('<!doctype html><html><head><link rel="stylesheet" href="styles.css"></head><body>Preview</body></html>', "utf8").toString("base64"),
+  });
+  assert.equal(htmlArtifact.status, 200);
+  await writeFile(path.join(path.dirname(htmlArtifact.body.artifact.localPath), "styles.css"), "body { color: red; }");
+  const htmlPreview = await fetch(`${server.baseUrl}${htmlArtifact.body.artifact.publicUrl}`);
+  assert.equal(htmlPreview.status, 200);
+  assert.match(await htmlPreview.text(), new RegExp(`<base href="/local-assets/${htmlArtifact.body.artifact.id}/">`));
+  const cssPreview = await fetch(`${server.baseUrl}${htmlArtifact.body.artifact.publicUrl}/styles.css`);
+  assert.equal(cssPreview.status, 200);
+  assert.equal(cssPreview.headers.get("content-type"), "text/css");
+  assert.equal(await cssPreview.text(), "body { color: red; }");
 
   const duplicatePublicArtifact = await postJson(server.baseUrl, `/api/conversations/${conversationId}/artifacts`, {
     filename: "public-copy.txt",

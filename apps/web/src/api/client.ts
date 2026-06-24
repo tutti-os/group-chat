@@ -5,6 +5,7 @@ import type {
   Artifact,
   ChatSnapshot,
   CollaborationRuleEvent,
+  ConversationMessagesPage,
   CreateIdentityRequest,
   CreateRoomRequest,
   LocalAgentProviderStatusResponse,
@@ -50,8 +51,11 @@ export interface LocalUserProfileResponse {
   profile: RemoteUserProfile | null;
 }
 
-export async function fetchSnapshot(): Promise<ChatSnapshot> {
-  return fetchJson("/api/bootstrap");
+export async function fetchSnapshot(messageLimit?: number): Promise<ChatSnapshot> {
+  const params = new URLSearchParams();
+  if (messageLimit && messageLimit > 0) params.set("messageLimit", String(messageLimit));
+  const query = params.toString();
+  return fetchJson(`/api/bootstrap${query ? `?${query}` : ""}`);
 }
 
 export async function fetchUserProfile(): Promise<LocalUserProfileResponse> {
@@ -94,6 +98,17 @@ export async function sendMessage(conversationId: string, input: SendMessageRequ
     method: "POST",
     body: JSON.stringify(input),
   });
+}
+
+export async function fetchConversationMessages(
+  conversationId: string,
+  input: { limit?: number; cursor?: string | null } = {},
+): Promise<ConversationMessagesPage> {
+  const params = new URLSearchParams();
+  if (input.limit && input.limit > 0) params.set("limit", String(input.limit));
+  if (input.cursor) params.set("cursor", input.cursor);
+  const query = params.toString();
+  return fetchJson(`/api/conversations/${conversationId}/messages${query ? `?${query}` : ""}`);
 }
 
 export async function updateMessage(messageId: string, input: UpdateMessageRequest): Promise<SendMessageResponse> {

@@ -1,5 +1,4 @@
 import type { Identity, LocalAgentProviderStatus, MentionTarget, Participant, RuntimeProfile, TuttiAtProviderId } from "@group-chat/shared";
-import { findEmbeddedLinks } from "./chat-links.js";
 import { buildLocalAgentLauncherReference } from "./local-agent-mention-options.js";
 import {
   enrichContentWithParticipantMentions,
@@ -30,7 +29,7 @@ export type ComposerPasteSegment =
   | { kind: "message"; id: string }
   | { kind: "summary"; id: string };
 
-const REFERENCE_MARKDOWN_LINK_PATTERN = /\[([^\]]+)\]\(((?:group-chat:\/\/reference\/|group-chat:\/\/participant\/|mention:\/\/)[^)]+)\)/g;
+const REFERENCE_MARKDOWN_LINK_PATTERN = /\[([^\]]+)\]\(((?:group-chat:\/\/reference\/|group-chat:\/\/participant\/|group-chat:\/\/message\/|group-chat:\/\/summary\/|mention:\/\/)[^)]+)\)/g;
 
 export function enrichMessageContentForCopy(
   content: string,
@@ -69,13 +68,13 @@ export function normalizeComposerPasteText(html: string, plain: string) {
   const normalizedPlain = sanitizeComposerPasteText(plain.replace(/\u200b/g, "").replace(/\r\n?/g, "\n"));
   if (!fromHtml) return normalizedPlain;
   const normalizedHtml = sanitizeComposerPasteText(fromHtml.replace(/\u200b/g, ""));
-  if (!normalizedPlain.trim()) return normalizedHtml;
-  if (normalizedHtml.includes("](group-chat://") || normalizedHtml.includes("](mention://")) return normalizedHtml;
+  const mergedHtml = mergeHtmlPasteWithPlainText(normalizedHtml, normalizedPlain);
+  if (!normalizedPlain.trim()) return mergedHtml;
+  if (normalizedHtml.includes("](group-chat://") || normalizedHtml.includes("](mention://")) return mergedHtml;
   return normalizedPlain;
 }
 
-const MEANINGFUL_GROUP_CHAT_LINK_PATTERN = /group-chat:\/\/(?:message\/[A-Za-z0-9_-]+(?:,[A-Za-z0-9_-]+)*|summary\/[A-Za-z0-9_-]+)/g;
-const MEANINGFUL_GROUP_CHAT_MARKDOWN_PATTERN = /\[[^\]]+\]\(group-chat:\/\/(?:reference|participant)\/[^)]+\)/g;
+const MEANINGFUL_GROUP_CHAT_MARKDOWN_PATTERN = /\[[^\]]+\]\(group-chat:\/\/(?:reference|participant|message|summary)\/[^)]+\)/g;
 const INTERNAL_GROUP_CHAT_TOKEN_PATTERN = /group-chat:\/\/[^\s]*/g;
 
 /** Removes leaked or incomplete internal protocol URLs while retaining links the composer renders as structured content. */
@@ -87,8 +86,7 @@ export function sanitizeComposerPasteText(value: string) {
   };
 
   const protectedText = value
-    .replace(MEANINGFUL_GROUP_CHAT_MARKDOWN_PATTERN, protect)
-    .replace(MEANINGFUL_GROUP_CHAT_LINK_PATTERN, protect);
+    .replace(MEANINGFUL_GROUP_CHAT_MARKDOWN_PATTERN, protect);
   const withoutLeakedLinks = protectedText
     .replace(/^[ \t]*group-chat:\/\/[^\s]*[ \t]*(?:\n|$)/gm, "")
     .replace(INTERNAL_GROUP_CHAT_TOKEN_PATTERN, "")
@@ -130,8 +128,8 @@ function serializeClipboardNode(node: Node): string {
     if (href && (isReferenceMentionHref(href) || isParticipantMentionHref(href))) {
       return `[${label}](${href})`;
     }
-    if (href && (href.includes("group-chat://message/") || href.includes("group-chat://summary/"))) {
-      return href;
+    if (href && (href.startsWith("group-chat://message/") || href.startsWith("group-chat://summary/"))) {
+      return `[${label}](${href})`;
     }
   }
   const pasteMarkdown = node.getAttribute("data-composer-paste-markdown")?.trim();
@@ -149,6 +147,19 @@ function serializeClipboardChildren(node: HTMLElement) {
     text += serializeClipboardNode(child);
   });
   return text;
+}
+
+export function mergeHtmlPasteWithPlainText(htmlText: string, plainText: string) {
+  if (!plainText.trim() || !htmlText.trim()) return htmlText;
+  const flattenedHtml = flattenPasteMarkdownToText(htmlText);
+  if (!flattenedHtml || flattenedHtml === plainText) return htmlText;
+  const index = plainText.indexOf(flattenedHtml);
+  if (index === -1) return htmlText;
+  return `${plainText.slice(0, index)}${htmlText}${plainText.slice(index + flattenedHtml.length)}`;
+}
+
+function flattenPasteMarkdownToText(value: string) {
+  return value.replace(REFERENCE_MARKDOWN_LINK_PATTERN, (_match, label: string) => label);
 }
 
 export function splitComposerPasteContent(
@@ -182,18 +193,23 @@ export function splitComposerPasteContent(
         length: match[0].length,
         segment: { kind: "reference", label, href },
       });
+      continue;
     }
-  }
-
-  for (const link of findEmbeddedLinks(normalized)) {
-    if (matches.some((item) => rangesOverlap(item.index, item.length, link.index, link.length))) continue;
-    matches.push({
-      index: link.index,
-      length: link.length,
-      segment: link.kind === "message"
-        ? { kind: "message", id: link.id }
-        : { kind: "summary", id: link.id },
-    });
+    if (href.startsWith("group-chat://message/")) {
+      matches.push({
+        index,
+        length: match[0].length,
+        segment: { kind: "message", id: href.slice("group-chat://message/".length) },
+      });
+      continue;
+    }
+    if (href.startsWith("group-chat://summary/")) {
+      matches.push({
+        index,
+        length: match[0].length,
+        segment: { kind: "summary", id: href.slice("group-chat://summary/".length) },
+      });
+    }
   }
 
   matches.sort((left, right) => left.index - right.index || right.length - left.length);
@@ -214,10 +230,6 @@ export function splitComposerPasteContent(
   return segments.length ? segments : [{ kind: "text", text: normalized }];
 }
 
-function rangesOverlap(leftIndex: number, leftLength: number, rightIndex: number, rightLength: number) {
-  return leftIndex < rightIndex + rightLength && rightIndex < leftIndex + leftLength;
-}
-
 function splitPlainComposerText(
   text: string,
   context: ComposerPasteContext,
@@ -229,7 +241,7 @@ function splitPlainComposerText(
   let index = text.indexOf("@");
   while (index !== -1) {
     if (index > cursor) {
-      segments.push({ kind: "text", text: text.slice(cursor, index) });
+      appendTextPasteSegment(segments, text.slice(cursor, index));
     }
     const resolved = resolvePlainAtMentionAt(text, index, candidates);
     if (resolved) {
@@ -238,13 +250,24 @@ function splitPlainComposerText(
       index = text.indexOf("@", cursor);
       continue;
     }
+    appendTextPasteSegment(segments, "@");
     cursor = index + 1;
     index = text.indexOf("@", cursor);
   }
   if (cursor < text.length) {
-    segments.push({ kind: "text", text: text.slice(cursor) });
+    appendTextPasteSegment(segments, text.slice(cursor));
   }
   return segments.length ? segments : [{ kind: "text", text }];
+}
+
+function appendTextPasteSegment(segments: ComposerPasteSegment[], text: string) {
+  if (!text) return;
+  const previous = segments.at(-1);
+  if (previous?.kind === "text") {
+    previous.text += text;
+    return;
+  }
+  segments.push({ kind: "text", text });
 }
 
 type PlainAtCandidate =
@@ -348,6 +371,7 @@ export function buildReferencePasteTarget(href: string, label: string): {
     providerId,
     itemId: entityId,
     label: chipLabel,
+    ...(insertScope.iconUrl?.trim() ? { thumbnailUrl: insertScope.iconUrl.trim() } : {}),
     insert: {
       kind: "mention",
       entityId,

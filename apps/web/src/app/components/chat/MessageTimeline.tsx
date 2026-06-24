@@ -48,6 +48,8 @@ const COLLAPSED_MESSAGE_CHAR_LIMIT = 800;
 const COPY_TIP_OFFSET_PX = 8;
 const MESSAGE_GROUP_GAP_MS = MESSAGE_GROUP_IDLE_MS;
 const EMPTY_MESSAGE_BLOCKS: MessageBlock[] = [];
+const TIMELINE_LOAD_BEFORE_OVERSCAN_SCREENS = 1;
+const TIMELINE_LOAD_BEFORE_MIN_PX = 96;
 
 type CopyTipPosition = { x: number; y: number };
 type CopyMessageInput = { position: CopyTipPosition; anchorEl?: HTMLElement | null; menuCopy?: boolean };
@@ -63,6 +65,12 @@ export type AgentForwardTarget = {
 const MessageBodyCopyContext = createContext<((input: CopyMessageInput) => void) | null>(null);
 
 const MESSAGE_MORE_MENU_SELECTOR = '[data-slot="message-more-menu"]';
+type TimelineScrollPreserveMode = "absolute" | "prepend";
+type PendingTimelineScroll = {
+  mode: TimelineScrollPreserveMode;
+  scrollTop: number;
+  scrollHeight: number;
+};
 
 type CopyMessageScope =
   | { kind: "message" }
@@ -250,6 +258,9 @@ export function MessageTimeline(props: {
   participantsCount: number;
   focusMessageRequest: { messageId: string; artifactId?: string; seq: number } | null;
   scrollToBottomRequest: { seq: number } | null;
+  hasMoreBefore?: boolean;
+  loadingBefore?: boolean;
+  onLoadBefore?: () => void;
   bulkToolbarHost?: HTMLElement | null;
   onSelectionModeChange?: (active: boolean) => void;
   onOpenMembers: (options?: { startAdding?: boolean }) => void;
@@ -274,13 +285,13 @@ export function MessageTimeline(props: {
   userProfile: Pick<LocalUserProfile, "avatarPreset" | "customAvatarUrl" | "displayName">;
   onOpenUserProfile: (anchor: HTMLElement) => void;
   onViewThinking: (message: Message) => void;
-  onRegisterScrollPreserver?: (preserver: { capture: () => void } | null) => void;
+  onRegisterScrollPreserver?: (preserver: { capture: (mode?: TimelineScrollPreserveMode) => void } | null) => void;
 }) {
   useTranslation();
   const scrollRef = useRef<HTMLElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const copyTipTimerRef = useRef<number | null>(null);
-  const pendingScrollTopRef = useRef<number | null>(null);
+  const pendingScrollRef = useRef<PendingTimelineScroll | null>(null);
   const preserveTimelineScrollRef = useRef(false);
   const stickToBottomRef = useRef(true);
   const [detailReplyMessageId, setDetailReplyMessageId] = useState<string | null>(null);
@@ -382,9 +393,13 @@ export function MessageTimeline(props: {
     [props.blocks, props.messages],
   );
 
-  const captureTimelineScroll = useCallback(() => {
+  const captureTimelineScroll = useCallback((mode: TimelineScrollPreserveMode = "absolute") => {
     if (scrollRef.current) {
-      pendingScrollTopRef.current = scrollRef.current.scrollTop;
+      pendingScrollRef.current = {
+        mode,
+        scrollTop: scrollRef.current.scrollTop,
+        scrollHeight: scrollRef.current.scrollHeight,
+      };
       preserveTimelineScrollRef.current = true;
     }
   }, []);
@@ -395,9 +410,13 @@ export function MessageTimeline(props: {
   }, [props.onRegisterScrollPreserver, captureTimelineScroll]);
 
   useLayoutEffect(() => {
-    if (pendingScrollTopRef.current === null || !scrollRef.current) return;
-    restoreTimelineScroll(scrollRef.current, pendingScrollTopRef.current);
-    pendingScrollTopRef.current = null;
+    if (!pendingScrollRef.current || !scrollRef.current) return;
+    const pending = pendingScrollRef.current;
+    const nextScrollTop = pending.mode === "prepend"
+      ? pending.scrollTop + Math.max(0, scrollRef.current.scrollHeight - pending.scrollHeight)
+      : pending.scrollTop;
+    restoreTimelineScroll(scrollRef.current, nextScrollTop);
+    pendingScrollRef.current = null;
   });
 
   const mentionParticipantKeepingScroll = useCallback((participant: Participant) => {
@@ -438,6 +457,17 @@ export function MessageTimeline(props: {
     const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
     stickToBottomRef.current = distanceFromBottom < 48;
     setShowJumpToBottom(distanceFromBottom > element.clientHeight);
+  };
+
+  const handleTimelineScroll = () => {
+    updateJumpToBottomVisibility();
+    const element = scrollRef.current;
+    if (!element || !props.hasMoreBefore || props.loadingBefore) return;
+    const loadBeforeThreshold = Math.max(
+      TIMELINE_LOAD_BEFORE_MIN_PX,
+      element.clientHeight * TIMELINE_LOAD_BEFORE_OVERSCAN_SCREENS,
+    );
+    if (element.scrollTop <= loadBeforeThreshold) props.onLoadBefore?.();
   };
 
   const scrollToBottomInstant = useCallback(() => {
@@ -795,7 +825,7 @@ export function MessageTimeline(props: {
     <section
       ref={scrollRef}
       className={`[position:relative] [min-height:0] [overflow-y:auto] [background:var(--panel)] [padding:26px_18px_8px_14px] [&_article:last-of-type]:[margin-bottom:0] max-[1080px]:[padding-inline:14px_18px] max-[760px]:[padding:18px_18px_8px_14px]`}
-      onScroll={updateJumpToBottomVisibility}
+      onScroll={handleTimelineScroll}
     >
       {visibleMessages.length === 0 ? (
         <EmptyTimelineState
@@ -805,7 +835,17 @@ export function MessageTimeline(props: {
       ) : null}
       {visibleMessages.map((message) => {
         if (message.role === "system") {
-          return <SystemNoticeRow key={message.id} message={message} />;
+          return (
+            <SystemNoticeRow
+              key={message.id}
+              message={message}
+              artifacts={props.allArtifacts}
+              participants={props.allParticipants}
+              runtimeProfiles={props.runtimeProfiles}
+              onOpenArtifact={handleOpenArtifact}
+              onOpenAgentProfile={props.onOpenAgentProfile}
+            />
+          );
         }
         const groupLayout = messageGroupLayout.get(message.id) ?? { showHeader: true, isLastInGroup: true };
         return (
@@ -1223,18 +1263,35 @@ function WhisperMessageFooter(props: { label: string }) {
   );
 }
 
-function SystemNoticeRow(props: { message: Message }) {
+function SystemNoticeRow(props: {
+  message: Message;
+  artifacts: Artifact[];
+  participants: Participant[];
+  runtimeProfiles: RuntimeProfile[];
+  onOpenArtifact: (artifact: Artifact) => void;
+  onOpenAgentProfile: (participant: Participant) => void;
+}) {
   if (props.message.status === "deleted" || props.message.status === "recalled") return null;
   const text = props.message.content.trim();
   if (!text) return null;
+  const translated = translateSystemNotice(text);
   return (
     <div
       data-message-id={props.message.id}
       data-role="system"
       className={"[display:flex] [justify-content:center] [margin:6px_0_14px] [padding:0_20px]"}
     >
-      <span className={"[inline-flex] [max-width:min(560px,_100%)] [align-items:center] [justify-content:center] [border-radius:999px] [padding:4px_12px] [color:var(--muted)] [background:#00000008] [font-size:12px] [line-height:18px] [text-align:center]"}>
-        {translateSystemNotice(text)}
+      <span className={`[inline-flex] [max-width:min(560px,_100%)] [align-items:center] [justify-content:center] [border-radius:999px] [padding:4px_12px] [background:#00000008] [font-size:12px] [line-height:18px] [text-align:center] ${props.message.status === "error" ? "[color:#dc2626]" : "[color:var(--muted)]"}`}>
+        <MessageReferenceContent
+          content={translated}
+          mentions={props.message.mentions}
+          artifacts={props.artifacts}
+          participants={props.participants}
+          runtimeProfiles={props.runtimeProfiles}
+          onOpenArtifact={props.onOpenArtifact}
+          onOpenAgentProfile={props.onOpenAgentProfile}
+          tightSpacing
+        />
       </span>
     </div>
   );
@@ -2916,26 +2973,41 @@ function RuntimeEventGroup(props: { blocks: MessageBlock[]; artifacts: Artifact[
 }
 
 const MESSAGE_ACTION_BAR_GAP_PX = 4;
-const MESSAGE_ACTION_ANCHOR_SELECTOR = '[data-message-action-anchor], [data-slot="message-block"], [data-slot="artifact-block"]';
+const MESSAGE_ACTION_ANCHOR_SELECTOR = "[data-message-action-anchor]";
+const MESSAGE_BUBBLE_ANCHOR_SELECTOR = '[data-slot="message-block"], [data-slot="artifact-block"][data-artifact-id]';
+const MESSAGE_CONTEXT_ARTIFACT_SELECTOR = '[data-slot="artifact-block"][data-artifact-id]';
 
 type MessageBubbleAnchor = { top: number; left: number; width: number; height: number };
 
 function resolveDefaultMessageActionAnchor(body: HTMLElement): HTMLElement | null {
-  const anchors = body.querySelectorAll(MESSAGE_ACTION_ANCHOR_SELECTOR);
-  for (let index = anchors.length - 1; index >= 0; index -= 1) {
-    const candidate = anchors.item(index);
+  const explicitAnchors = body.querySelectorAll(MESSAGE_ACTION_ANCHOR_SELECTOR);
+  for (let index = explicitAnchors.length - 1; index >= 0; index -= 1) {
+    const candidate = explicitAnchors.item(index);
     if (candidate instanceof HTMLElement && candidate.hasAttribute("data-message-action-anchor")) {
       return candidate;
     }
   }
-  for (let index = anchors.length - 1; index >= 0; index -= 1) {
+
+  const anchors = body.querySelectorAll(MESSAGE_BUBBLE_ANCHOR_SELECTOR);
+  for (let index = 0; index < anchors.length; index += 1) {
     const candidate = anchors.item(index);
-    if (candidate instanceof HTMLElement && candidate.dataset.slot === "artifact-block") {
+    if (!(candidate instanceof HTMLElement)) continue;
+    if (candidate.parentElement?.closest(MESSAGE_BUBBLE_ANCHOR_SELECTOR)) continue;
+    if (candidate.dataset.slot === "message-block") {
       return candidate;
     }
   }
-  const fallback = anchors.item(anchors.length - 1);
-  return fallback instanceof HTMLElement ? fallback : null;
+
+  for (let index = 0; index < anchors.length; index += 1) {
+    const candidate = anchors.item(index);
+    if (!(candidate instanceof HTMLElement)) continue;
+    if (candidate.parentElement?.closest(MESSAGE_BUBBLE_ANCHOR_SELECTOR)) continue;
+    if (candidate.dataset.slot === "artifact-block") {
+      return candidate;
+    }
+  }
+
+  return body;
 }
 
 function measureMessageBubbleAnchor(body: HTMLElement, preferredAnchor?: HTMLElement | null): MessageBubbleAnchor | null {
@@ -3000,6 +3072,7 @@ function MessageBodyShell(props: {
   const bodyRef = useRef<HTMLDivElement>(null);
 
   const rememberActionAnchor = useCallback((block: HTMLElement | null) => {
+    if (actionAnchorElRef.current === block) return;
     actionAnchorElRef.current = block;
     if (block) lastActionAnchorRef.current = block;
     setActionAnchorEl(block);
@@ -3018,6 +3091,15 @@ function MessageBodyShell(props: {
     delete body.dataset.contextCopyArtifactId;
   }, []);
 
+  const syncContextCopyArtifactIdFromTarget = useCallback((target: EventTarget | null) => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const artifactBlock = target instanceof Element
+      ? target.closest(MESSAGE_CONTEXT_ARTIFACT_SELECTOR)
+      : null;
+    syncContextCopyArtifactId(artifactBlock instanceof HTMLElement && body.contains(artifactBlock) ? artifactBlock : null);
+  }, [syncContextCopyArtifactId]);
+
   const resolveCopyAnchor = useCallback((input?: Pick<CopyMessageInput, "menuCopy">): HTMLElement | null => {
     const body = bodyRef.current;
     const layoutAnchor = copyAnchorFromLayoutRef.current;
@@ -3026,9 +3108,6 @@ function MessageBodyShell(props: {
       if (!input?.menuCopy) return layoutAnchor;
     }
 
-    const hoverAnchor = actionAnchorElRef.current ?? lastActionAnchorRef.current;
-    if (hoverAnchor) return hoverAnchor;
-
     if (input?.menuCopy && body) {
       const contextArtifactId = body.dataset.contextCopyArtifactId?.trim();
       if (contextArtifactId) {
@@ -3036,6 +3115,9 @@ function MessageBodyShell(props: {
         if (contextBlock instanceof HTMLElement) return contextBlock;
       }
     }
+
+    const hoverAnchor = actionAnchorElRef.current ?? lastActionAnchorRef.current;
+    if (hoverAnchor) return hoverAnchor;
 
     return body ? resolveDefaultMessageActionAnchor(body) : null;
   }, []);
@@ -3054,16 +3136,30 @@ function MessageBodyShell(props: {
       ?? actionAnchorEl
       ?? resolveDefaultMessageActionAnchor(body);
     copyAnchorFromLayoutRef.current = anchor instanceof HTMLElement ? anchor : null;
-    setBubbleAnchor(measureMessageBubbleAnchor(body, anchor));
+    const nextAnchor = measureMessageBubbleAnchor(body, anchor);
+    setBubbleAnchor((current) => {
+      if (
+        current
+        && nextAnchor
+        && Math.abs(current.top - nextAnchor.top) < 0.5
+        && Math.abs(current.left - nextAnchor.left) < 0.5
+        && Math.abs(current.width - nextAnchor.width) < 0.5
+        && Math.abs(current.height - nextAnchor.height) < 0.5
+      ) {
+        return current;
+      }
+      if (!current && !nextAnchor) return current;
+      return nextAnchor;
+    });
   }, [actionAnchorEl]);
 
-  const syncActionAnchorFromTarget = useCallback((target: EventTarget | null) => {
-    const block = target instanceof Element ? target.closest(MESSAGE_ACTION_ANCHOR_SELECTOR) : null;
-    if (!(block instanceof HTMLElement) || !bodyRef.current?.contains(block)) return;
-    if (actionAnchorElRef.current === block) return;
+  const syncActionAnchorFromBody = useCallback(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const block = resolveDefaultMessageActionAnchor(body);
+    if (!(block instanceof HTMLElement) || actionAnchorElRef.current === block) return;
     rememberActionAnchor(block);
-    syncContextCopyArtifactId(block);
-  }, [rememberActionAnchor, syncContextCopyArtifactId]);
+  }, [rememberActionAnchor]);
 
   const leaveMessageBody = useCallback((relatedTarget: EventTarget | null) => {
     if (relatedTarget instanceof Node) {
@@ -3094,7 +3190,7 @@ function MessageBodyShell(props: {
 
     const observer = new ResizeObserver(() => updateBubbleAnchor());
     observer.observe(body);
-    for (const anchor of body.querySelectorAll(MESSAGE_ACTION_ANCHOR_SELECTOR)) {
+    for (const anchor of body.querySelectorAll(MESSAGE_BUBBLE_ANCHOR_SELECTOR)) {
       if (anchor instanceof HTMLElement) observer.observe(anchor);
     }
 
@@ -3112,9 +3208,11 @@ function MessageBodyShell(props: {
       ref={bodyRef}
       data-slot="message-body"
       className={"group/body [user-select:none] [position:relative] [min-width:0] [max-width:min(760px,_70%)] [overflow:visible] max-[1080px]:[max-width:min(720px,_86%)] max-[760px]:[max-width:88%]"}
-      onMouseEnter={props.onShowActions}
+      onMouseEnter={() => {
+        syncActionAnchorFromBody();
+        props.onShowActions();
+      }}
       onMouseLeave={(event) => leaveMessageBody(event.relatedTarget)}
-      onMouseMove={(event) => syncActionAnchorFromTarget(event.target)}
       onFocusCapture={props.onShowActions}
       onBlurCapture={(event) => {
         if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
@@ -3124,8 +3222,8 @@ function MessageBodyShell(props: {
         if (props.selectionMode || props.disabled) return;
         event.preventDefault();
         event.stopPropagation();
-        syncActionAnchorFromTarget(event.target);
-        syncContextCopyArtifactId(actionAnchorElRef.current ?? lastActionAnchorRef.current);
+        syncActionAnchorFromBody();
+        syncContextCopyArtifactIdFromTarget(event.target);
         props.onShowActions();
         requestAnimationFrame(openMenuFromBody);
       }}

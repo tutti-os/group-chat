@@ -534,6 +534,16 @@ export interface ChatSnapshot {
   lastSeq: number;
 }
 
+export interface ConversationMessagesPage {
+  conversationId: Id;
+  messages: Message[];
+  messageBlocks: MessageBlock[];
+  artifacts: Artifact[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  limit: number;
+}
+
 export interface CreateRoomRequest {
   title?: string;
   description?: string;

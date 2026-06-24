@@ -280,7 +280,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       const input = buildLocalAgentInput(context);
       const prompt = acpPromptFromLocalAgentInput(input);
       const timeoutMs = localAgentTimeoutMs();
-      let resume = previousSession?.provider === provider && (previousSession.providerSessionId || previousSession.resumeToken)
+      let resume = !input.turn.intent && previousSession?.provider === provider && (previousSession.providerSessionId || previousSession.resumeToken)
         ? {
             mode: "provider" as const,
             ...(previousSession.providerSessionId ? { providerSessionId: previousSession.providerSessionId } : {}),
