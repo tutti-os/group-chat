@@ -1,5 +1,6 @@
 import type { AppReferenceListResponse, Artifact, TuttiAtProviderId, TuttiReferenceInsert } from "@group-chat/shared";
 import { TUTTI_AT_PROVIDER_IDS } from "@group-chat/shared";
+import type { RichTextTriggerInsertResult } from "@tutti-os/ui-rich-text/types";
 import { resolveArtifactPublicUrl } from "./artifact-actions.js";
 import { listAppReferences } from "../api/client.js";
 
@@ -257,6 +258,22 @@ function sortTuttiAtMentionResults(
     return [...sortRoomFileMentionsByRecency(roomFiles, roomArtifacts), ...others];
   }
   return [...results].sort((left, right) => scoreTuttiAtMentionMatch(right, query) - scoreTuttiAtMentionMatch(left, query));
+}
+
+export function tuttiReferenceInsertToRichTextInsertResult(
+  insert: TuttiReferenceInsert,
+): RichTextTriggerInsertResult {
+  if (insert.kind === "mention") {
+    return {
+      kind: "mention",
+      mention: {
+        entityId: insert.entityId,
+        label: insert.label,
+        scope: insert.scope,
+      },
+    };
+  }
+  return insert;
 }
 
 function parseArtifactCreatedAtMs(createdAt: string) {

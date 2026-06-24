@@ -68,6 +68,8 @@
   "composer.stopResponses": "停止回复",
   "composer.attachFiles": "添加附件",
   "composer.mentionSuggestions": "提及建议",
+  "composer.mentionSwitchCategory": "切换分类",
+  "composer.mentionSwitchSelection": "切换选中",
   "composer.pendingAttachments": "待发送附件",
   "composer.cancelEdit": "取消编辑",
   "composer.input": "消息输入框",

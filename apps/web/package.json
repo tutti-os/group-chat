@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@group-chat/shared": "workspace:*",
+    "@tutti-os/ui-rich-text": "file:/tmp/ui-rich-text-dist-link",
     "@vitejs/plugin-react": "^5.1.1",
     "lucide-react": "^0.562.0",
     "react": "^19.2.3",

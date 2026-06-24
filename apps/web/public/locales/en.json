@@ -68,6 +68,8 @@
   "composer.stopResponses": "Stop responses",
   "composer.attachFiles": "Attach files",
   "composer.mentionSuggestions": "Mention suggestions",
+  "composer.mentionSwitchCategory": "Switch category",
+  "composer.mentionSwitchSelection": "Switch selection",
   "composer.pendingAttachments": "Pending attachments",
   "composer.cancelEdit": "Cancel edit",
   "composer.input": "Message input",

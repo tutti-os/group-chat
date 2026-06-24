@@ -38,7 +38,11 @@ export function AgentAvatar(props: {
         style={{ width: badgeSize, height: badgeSize }}
         aria-hidden
       >
-        <Bot size={iconSize} strokeWidth={2} />
+        <Bot
+          className={size <= 34 ? "size-[9px]" : "size-2.5"}
+          size={iconSize}
+          strokeWidth={2}
+        />
       </span>
     </span>
   );
