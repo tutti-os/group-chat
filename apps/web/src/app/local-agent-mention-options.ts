@@ -37,9 +37,11 @@ export function buildLocalAgentLauncherReference(option: LocalAgentMentionOption
       subtitle: option.subtitle,
       insert: {
         kind: "mention",
-        entityId: appId,
-        label: option.label,
-        scope,
+        mention: {
+          entityId: appId,
+          label: option.label,
+          scope,
+        },
       },
     };
   }
@@ -51,9 +53,11 @@ export function buildLocalAgentLauncherReference(option: LocalAgentMentionOption
     subtitle: option.subtitle,
     insert: {
       kind: "mention",
-      entityId: option.runtimeProfile.id,
-      label: option.label,
-      scope: { provider: option.runtimeProfile.provider },
+      mention: {
+        entityId: option.runtimeProfile.id,
+        label: option.label,
+        scope: { provider: option.runtimeProfile.provider },
+      },
     },
   };
 }

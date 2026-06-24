@@ -25,8 +25,8 @@ function escapeRegExp(value: string) {
 function resolveReferenceScope(
   mention: Pick<MentionTarget, "referenceScope" | "referenceInsert">,
 ): WorkspaceScope | undefined {
-  if (mention.referenceInsert?.kind === "mention" && mention.referenceInsert.scope) {
-    return mention.referenceInsert.scope;
+  if (mention.referenceInsert?.kind === "mention" && mention.referenceInsert.mention.scope) {
+    return mention.referenceInsert.mention.scope;
   }
   return mention.referenceScope;
 }
@@ -107,9 +107,11 @@ function buildIssueMentionTarget(
     referenceInsert: scope
       ? {
           kind: "mention",
-          entityId: issueId,
-          label: title,
-          scope,
+          mention: {
+            entityId: issueId,
+            label: title,
+            scope,
+          },
         }
       : undefined,
   };
@@ -279,7 +281,14 @@ function parseReferenceMentionsFromContent(content: string): MentionTarget[] {
           referenceEntityId: entityId,
           referenceScope: Object.keys(scope).length ? scope : undefined,
           referenceInsert: Object.keys(scope).length
-            ? { kind: "mention", entityId, label, scope }
+            ? {
+                kind: "mention",
+                mention: {
+                  entityId,
+                  label,
+                  scope,
+                },
+              }
             : undefined,
         });
       } catch {

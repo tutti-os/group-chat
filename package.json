@@ -28,5 +28,12 @@
     "esbuild": "^0.28.0",
     "typescript": "^5.9.3"
   },
+  "pnpm": {
+    "overrides": {
+      "@tutti-os/ui-i18n-runtime@0.1.0": "file:/tmp/group-chat-local-pack/tutti-os-ui-i18n-runtime-0.1.0.tgz",
+      "@tutti-os/ui-rich-text": "file:/tmp/group-chat-local-pack/tutti-os-ui-rich-text-0.1.0.tgz",
+      "@tutti-os/ui-system@0.1.0": "file:/tmp/group-chat-local-pack/tutti-os-ui-system-0.1.0.tgz"
+    }
+  },
   "packageManager": "pnpm@10.11.0"
 }

@@ -30,7 +30,6 @@ import {
 } from "../../mention-panel-tabs.js";
 import {
   tuttiAtMentionKey,
-  tuttiReferenceInsertToRichTextInsertResult,
   type TuttiAtQueryResult,
 } from "../../tutti-at-mentions.js";
 import { getRuntimeProviderAvatarStyle, resolveAgentAvatarFromContext } from "../../identity-avatar.js";
@@ -292,7 +291,7 @@ function referenceResultToMentionMatch(item: TuttiAtQueryResult): ComposerMentio
     subtitle: item.subtitle,
     iconUrl: item.roomFile?.previewUrl ?? item.thumbnailUrl ?? undefined,
     item,
-    insertResult: tuttiReferenceInsertToRichTextInsertResult(item.insert),
+    insertResult: item.insert,
   };
 }
 

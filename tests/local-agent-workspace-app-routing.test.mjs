@@ -192,9 +192,11 @@ test("workspace app mentions keep structured context for the mentioned agent", a
               referenceScope: { workspaceId: "ws-1" },
               referenceInsert: {
                 kind: "mention",
-                entityId: "vibe-design",
-                label: "Vibe Design",
-                scope: { workspaceId: "ws-1" },
+                mention: {
+                  entityId: "vibe-design",
+                  label: "Vibe Design",
+                  scope: { workspaceId: "ws-1" },
+                },
               },
             },
             {

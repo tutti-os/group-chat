@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Ear, Paperclip, Send, Square, X } from "lucide-react";
 import { makeAtPanelKeyDown } from "@tutti-os/ui-rich-text/at-panel";
 import type { AgentRun, Artifact, Conversation, Identity, LocalAgentProviderStatus, MentionTarget, Message, MessageBlock, Participant, Room, RuntimeProfile, TuttiAtProviderId } from "@group-chat/shared";
-import { resolveArtifactLinkedMessageId } from "@group-chat/shared";
+import { resolveArtifactLinkedMessageId, sanitizeMentionTargetForAgentContext } from "@group-chat/shared";
 import { cancelRun, sendMessage, updateMessage, uploadArtifact } from "../../../api/client.js";
 import { getArtifactCategory, revealArtifactInTuttiFileManager, resolveArtifactPublicUrl } from "../../artifact-actions.js";
 import { formatBytes, formatMessageTime } from "../../formatting.js";
@@ -965,7 +965,7 @@ export function Composer(props: {
         try {
           referenceInsert = JSON.parse(element.dataset.mentionReferenceInsert) as MentionTarget["referenceInsert"];
           if (referenceInsert?.kind === "mention") {
-            referenceScope = referenceInsert.scope;
+            referenceScope = referenceInsert.mention.scope;
           }
         } catch {
           referenceInsert = undefined;
@@ -2807,10 +2807,9 @@ function collectMentionTargetsFromEditor(editor: HTMLDivElement | null, particip
         }
       }
       const referenceScope = {
-        ...(referenceInsert?.kind === "mention" ? referenceInsert.scope : {}),
-        ...(element.dataset.mentionIconUrl?.trim() ? { iconUrl: element.dataset.mentionIconUrl.trim() } : {}),
+        ...(referenceInsert?.kind === "mention" ? referenceInsert.mention.scope : {}),
       };
-      mentions.push({
+      mentions.push(sanitizeMentionTargetForAgentContext({
         participantId: mentionId,
         displayNameSnapshot: label,
         mentionType: "reference",
@@ -2818,7 +2817,7 @@ function collectMentionTargetsFromEditor(editor: HTMLDivElement | null, particip
         referenceEntityId: parsedReference?.itemId,
         referenceInsert,
         ...(Object.keys(referenceScope).length ? { referenceScope } : {}),
-      });
+      }));
       continue;
     }
     const participant = byId.get(mentionId);
@@ -2872,7 +2871,7 @@ function isStyledReferenceMention(reference: TuttiAtQueryResult) {
 function referenceLinkHref(reference: TuttiAtQueryResult) {
   if (reference.insert.kind === "markdown-link") return reference.insert.href;
   if (reference.insert.kind === "text") return reference.insert.text;
-  if (reference.insert.kind === "mention") return reference.insert.entityId;
+  if (reference.insert.kind === "mention") return reference.insert.mention.entityId;
   return reference.itemId;
 }
 
@@ -2882,7 +2881,7 @@ function tuttiMentionUrl(reference: TuttiAtQueryResult) {
   }
   return buildTuttiMentionHref(reference.providerId, reference.itemId, {
     referenceInsert: reference.insert,
-    referenceScope: reference.insert.kind === "mention" ? reference.insert.scope : undefined,
+    referenceScope: reference.insert.kind === "mention" ? reference.insert.mention.scope : undefined,
   });
 }
 

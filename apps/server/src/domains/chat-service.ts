@@ -28,6 +28,7 @@ import {
   type ReplyMode,
   type RuntimeProfile,
   resolveMentionSpeakingOrder,
+  sanitizeMentionTargetForAgentContext,
   stripAssistantSkillDetails,
 } from "@group-chat/shared";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -821,7 +822,7 @@ export class ChatService {
     return mentions
       .map((mention) => {
         if (mention.mentionType === "reference") {
-          return {
+          return sanitizeMentionTargetForAgentContext({
             participantId: mention.participantId,
             displayNameSnapshot: mention.displayNameSnapshot,
             mentionType: mention.mentionType,
@@ -829,7 +830,7 @@ export class ChatService {
             referenceEntityId: mention.referenceEntityId,
             referenceScope: mention.referenceScope,
             referenceInsert: mention.referenceInsert,
-          };
+          });
         }
         if (mention.mentionType === "all") {
           return {

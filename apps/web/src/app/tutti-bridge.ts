@@ -1,13 +1,10 @@
 import type { Artifact, TuttiAtProviderId, TuttiReferenceInsert } from "@group-chat/shared";
+import type {
+  TuttiExternalAtQueryInput,
+  TuttiExternalAtQueryResult
+} from "@tutti-os/workspace-external-core/contracts";
 
-export interface TuttiAtQueryResult {
-  providerId: TuttiAtProviderId;
-  itemId: string;
-  label: string;
-  subtitle?: string;
-  thumbnailUrl?: string | null;
-  insert: TuttiReferenceInsert;
-}
+export type TuttiAtQueryResult = TuttiExternalAtQueryResult;
 
 export interface TuttiWorkspaceAppOpenFileRequest {
   mode?: "auto" | "preview" | "reveal";
@@ -57,11 +54,7 @@ declare global {
         subscribe(listener: (context: unknown) => void): () => void;
       };
       at?: {
-        query(input: {
-          keyword: string;
-          maxResults?: number;
-          providers?: readonly TuttiAtProviderId[];
-        }): Promise<readonly TuttiAtQueryResult[]>;
+        query(input: TuttiExternalAtQueryInput): Promise<readonly TuttiExternalAtQueryResult[]>;
       };
       files?: {
         open(input: TuttiWorkspaceAppOpenFileRequest): Promise<void>;
@@ -195,8 +188,8 @@ export function resolveReferenceMentionScope(
   referenceInsert?: TuttiReferenceInsert,
   referenceScope?: Readonly<Record<string, string>>,
 ) {
-  if (referenceInsert?.kind === "mention" && referenceInsert.scope) {
-    return referenceInsert.scope;
+  if (referenceInsert?.kind === "mention" && referenceInsert.mention.scope) {
+    return referenceInsert.mention.scope;
   }
   return referenceScope;
 }

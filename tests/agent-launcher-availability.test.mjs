@@ -28,7 +28,10 @@ test("keeps the latest Dock agent list available synchronously after reload", as
           providerId: "workspace-app",
           itemId: "agent-codex",
           label: "Codex",
-          insert: { kind: "mention", entityId: "agent-codex", label: "Codex" },
+          insert: {
+            kind: "mention",
+            mention: { entityId: "agent-codex", label: "Codex" },
+          },
         }],
       },
     },
