@@ -82,6 +82,33 @@ test("mention target agent context drops presentation-only scope fields", async 
   });
 });
 
+test("mention target agent context drops non-mention inserts", async () => {
+  const { sanitizeMentionTargetForAgentContext } = await loadSharedModule();
+
+  assert.deepEqual(
+    sanitizeMentionTargetForAgentContext(
+      referenceMention({
+        referenceInsert: {
+          kind: "markdown-link",
+          href: "data:text/plain;base64,bad",
+          text: "Automation",
+        },
+      }),
+    ),
+    {
+      participantId: "tutti-at:workspace-app:automation",
+      displayNameSnapshot: "Automation",
+      mentionType: "reference",
+      referenceProviderId: "workspace-app",
+      referenceEntityId: "automation",
+      referenceScope: {
+        topicId: "topic-1",
+        workspaceId: "ws-1",
+      },
+    },
+  );
+});
+
 test("local agent prompt serializes sanitized mention context", async () => {
   const { acpPromptFromLocalAgentInput } = await loadAcpModule();
   const hugeIcon = `data:image/png;base64,${"a".repeat(500_000)}`;

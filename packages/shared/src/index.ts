@@ -448,7 +448,7 @@ function sanitizeReferenceInsertForAgentContext(
 ): Pick<MentionTarget, "referenceInsert"> {
   if (!insert) return {};
   if (insert.kind !== "mention") {
-    return { referenceInsert: insert };
+    return {};
   }
   if (!insert.mention) return {};
   const entityId = insert.mention.entityId.trim();

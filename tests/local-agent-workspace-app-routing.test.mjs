@@ -70,12 +70,14 @@ test("workspace app and agent mentions produce a clean intent prompt", async () 
                 referenceProviderId: "workspace-app",
                 referenceEntityId: "vibe-design",
                 displayNameSnapshot: "Vibe Design",
-                referenceScope: { workspaceId: "ws-1" },
+                referenceScope: { workspaceId: "ws-1", iconUrl: "data:image/png;base64,bad" },
                 referenceInsert: {
                   kind: "mention",
-                  entityId: "vibe-design",
-                  label: "Vibe Design",
-                  scope: { workspaceId: "ws-1" },
+                  mention: {
+                    entityId: "vibe-design",
+                    label: "Vibe Design",
+                    scope: { workspaceId: "ws-1", iconUrl: "data:image/png;base64,bad" },
+                  },
                 },
               },
               {
@@ -99,8 +101,10 @@ test("workspace app and agent mentions produce a clean intent prompt", async () 
         const input = buildLocalAgentInput(context);
         assert.equal(input.turn.intent.requestText, "你去做一个音乐网站");
         assert.equal(input.turn.intent.workspaceApps[0].appId, "vibe-design");
+        assert.deepEqual(input.turn.intent.workspaceApps[0].scope, { workspaceId: "ws-1" });
         const prompt = acpPromptFromLocalAgentInput(input);
         assert.match(prompt, /<intent>/);
+        assert.equal(prompt.includes("data:image/png;base64"), false);
         assert.match(prompt, /request_text: 你去做一个音乐网站/);
         assert.match(prompt, /The Group Chat host invokes directly supported workspace app\\(s\\) when possible/);
         assert.match(prompt, /Do not treat the app label as a generic design keyword, Figma document, shell command, or MCP server name/);
