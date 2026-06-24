@@ -2,6 +2,8 @@ import { Info, RefreshCw, Terminal } from "lucide-react";
 import type { LocalAgentProviderStatus, ReasoningEffort, RuntimeProfile } from "@group-chat/shared";
 import { t, useTranslation } from "./i18n/index.js";
 
+const DEFAULT_LOCAL_AGENT_MODEL_ID = "default";
+
 export function defaultIdentityNameForRuntime(
   profile: RuntimeProfile | null,
   localAgentProviders: LocalAgentProviderStatus[] = [],
@@ -54,12 +56,25 @@ export function listRuntimeModels(
   localAgentProviders: LocalAgentProviderStatus[],
 ) {
   if (!profile) return [];
-  const detected = localAgentStatus(profile, localAgentProviders)?.models ?? [];
+  const rawDetected = localAgentStatus(profile, localAgentProviders)?.models ?? [];
+  const detected = rawDetected.length > 1
+    ? rawDetected.filter((model) => !isDefaultModelOptionId(model.id))
+    : rawDetected;
   if (detected.length) {
-    if (!profile.model || detected.some((model) => model.id === profile.model)) return detected;
-    return [{ id: profile.model, label: profile.model }, ...detected];
+    const normalizedProfileModel = normalizeRuntimeModelId(profile, profile.model);
+    if (isDefaultLocalAgentModelId(profile, profile.model)) return detected;
+    if (!normalizedProfileModel || detected.some((model) => model.id === normalizedProfileModel)) return detected;
+    return [{ id: normalizedProfileModel, label: normalizedProfileModel }, ...detected];
   }
-  if (profile.model) return [{ id: profile.model, label: profile.model }];
+  const normalizedProfileModel = normalizeRuntimeModelId(profile, profile.model);
+  if (normalizedProfileModel) {
+    return [{
+      id: normalizedProfileModel,
+      label: isDefaultLocalAgentModelId(profile, profile.model)
+        ? t("runtime.defaultCliModel")
+        : normalizedProfileModel,
+    }];
+  }
   return [];
 }
 
@@ -69,9 +84,24 @@ export function preferredRuntimeModelId(
 ) {
   const options = listRuntimeModels(profile, localAgentProviders);
   const provider = localAgentStatus(profile, localAgentProviders);
-  const preferred = provider?.defaultModelId ?? profile?.model ?? "";
+  const preferred = normalizeRuntimeModelId(profile, provider?.defaultModelId ?? profile?.model ?? "");
   if (preferred && options.some((option) => option.id === preferred)) return preferred;
   return options[0]?.id ?? "";
+}
+
+export function normalizeRuntimeModelId(profile: RuntimeProfile | null, modelId: string | null | undefined) {
+  const trimmed = modelId?.trim() ?? "";
+  if (!trimmed) return "";
+  return isDefaultLocalAgentModelId(profile, trimmed) ? DEFAULT_LOCAL_AGENT_MODEL_ID : trimmed;
+}
+
+function isDefaultLocalAgentModelId(profile: RuntimeProfile | null, modelId: string | null | undefined) {
+  if (!profile || profile.kind !== "local-agent") return false;
+  return modelId === `${profile.provider}:default`;
+}
+
+function isDefaultModelOptionId(modelId: string | null | undefined) {
+  return modelId?.trim().toLowerCase() === DEFAULT_LOCAL_AGENT_MODEL_ID;
 }
 
 export function listRuntimeReasoningOptions(

@@ -144,9 +144,15 @@ export function mergeBackgroundTask(current: BackgroundTask, snapshot: PrivateTa
     : snapshot.sourceMessageId
       ? [snapshot.sourceMessageId]
       : current.sourceMessageIds;
+  const snapshotContent = snapshot.content ?? "";
+  const hasSnapshotContent = snapshotContent.trim().length > 0;
+  const content = hasSnapshotContent || snapshot.status === "running"
+    ? snapshotContent
+    : current.content || snapshotContent;
   return {
     ...current,
     ...snapshot,
+    content,
     sourceMessageIds,
     panelOpen: current.panelOpen,
     sourceMessage: current.sourceMessage,

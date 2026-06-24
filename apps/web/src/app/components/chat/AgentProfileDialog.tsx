@@ -270,6 +270,7 @@ function createDraftParticipant(
     listenMode: identity.defaultListenMode ?? DEFAULT_PARTICIPANT_LISTEN_MODE,
     sortOrder: 0,
     reasoningEffort: identity.defaultReasoningEffort,
+    speedMode: identity.defaultSpeedMode,
     createdAt: now,
     updatedAt: now,
   };

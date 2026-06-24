@@ -106,7 +106,7 @@ function sameLocalAgentProviders(left: LocalAgentProviderStatus[], right: LocalA
 export type ComposerRequest =
   | { type: "insert"; seq: number; content: string }
   | { type: "insertSummaryLink"; seq: number; taskId: string }
-  | { type: "quote"; seq: number; quote: ComposerQuote }
+  | { type: "quote"; seq: number; quote: ComposerQuote; mentionParticipant?: ComposerMentionParticipant }
   | { type: "quotes"; seq: number; quotes: ComposerQuote[] }
   | { type: "edit"; seq: number; messageId: string; content: string; mentions: Message["mentions"]; blocks: MessageBlock[] };
 
@@ -114,6 +114,11 @@ export interface ComposerQuote {
   messageId: string;
   sender: string;
   content: string;
+}
+
+export interface ComposerMentionParticipant {
+  id: string;
+  displayName: string;
 }
 
 function toChatSnapshot(state: AppState): ChatSnapshot {
@@ -977,19 +982,24 @@ export function App() {
     setOpenMessageLinkSegment(null);
   };
 
-  const ensureBackgroundTask = useCallback(async (taskId: string) => {
+  const ensureBackgroundTask = useCallback(async (taskId: string, options: { refresh?: boolean } = {}) => {
     const existing = backgroundTasks.find((task) => task.id === taskId);
-    if (existing) return existing;
+    if (existing && !options.refresh) return existing;
     try {
       const { task } = await getPrivateTask(taskId);
-      let nextTask: BackgroundTask | null = null;
+      const nextTask = enrichBackgroundTask(task, {
+        messages: state.messages,
+        participants: state.participants,
+      }, existing);
       setBackgroundTasks((current) => {
         const currentTask = current.find((item) => item.id === taskId);
-        nextTask = enrichBackgroundTask(task, {
-          messages: state.messages,
-          participants: state.participants,
-        }, currentTask);
-        return [...current.filter((item) => item.id !== taskId), nextTask!];
+        const enriched = currentTask === existing
+          ? nextTask
+          : enrichBackgroundTask(task, {
+              messages: state.messages,
+              participants: state.participants,
+            }, currentTask);
+        return [...current.filter((item) => item.id !== taskId), enriched];
       });
       return nextTask;
     } catch {
@@ -1026,7 +1036,7 @@ export function App() {
   }, [state.ready, dismissedBackgroundTaskIds, state.messages, state.participants]);
 
   const openSummaryLink = useCallback(async (taskId: string) => {
-    const task = await ensureBackgroundTask(taskId);
+    const task = await ensureBackgroundTask(taskId, { refresh: true });
     if (!task) {
       window.alert(t("app.summaryTaskMissing"));
       return;
@@ -1182,10 +1192,17 @@ export function App() {
           content: message.content.trim() || attachmentLabel(),
         }));
       if (quotes.length === 1) {
+        const sourceMessage = messages.find((message) => message.id === quotes[0]!.messageId);
+        const mentionParticipant = sourceMessage?.senderParticipantId
+          ? state.participants.find((participant) => participant.id === sourceMessage.senderParticipantId)
+          : null;
         setComposerRequest((current) => ({
           seq: (current?.seq ?? 0) + 1,
           type: "quote",
           quote: quotes[0]!,
+          ...(mentionParticipant
+            ? { mentionParticipant: { id: mentionParticipant.id, displayName: mentionParticipant.displayName } }
+            : {}),
         }));
         return;
       }

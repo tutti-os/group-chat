@@ -45,6 +45,7 @@ export function buildAgentInstructions(input: AgentInstructionInput) {
     input.participant.runtimeProfileId ? `- Runtime profile: ${input.participant.runtimeProfileId}` : null,
     `- Listen mode: ${input.participant.listenMode}`,
     input.participant.reasoningEffort ? `- Reasoning effort: ${input.participant.reasoningEffort}` : null,
+    input.participant.speedMode ? `- Speed mode: ${input.participant.speedMode}` : null,
     roomOverride ? "" : null,
     roomOverride
       ? "This participant uses a room-specific role description that overrides the global identity defaults in this room only."

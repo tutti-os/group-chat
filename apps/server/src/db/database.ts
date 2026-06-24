@@ -66,6 +66,7 @@ function migrate(database: DatabaseSync) {
       listen_mode TEXT NOT NULL DEFAULT 'passive',
       sort_order INTEGER NOT NULL DEFAULT 0,
       reasoning_effort TEXT,
+      speed_mode TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
@@ -94,6 +95,7 @@ function migrate(database: DatabaseSync) {
       system_prompt TEXT NOT NULL DEFAULT '',
       style_prompt TEXT NOT NULL DEFAULT '',
       default_runtime_profile_id TEXT,
+      default_speed_mode TEXT,
       temperature REAL NOT NULL DEFAULT 0.7,
       skill_ids TEXT NOT NULL DEFAULT '[]',
       tool_access_policy TEXT NOT NULL,
@@ -271,11 +273,13 @@ function migrate(database: DatabaseSync) {
   ensureColumn(database, "agent_runs", "trigger_message_id", "TEXT");
   ensureColumn(database, "participants", "listen_mode", "TEXT NOT NULL DEFAULT 'passive'");
   ensureColumn(database, "participants", "room_instructions", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(database, "participants", "speed_mode", "TEXT");
   ensureColumn(database, "conversations", "collaboration_rules", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(database, "conversations", "collaboration_rules_version", "INTEGER NOT NULL DEFAULT 1");
   ensureColumn(database, "rooms", "avatar", "TEXT");
   ensureColumn(database, "identities", "default_listen_mode", "TEXT NOT NULL DEFAULT 'passive'");
   ensureColumn(database, "identities", "default_reasoning_effort", "TEXT");
+  ensureColumn(database, "identities", "default_speed_mode", "TEXT");
   ensureColumn(database, "artifacts", "content_hash", "TEXT");
   database.exec(
     "CREATE INDEX IF NOT EXISTS idx_agent_runs_trigger_status_created ON agent_runs(trigger_message_id, status, created_at)",

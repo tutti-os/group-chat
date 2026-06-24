@@ -123,7 +123,7 @@ export function Composer(props: {
   composerRequest:
     | { type: "insert"; seq: number; content: string }
     | { type: "insertSummaryLink"; seq: number; taskId: string }
-    | { type: "quote"; seq: number; quote: ComposerQuote }
+    | { type: "quote"; seq: number; quote: ComposerQuote; mentionParticipant?: ComposerMentionParticipant }
     | { type: "quotes"; seq: number; quotes: ComposerQuote[] }
     | { type: "edit"; seq: number; messageId: string; content: string; mentions: MentionTarget[]; blocks: MessageBlock[] }
     | null;
@@ -857,7 +857,7 @@ export function Composer(props: {
     insertMentionChipAtActiveQuery(participant.displayName, participant.id);
   };
 
-  const insertMentionAtCursor = (participant: Participant): boolean => {
+  const insertMentionAtCursor = (participant: ComposerMentionParticipant): boolean => {
     setMentionQuery(null);
     const editor = editorRef.current;
     if (!editor) return false;
@@ -898,6 +898,42 @@ export function Composer(props: {
     setText(editorText(editor));
     syncMentionedIdsFromEditor(editor);
     setMentionQuery(null);
+    mentionQueryRangeRef.current = null;
+
+    if (trailingSpace) {
+      focusAfterTrailingSpace(trailingSpace, editor);
+    } else {
+      placeCaretAtEditorEnd(editor, { preventScroll: true });
+    }
+    composerCaretOffsetRef.current = caretTextOffset(editor);
+    resizeComposerEditor(editor);
+    return true;
+  };
+
+  const insertMentionAtEditorEnd = (participant: ComposerMentionParticipant): boolean => {
+    setMentionQuery(null);
+    const editor = editorRef.current;
+    if (!editor) return false;
+
+    placeCaretAtEditorEnd(editor, { preventScroll: true });
+    if (hasMentionChip(editor, participant.id)) {
+      syncMentionedIdsFromEditor(editor);
+      resizeComposerEditor(editor);
+      return true;
+    }
+
+    suppressEditorSyncRef.current = true;
+    let trailingSpace: Text | null = null;
+    try {
+      trailingSpace = insertMentionChipAtCaret(editor, participant.displayName, participant.id);
+      normalizeEditorAfterMentionInsert(editor);
+    } finally {
+      suppressEditorSyncRef.current = false;
+    }
+
+    setText(editorText(editor));
+    syncMentionedIdsFromEditor(editor);
+    mentionSelectionRef.current = null;
     mentionQueryRangeRef.current = null;
 
     if (trailingSpace) {
@@ -1762,7 +1798,13 @@ export function Composer(props: {
     }
     if (request.type === "quote") {
       setQuotes([request.quote]);
-      requestAnimationFrame(() => focusEditorAtEnd(editorRef.current));
+      requestAnimationFrame(() => {
+        if (request.mentionParticipant) {
+          insertMentionAtEditorEnd(request.mentionParticipant);
+          return;
+        }
+        focusEditorAtEnd(editorRef.current);
+      });
       return;
     }
     if (request.type === "quotes") {
@@ -4155,6 +4197,11 @@ interface ComposerQuote {
   messageId: string;
   sender: string;
   content: string;
+}
+
+interface ComposerMentionParticipant {
+  id: string;
+  displayName: string;
 }
 
 interface ComposerDraft {

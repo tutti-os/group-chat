@@ -27,6 +27,7 @@ export function createDraftLocalAgent(
     defaultRuntimeProfileId: canonicalRuntime?.id ?? runtimeProfiles[0]?.id ?? null,
     defaultListenMode: DEFAULT_PARTICIPANT_LISTEN_MODE,
     defaultReasoningEffort: null,
+    defaultSpeedMode: null,
     temperature: 0.7,
     skillIds: [],
     toolAccessPolicy: { mode: "read-only", allowedToolIds: [] },

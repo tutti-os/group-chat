@@ -110,6 +110,7 @@ function buildParticipantIdentityFile(input: {
     input.participant.runtimeProfileId ? `- Runtime profile: ${input.participant.runtimeProfileId}` : null,
     `- Listen mode: ${input.participant.listenMode}`,
     input.participant.reasoningEffort ? `- Reasoning effort: ${input.participant.reasoningEffort}` : null,
+    input.participant.speedMode ? `- Speed mode: ${input.participant.speedMode}` : null,
     input.identity ? `- Identity ID: ${input.identity.id}` : null,
     input.identity ? `- Identity name: ${input.identity.name}` : null,
     hasRoomRoleOverride(input.participant)

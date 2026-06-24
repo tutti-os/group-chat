@@ -2497,6 +2497,8 @@ function SummaryPanel(props: {
                     />
                   ))}
                 </>
+              ) : props.task.status === "completed" ? (
+                <p className={"[margin:0] [color:var(--muted)]"}>{t("messageActions.summaryEmpty")}</p>
               ) : (
                 <p className={"[margin:0] [color:var(--muted)]"}>{t("messageActions.waitingSummary")}</p>
               )}

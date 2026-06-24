@@ -141,7 +141,7 @@ export function ConversationSidebar(props: {
                     ) : null}
                     <span className={"[display:block] [overflow:hidden] [font-size:13px] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>{conversation.title}</span>
                   </span>
-                  <span data-slot="conversation-time" className={"[flex:0_0_auto] [margin-left:auto] [color:var(--muted)] [font-size:11px] [text-align:right] [white-space:nowrap]"}>{formatConversationListTimestamp(conversation.updatedAt)}</span>
+                  <span data-slot="conversation-time" className={"[flex:0_0_auto] [margin-left:auto] [color:var(--muted)] [font-size:11px] [text-align:right] [white-space:nowrap]"}>{formatConversationListTimestamp(resolveConversationActivityAt(conversation))}</span>
                 </span>
                 <span className={"[display:flex] [min-width:0] [margin-top:4px] [align-items:center] [gap:2px] [color:var(--muted)] [font-size:12px] [line-height:1.35] [white-space:nowrap]"}>
                   {preview.sender ? (
@@ -207,7 +207,11 @@ function ConversationContextMenu(props: {
 
 function sortConversations(left: Conversation, right: Conversation) {
   if (left.pinned !== right.pinned) return left.pinned ? -1 : 1;
-  return right.updatedAt.localeCompare(left.updatedAt);
+  return resolveConversationActivityAt(right).localeCompare(resolveConversationActivityAt(left));
+}
+
+function resolveConversationActivityAt(conversation: Conversation) {
+  return conversation.lastMessageAt ?? (conversation.lastMessage ? conversation.updatedAt : conversation.createdAt);
 }
 
 function buildRecentMessagePreview(conversation: Conversation, room: Room, message: Message | null) {

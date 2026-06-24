@@ -13,7 +13,7 @@ import {
   type RawAgentEvent,
   type RawAgentStream,
 } from "@tutti-os/agent-acp-kit";
-import type { LocalAgentProviderStatus } from "@group-chat/shared";
+import type { LocalAgentProviderModel, LocalAgentProviderSpeedMode, LocalAgentProviderStatus, ReasoningEffort } from "@group-chat/shared";
 import { isMentionAllTrigger } from "@group-chat/shared";
 import { buildEffectiveRoleDescription } from "../domains/agent-instructions.js";
 import { participantWorkspaceRoot } from "../local/paths.js";
@@ -41,6 +41,10 @@ type TuttiAgentProviderStatus = {
   auth?: {
     status?: string;
   };
+  models?: unknown;
+  modelCatalog?: unknown;
+  configuration?: unknown;
+  defaults?: unknown;
 };
 
 type TuttiAgentProviderStatusListResponse = {
@@ -159,17 +163,38 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       );
     }
 
+    let retryWithEnv: Record<string, string> | undefined;
+    let canRetryWithoutUserSkills = context.runtimeProfile?.provider === "codex";
+    while (true) {
+      try {
+        yield* this.streamCommandBridgeAttempt(context, command, retryWithEnv);
+        return;
+      } catch (error) {
+        if (
+          canRetryWithoutUserSkills
+          && isSkillLoadFailure(error)
+          && !didLocalAgentCommandEmitOutput(error)
+        ) {
+          canRetryWithoutUserSkills = false;
+          const workspaceRoot = participantWorkspaceRoot(context.conversation.roomId, context.participant.id);
+          retryWithEnv = buildIsolatedUserSkillEnv(workspaceRoot);
+          yield { type: "thinking_delta" as const, text: `${SKILL_LOAD_FALLBACK_NOTICE}\n` };
+          continue;
+        }
+        throw error;
+      }
+    }
+  }
+
+  private async *streamCommandBridgeAttempt(
+    context: RuntimeReplyContext,
+    command: string,
+    envOverrides?: Record<string, string>,
+  ) {
     const workspaceRoot = participantWorkspaceRoot(context.conversation.roomId, context.participant.id);
     const child = spawn(command, {
       cwd: workspaceRoot,
-      env: {
-        ...process.env,
-        GROUP_CHAT_WORKSPACE: workspaceRoot,
-        GROUP_CHAT_RUN_ID: context.runId ?? "",
-        GROUP_CHAT_PARTICIPANT_ID: context.participant.id,
-        GROUP_CHAT_CONVERSATION_ID: context.conversation.id,
-        GROUP_CHAT_TOOL_BASE_URL: localToolBaseUrl(),
-      },
+      env: buildLocalAgentRunEnv(context, workspaceRoot, envOverrides),
       shell: true,
       stdio: "pipe",
     });
@@ -193,17 +218,24 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk) => stderrChunks.push(String(chunk)));
 
+    let emittedOutput = false;
     try {
       child.stdin.end(JSON.stringify(buildLocalAgentInput(context), null, 2));
       child.stdout.setEncoding("utf8");
-      yield* decodeLocalAgentStdout(child.stdout);
+      for await (const event of decodeLocalAgentStdout(child.stdout)) {
+        emittedOutput = true;
+        yield event;
+      }
       const [code, signal] = (await once(child, "close")) as [number | null, NodeJS.Signals | null];
       if (code !== 0) {
         const stderr = stderrChunks.join("").trim();
         if (timedOut && signal === "SIGTERM" && code === null) {
-          throw new Error("Agent 执行超时，已被终止");
+          throw new LocalAgentCommandError("Agent 执行超时，已被终止", emittedOutput);
         }
-        throw new Error(`local-agent command exited with ${code ?? signal ?? "unknown"}${stderr ? `: ${stderr}` : ""}`);
+        throw new LocalAgentCommandError(
+          `local-agent command exited with ${code ?? signal ?? "unknown"}${stderr ? `: ${stderr}` : ""}`,
+          emittedOutput,
+        );
       }
     } finally {
       if (timeout) clearTimeout(timeout);
@@ -237,6 +269,8 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
           }
         : { mode: "fresh" as const };
       let canRetryFresh = resume.mode !== "fresh";
+      let canRetryWithoutUserSkills = provider === "codex";
+      let skillFallbackEnv: Record<string, string> | undefined;
       let emittedNonRetryableEvent = false;
       while (true) {
         try {
@@ -254,13 +288,8 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
             model: stripLocalAgentProviderPrefix(context.runtimeProfile?.model ?? "default", provider),
             reasoning: context.participant.reasoningEffort ?? undefined,
             mcpServers: buildGroupChatMcpServers(context),
-            env: {
-              GROUP_CHAT_WORKSPACE: workspaceRoot,
-              GROUP_CHAT_RUN_ID: context.runId ?? "",
-              GROUP_CHAT_PARTICIPANT_ID: context.participant.id,
-              GROUP_CHAT_CONVERSATION_ID: context.conversation.id,
-              GROUP_CHAT_TOOL_BASE_URL: localToolBaseUrl(),
-            },
+            env: buildLocalAgentRunEnv(context, workspaceRoot, skillFallbackEnv),
+            metadata: context.participant.speedMode ? { speedMode: context.participant.speedMode } : undefined,
             ...(timeoutMs ? { timeoutMs } : {}),
             extraAllowedDirs: [workspaceRoot],
             resume,
@@ -290,6 +319,15 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
           }
           break;
         } catch (error) {
+          if (canRetryWithoutUserSkills && !emittedNonRetryableEvent && isSkillLoadFailure(error)) {
+            sessionStore.remove(context.conversation.id);
+            resume = { mode: "fresh" as const };
+            canRetryFresh = false;
+            canRetryWithoutUserSkills = false;
+            skillFallbackEnv = buildIsolatedUserSkillEnv(workspaceRoot);
+            yield { type: "thinking_delta" as const, text: `${SKILL_LOAD_FALLBACK_NOTICE}\n` };
+            continue;
+          }
           if (canRetryFresh && !emittedNonRetryableEvent && isRecoverableResumeError(error)) {
             sessionStore.remove(context.conversation.id);
             resume = { mode: "fresh" as const };
@@ -305,11 +343,53 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
   }
 }
 
+const SKILL_LOAD_FALLBACK_NOTICE = "检测到用户级 skill 元数据损坏，已临时隔离用户级 skills 并自动重试。";
+
+class LocalAgentCommandError extends Error {
+  constructor(message: string, readonly emittedOutput: boolean) {
+    super(message);
+    this.name = "LocalAgentCommandError";
+  }
+}
+
 function localAgentTimeoutMs() {
   const raw = process.env.GROUP_CHAT_LOCAL_AGENT_TIMEOUT_MS;
   if (raw === undefined || raw.trim() === "") return undefined;
   const value = Number(raw);
   return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function buildLocalAgentRunEnv(
+  context: RuntimeReplyContext,
+  workspaceRoot: string,
+  overrides?: Record<string, string>,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (typeof value === "string") env[key] = value;
+  }
+  return {
+    ...env,
+    ...overrides,
+    GROUP_CHAT_WORKSPACE: workspaceRoot,
+    GROUP_CHAT_RUN_ID: context.runId ?? "",
+    GROUP_CHAT_PARTICIPANT_ID: context.participant.id,
+    GROUP_CHAT_CONVERSATION_ID: context.conversation.id,
+    GROUP_CHAT_TOOL_BASE_URL: localToolBaseUrl(),
+    GROUP_CHAT_SPEED_MODE: context.participant.speedMode ?? "",
+  };
+}
+
+function buildIsolatedUserSkillEnv(workspaceRoot: string): Record<string, string> {
+  const home = join(workspaceRoot, ".group-chat", "isolated-skill-home");
+  const agentsHome = join(home, ".agents");
+  mkdirSync(join(agentsHome, "skills"), { recursive: true });
+  mkdirSync(join(home, ".codex"), { recursive: true });
+  return {
+    HOME: home,
+    USERPROFILE: home,
+    AGENTS_HOME: agentsHome,
+  };
 }
 
 function toRuntimeStreamEvent(event: AgentEvent): RuntimeStreamEvent | null {
@@ -405,9 +485,11 @@ function mergeTuttiAgentProviderStatuses(
       executablePath: tuttiStatus.cli?.binaryPath ?? tuttiStatus.adapter?.binaryPath ?? kitStatus?.executablePath ?? "",
       version: tuttiStatus.cli?.version ?? kitStatus?.version ?? (available ? "" : "not-installed"),
       configDir: kitStatus?.configDir,
-      models: kitStatus?.models ?? [],
-      defaultModelId: kitStatus?.defaultModelId,
-      defaultReasoningEffort: kitStatus?.defaultReasoningEffort,
+      models: parseTuttiAgentProviderModels(tuttiStatus) ?? kitStatus?.models ?? [],
+      defaultModelId: parseTuttiAgentProviderDefaultModelId(tuttiStatus) ?? kitStatus?.defaultModelId,
+      defaultReasoningEffort: parseTuttiAgentProviderDefaultReasoningEffort(tuttiStatus) ?? kitStatus?.defaultReasoningEffort,
+      speedModes: parseTuttiAgentProviderSpeedModes(tuttiStatus) ?? kitStatus?.speedModes,
+      defaultSpeedMode: parseTuttiAgentProviderDefaultSpeedMode(tuttiStatus) ?? kitStatus?.defaultSpeedMode,
       reason: available ? undefined : unavailableReasonFromTuttiAgentProvider(tuttiStatus),
     };
     merged.set(provider, enrichLocalAgentProviderStatus(status));
@@ -420,6 +502,132 @@ function mergeTuttiAgentProviderStatuses(
   }
 
   return [...merged.values()];
+}
+
+const REASONING_EFFORTS = new Set<ReasoningEffort>(["low", "medium", "high", "xhigh"]);
+
+function readString(record: Record<string, unknown> | undefined, ...keys: string[]) {
+  if (!record) return undefined;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function readArray(record: Record<string, unknown> | undefined, ...keys: string[]) {
+  if (!record) return undefined;
+  for (const key of keys) {
+    const value = record[key];
+    if (Array.isArray(value)) return value;
+  }
+  return undefined;
+}
+
+function parseReasoningEffort(value: unknown): ReasoningEffort | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  return REASONING_EFFORTS.has(normalized as ReasoningEffort) ? (normalized as ReasoningEffort) : null;
+}
+
+function parseReasoningEfforts(value: unknown): ReasoningEffort[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const efforts = value
+    .map((item) => {
+      const itemRecord = toRecord(item);
+      return parseReasoningEffort(readString(itemRecord, "effort", "id", "value") ?? item);
+    })
+    .filter((effort): effort is ReasoningEffort => effort !== null);
+  return efforts.length ? [...new Set(efforts)] : undefined;
+}
+
+function parseTuttiAgentProviderModels(status: TuttiAgentProviderStatus): LocalAgentProviderModel[] | undefined {
+  const root = toRecord(status);
+  const configuration = toRecord(status.configuration);
+  const catalog = toRecord(status.modelCatalog);
+  const rawModels =
+    readArray(root, "models", "availableModels", "modelOptions")
+    ?? readArray(configuration, "models", "availableModels", "modelOptions")
+    ?? readArray(catalog, "models", "availableModels", "modelOptions");
+  if (!rawModels?.length) return undefined;
+
+  const models: LocalAgentProviderModel[] = [];
+  const seen = new Set<string>();
+  for (const entry of rawModels) {
+    const record = toRecord(entry);
+    if (!record) continue;
+    if (record.hidden === true || record.visibility === "hide") continue;
+    const id = readString(record, "id", "model", "slug", "value");
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const label = readString(record, "label", "displayName", "display_name", "name", "title") ?? id;
+    const description = readString(record, "description", "subtitle");
+    const supportedReasoningEfforts = parseReasoningEfforts(
+      record.supportedReasoningEfforts
+      ?? record.supported_reasoning_efforts
+      ?? record.supportedReasoningLevels
+      ?? record.supported_reasoning_levels
+      ?? record.reasoningEfforts
+      ?? record.reasoning,
+    );
+    models.push({
+      id,
+      label,
+      ...(description ? { description } : {}),
+      ...(supportedReasoningEfforts?.length ? { supportedReasoningEfforts } : {}),
+    });
+  }
+  return models.length ? models : undefined;
+}
+
+function parseTuttiAgentProviderDefaultModelId(status: TuttiAgentProviderStatus) {
+  const root = toRecord(status);
+  const configuration = toRecord(status.configuration);
+  const defaults = toRecord(status.defaults);
+  const catalog = toRecord(status.modelCatalog);
+  return readString(root, "defaultModelId", "defaultModel", "selectedModel", "model")
+    ?? readString(configuration, "defaultModelId", "defaultModel", "selectedModel", "model")
+    ?? readString(defaults, "modelId", "model")
+    ?? readString(catalog, "defaultModelId", "defaultModel");
+}
+
+function parseTuttiAgentProviderDefaultReasoningEffort(status: TuttiAgentProviderStatus) {
+  const root = toRecord(status);
+  const configuration = toRecord(status.configuration);
+  const defaults = toRecord(status.defaults);
+  return parseReasoningEffort(readString(root, "defaultReasoningEffort", "reasoningEffort", "reasoning"))
+    ?? parseReasoningEffort(readString(configuration, "defaultReasoningEffort", "reasoningEffort", "reasoning"))
+    ?? parseReasoningEffort(readString(defaults, "reasoningEffort", "reasoning"));
+}
+
+function parseTuttiAgentProviderSpeedModes(status: TuttiAgentProviderStatus): LocalAgentProviderSpeedMode[] | undefined {
+  const root = toRecord(status);
+  const configuration = toRecord(status.configuration);
+  const rawModes = readArray(root, "speedModes", "speeds")
+    ?? readArray(configuration, "speedModes", "speeds");
+  if (!rawModes?.length) return undefined;
+  const modes: LocalAgentProviderSpeedMode[] = [];
+  const seen = new Set<string>();
+  for (const entry of rawModes) {
+    const record = toRecord(entry);
+    const id = record ? readString(record, "id", "value", "key") : typeof entry === "string" ? entry.trim() : "";
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    modes.push({
+      id,
+      label: record ? readString(record, "label", "displayName", "display_name", "name") ?? id : id,
+    });
+  }
+  return modes.length ? modes : undefined;
+}
+
+function parseTuttiAgentProviderDefaultSpeedMode(status: TuttiAgentProviderStatus) {
+  const root = toRecord(status);
+  const configuration = toRecord(status.configuration);
+  const defaults = toRecord(status.defaults);
+  return readString(root, "defaultSpeedMode", "speedMode", "speed")
+    ?? readString(configuration, "defaultSpeedMode", "speedMode", "speed")
+    ?? readString(defaults, "speedMode", "speed");
 }
 
 function normalizeTuttiAgentProvider(provider: string) {
@@ -535,6 +743,15 @@ function isRecoverableResumeError(error: unknown) {
   return /thread\/resume|resume failed|no rollout found|session.*not found|conversation.*not found/i.test(message);
 }
 
+function isSkillLoadFailure(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /failed to load skill|missing YAML frontmatter|invalid YAML/i.test(message);
+}
+
+function didLocalAgentCommandEmitOutput(error: unknown) {
+  return error instanceof LocalAgentCommandError && error.emittedOutput;
+}
+
 function safePathSegment(value: string) {
   return value.replace(/[^\w.-]/g, "_") || "unknown";
 }
@@ -562,6 +779,7 @@ function buildKitSystemPrompt(context: RuntimeReplyContext) {
       ? "In passive group listen mode, reply only when directly mentioned or explicitly assigned work; otherwise output [NO_REPLY]."
       : null,
     "Use the group-chat MCP tools for run-scoped room context, artifacts, sending side messages, and saving artifacts.",
+    "When the message mentions both you and a Tutti workspace app reference, interpret it as: the user wants you to use that referenced app to complete the remaining request. Keep the workspace-app mention as structured context; do not turn the visible app label into a guessed shell command.",
     "When you create or update Tutti workspace resources (issues/tasks, apps, or agent sessions), include clickable markdown links in your final reply so the user can open them directly. Use mention:// links, for example [task title](mention://workspace-issue/{issueId}?workspaceId={workspaceId}&topicId={topicId}) or [app name](mention://workspace-app/{appId}?workspaceId={workspaceId}). Read workspaceId and topicId from the current message <mentions> JSON (referenceInsert.scope). Prefer linking the task title instead of only listing a raw Issue ID.",
     rules ? `Collaboration rules version ${context.conversation.collaborationRulesVersion}:\n${rules}` : null,
     roleDescription ? `Role description for this participant in this room:\n${roleDescription}` : null,

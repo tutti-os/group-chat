@@ -147,6 +147,7 @@ export interface Participant {
   listenMode: ParticipantListenMode;
   sortOrder: number;
   reasoningEffort: ReasoningEffort | null;
+  speedMode: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -178,6 +179,11 @@ export interface LocalAgentProviderModel {
   supportedReasoningEfforts?: ReasoningEffort[];
 }
 
+export interface LocalAgentProviderSpeedMode {
+  id: string;
+  label: string;
+}
+
 export interface LocalAgentProviderStatus {
   provider: string;
   displayName: string;
@@ -189,6 +195,8 @@ export interface LocalAgentProviderStatus {
   models: LocalAgentProviderModel[];
   defaultModelId?: string;
   defaultReasoningEffort?: ReasoningEffort | null;
+  speedModes?: LocalAgentProviderSpeedMode[];
+  defaultSpeedMode?: string | null;
   reason?: string;
 }
 
@@ -205,6 +213,7 @@ export interface Identity {
   defaultRuntimeProfileId: string | null;
   defaultListenMode: ParticipantListenMode;
   defaultReasoningEffort: ReasoningEffort | null;
+  defaultSpeedMode: string | null;
   temperature: number;
   skillIds: string[];
   toolAccessPolicy: {
@@ -550,6 +559,7 @@ export interface CreateIdentityRequest {
   defaultRuntimeProfileId?: string | null;
   defaultListenMode?: ParticipantListenMode;
   defaultReasoningEffort?: ReasoningEffort | null;
+  defaultSpeedMode?: string | null;
   model?: string;
   temperature?: number;
 }
@@ -562,6 +572,7 @@ export interface UpdateIdentityRequest {
   defaultRuntimeProfileId?: string | null;
   defaultListenMode?: ParticipantListenMode;
   defaultReasoningEffort?: ReasoningEffort | null;
+  defaultSpeedMode?: string | null;
   model?: string;
   temperature?: number;
 }
@@ -586,6 +597,7 @@ export interface AddParticipantRequest {
   listenMode?: ParticipantListenMode;
   roomInstructions?: string;
   reasoningEffort?: ReasoningEffort | null;
+  speedMode?: string | null;
 }
 
 export interface UpdateParticipantRequest {
@@ -597,6 +609,7 @@ export interface UpdateParticipantRequest {
   listenMode?: ParticipantListenMode;
   roomInstructions?: string;
   reasoningEffort?: ReasoningEffort | null;
+  speedMode?: string | null;
 }
 
 export type MessageVisibility = "public" | "whisper";
@@ -830,7 +843,11 @@ export function participantDisplayNameUnits(displayName: string): number {
   return units;
 }
 
-export function truncateParticipantDisplayName(displayName: string, maxUnits = PARTICIPANT_DISPLAY_NAME_MAX_UNITS): string {
+export function truncateParticipantDisplayName(
+  displayName: string,
+  maxUnits = PARTICIPANT_DISPLAY_NAME_MAX_UNITS,
+  options?: { trimTrailing?: boolean },
+): string {
   let units = 0;
   let result = "";
   for (const char of [...displayName]) {
@@ -839,7 +856,7 @@ export function truncateParticipantDisplayName(displayName: string, maxUnits = P
     result += char;
     units += charUnits;
   }
-  return result.trimEnd();
+  return options?.trimTrailing === false ? result : result.trimEnd();
 }
 
 function appendDisplayNameSuffix(baseName: string, index: number) {

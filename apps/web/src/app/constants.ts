@@ -108,9 +108,7 @@ export function reasoningEffortLabel(value: ReasoningEffort | null | undefined) 
 }
 
 export function reasoningModeFieldLabel(value: "" | ReasoningEffort) {
-  const option = getReasoningEffortOptions().find((item) => item.value === value);
-  if (!value || !option?.description) return t("reasoning.mode");
-  return t("reasoning.modeWithDesc", { desc: option.description });
+  return t("reasoning.mode");
 }
 
 export function getReplyModeOptions(): Array<{ value: ReplyMode; label: string }> {

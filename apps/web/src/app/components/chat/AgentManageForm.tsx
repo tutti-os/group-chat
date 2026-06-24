@@ -30,6 +30,7 @@ import {
   listRuntimeModels,
   listRuntimeReasoningOptions,
   localAgentStatus,
+  normalizeRuntimeModelId,
   preferredRuntimeModelId,
   resolveCanonicalRuntimeProfile,
   runtimeOptionLabel,
@@ -73,10 +74,11 @@ export function AgentManageForm(props: {
   const [runtimeProfileId, setRuntimeProfileId] = useState(
     () => participant.runtimeProfileId ?? identity?.defaultRuntimeProfileId ?? "",
   );
-  const [model, setModel] = useState(props.runtimeProfile?.model ?? "");
+  const [model, setModel] = useState(() => normalizeRuntimeModelId(props.runtimeProfile, props.runtimeProfile?.model));
   const [reasoningEffort, setReasoningEffort] = useState<"" | ReasoningEffort>(
     participant.reasoningEffort ?? identity?.defaultReasoningEffort ?? "",
   );
+  const [speedMode, setSpeedMode] = useState(() => participant.speedMode ?? identity?.defaultSpeedMode ?? "");
   const [roleDescription, setRoleDescription] = useState(() => normalizeRoleDescriptionForEditor(identity));
   const [selectedRolePresetId, setSelectedRolePresetId] = useState(() =>
     matchRolePresetId(normalizeRoleDescriptionForEditor(identity)),
@@ -97,17 +99,26 @@ export function AgentManageForm(props: {
     ?? props.runtimeProfile;
   const canonicalRuntime = resolveCanonicalRuntimeProfile(selectedRuntime ?? null, props.runtimeProfiles);
   const listedModelOptions = listRuntimeModels(selectedRuntime ?? null, props.localAgentProviders);
+  const normalizedModel = normalizeRuntimeModelId(selectedRuntime ?? null, model);
   const modelOptions =
-    model && !listedModelOptions.some((option) => option.id === model)
-      ? [{ id: model, label: model }, ...listedModelOptions]
+    normalizedModel && !listedModelOptions.some((option) => option.id === normalizedModel)
+      ? [{ id: normalizedModel, label: normalizedModel }, ...listedModelOptions]
       : listedModelOptions;
   const reasoningOptions = listRuntimeReasoningOptions(
     selectedRuntime ?? null,
     props.localAgentProviders,
-    model,
+    normalizedModel,
     getReasoningEffortOptions(),
   );
   const providerStatus = localAgentStatus(selectedRuntime ?? null, props.localAgentProviders);
+  const speedOptions = providerStatus?.speedModes?.length
+    ? providerStatus.speedModes
+    : [{ id: "standard", label: t("speed.standard") }];
+  const selectedSpeed = speedOptions.some((option) => option.id === speedMode)
+    ? speedMode
+    : providerStatus?.defaultSpeedMode && speedOptions.some((option) => option.id === providerStatus.defaultSpeedMode)
+      ? providerStatus.defaultSpeedMode
+      : speedOptions[0]?.id ?? "standard";
   const hasRoomInstructions = Boolean(roomInstructions.trim());
   const showRoomInstructions = hasRoomInstructions || (!readOnly && showRoomInstructionsEditor);
 
@@ -115,8 +126,9 @@ export function AgentManageForm(props: {
     setDisplayName(normalizeParticipantDisplayName(participant.displayName));
     setRoomInstructions(participant.roomInstructions);
     setRuntimeProfileId(participant.runtimeProfileId ?? identity?.defaultRuntimeProfileId ?? "");
-    setModel(props.runtimeProfile?.model ?? "");
+    setModel(normalizeRuntimeModelId(props.runtimeProfile, props.runtimeProfile?.model));
     setReasoningEffort(participant.reasoningEffort ?? identity?.defaultReasoningEffort ?? "");
+    setSpeedMode(participant.speedMode ?? identity?.defaultSpeedMode ?? "");
     const nextRoleDescription = normalizeRoleDescriptionForEditor(identity);
     setRoleDescription(nextRoleDescription);
     setSelectedRolePresetId(matchRolePresetId(nextRoleDescription));
@@ -142,7 +154,7 @@ export function AgentManageForm(props: {
         reasoningOptions.some((option) => option.value === providerDefault) ? providerDefault : "",
       );
     }
-  }, [model, providerStatus?.defaultReasoningEffort, reasoningEffort, reasoningOptions]);
+  }, [normalizedModel, providerStatus?.defaultReasoningEffort, reasoningEffort, reasoningOptions]);
 
   const buildIdentityPayload = (): CreateIdentityRequest => ({
     name: normalizeParticipantDisplayName(displayName, identity?.name || t("common.agent")),
@@ -152,7 +164,8 @@ export function AgentManageForm(props: {
     defaultRuntimeProfileId: canonicalRuntime?.id ?? (runtimeProfileId || null),
     defaultListenMode: DEFAULT_PARTICIPANT_LISTEN_MODE,
     defaultReasoningEffort: reasoningEffort || null,
-    model: model || undefined,
+    defaultSpeedMode: selectedSpeed || null,
+    model: normalizedModel || undefined,
   });
 
   const save = async () => {
@@ -181,7 +194,8 @@ export function AgentManageForm(props: {
           || activeIdentity.icon !== identityPayload.icon
           || getConfiguredIdentityRoleDescription(activeIdentity) !== roleDescription
           || activeIdentity.defaultRuntimeProfileId !== identityPayload.defaultRuntimeProfileId
-          || (activeIdentity.defaultReasoningEffort ?? null) !== (identityPayload.defaultReasoningEffort ?? null);
+          || (activeIdentity.defaultReasoningEffort ?? null) !== (identityPayload.defaultReasoningEffort ?? null)
+          || (activeIdentity.defaultSpeedMode ?? null) !== (identityPayload.defaultSpeedMode ?? null);
         if (identityChanged) {
           const result = await props.onUpdateIdentity(activeIdentity.id, identityPayload);
           activeIdentity = result.identity ?? activeIdentity;
@@ -193,8 +207,9 @@ export function AgentManageForm(props: {
         avatar: props.avatar,
         listenMode: DEFAULT_PARTICIPANT_LISTEN_MODE,
         runtimeProfileId: canonicalRuntime?.id ?? (runtimeProfileId || undefined),
-        model: model || undefined,
+        model: normalizedModel || undefined,
         reasoningEffort: reasoningEffort || null,
+        speedMode: selectedSpeed || null,
         roomInstructions: roomInstructions.trim(),
       };
 
@@ -209,6 +224,7 @@ export function AgentManageForm(props: {
           listenMode: DEFAULT_PARTICIPANT_LISTEN_MODE,
           roomInstructions: roomInstructions.trim(),
           reasoningEffort: reasoningEffort || null,
+          speedMode: selectedSpeed || null,
         });
         await props.onUpdateParticipant(result.participant.id, participantPayload);
       } else {
@@ -242,7 +258,7 @@ export function AgentManageForm(props: {
           aria-readonly={readOnly || undefined}
           onChange={(event) => {
             if (readOnly) return;
-            const nextValue = truncateParticipantDisplayName(event.target.value);
+            const nextValue = truncateParticipantDisplayName(event.target.value, undefined, { trimTrailing: false });
             setDisplayName(nextValue);
             props.onDisplayNameChange?.(nextValue);
           }}
@@ -255,7 +271,7 @@ export function AgentManageForm(props: {
         </small>
       </label>
 
-      <div className={"[display:grid] [grid-template-columns:repeat(3,_minmax(0,_1fr))] [gap:10px] max-[520px]:[grid-template-columns:1fr]"}>
+      <div className={"[display:grid] [grid-template-columns:repeat(4,_minmax(0,_1fr))] [gap:10px] max-[760px]:[grid-template-columns:repeat(2,_minmax(0,_1fr))] max-[520px]:[grid-template-columns:1fr]"}>
         <label>
           <span>Runtime</span>
           <select
@@ -285,7 +301,7 @@ export function AgentManageForm(props: {
           <span>{t("agentForm.model")}</span>
           {modelOptions.length ? (
             <select
-              value={model}
+              value={normalizedModel}
               disabled={readOnly}
               onChange={(event) => setModel(event.target.value)}
               aria-label={t("agentForm.modelAria", { name: participant.displayName })}
@@ -312,6 +328,22 @@ export function AgentManageForm(props: {
           >
             {reasoningOptions.map((option) => (
               <option key={option.value || "auto"} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>{t("agentForm.speed")}</span>
+          <select
+            value={selectedSpeed}
+            disabled={readOnly}
+            onChange={(event) => setSpeedMode(event.target.value)}
+            aria-label={t("agentForm.speedAria", { name: participant.displayName })}
+            className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
+          >
+            {speedOptions.map((option) => (
+              <option key={option.id} value={option.id}>
                 {option.label}
               </option>
             ))}

@@ -79,3 +79,49 @@ test("background task bar visibility is scoped to the current conversation", asy
     false,
   );
 });
+
+test("completed summary snapshot does not clear streamed content", async () => {
+  globalThis.localStorage = createMemoryStorage();
+  globalThis.sessionStorage = createMemoryStorage();
+  const tasks = await loadBackgroundTasksModule();
+  const current = createBackgroundTask({
+    id: "summary-1",
+    status: "running",
+    content: "streamed summary",
+  });
+  const snapshot = {
+    ...current,
+    status: "completed",
+    content: "",
+    panelOpen: undefined,
+    sourceMessage: undefined,
+    targetParticipant: undefined,
+  };
+
+  const merged = tasks.mergeBackgroundTask(current, snapshot);
+
+  assert.equal(merged.status, "completed");
+  assert.equal(merged.content, "streamed summary");
+});
+
+function createBackgroundTask(overrides = {}) {
+  return {
+    id: "summary-1",
+    type: "summary",
+    conversationId: "conversation-1",
+    sourceMessageId: "message-1",
+    sourceMessageIds: ["message-1"],
+    participantId: "participant-1",
+    participantName: "Agent",
+    sourcePreview: "source",
+    status: "running",
+    content: "",
+    error: null,
+    createdAt: "2026-06-24T00:00:00.000Z",
+    updatedAt: "2026-06-24T00:00:00.000Z",
+    panelOpen: false,
+    sourceMessage: null,
+    targetParticipant: null,
+    ...overrides,
+  };
+}

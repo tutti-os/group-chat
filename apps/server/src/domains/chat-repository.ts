@@ -302,14 +302,13 @@ export class ChatRepository {
   updateConversationPinned(conversationId: string, pinned: boolean): Conversation | null {
     const current = this.getConversation(conversationId);
     if (!current) return null;
-    const now = new Date().toISOString();
     getDb()
       .prepare(
         `UPDATE conversations
-         SET pinned = ?, updated_at = ?
+         SET pinned = ?
          WHERE id = ?`,
       )
-      .run(pinned ? 1 : 0, now, conversationId);
+      .run(pinned ? 1 : 0, conversationId);
     return this.getConversation(conversationId);
   }
 
@@ -340,6 +339,7 @@ export class ChatRepository {
       roomInstructions?: string;
       listenMode?: ParticipantListenMode;
       reasoningEffort?: string | null;
+      speedMode?: string | null;
       sortOrder: number;
     },
   ): Participant {
@@ -348,8 +348,8 @@ export class ChatRepository {
     getDb()
       .prepare(
         `INSERT INTO participants
-         (id, conversation_id, kind, display_name, avatar, runtime_profile_id, identity_id, room_instructions, status, listen_mode, sort_order, reasoning_effort, created_at, updated_at)
-         VALUES (?, ?, ?, ?, NULL, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
+         (id, conversation_id, kind, display_name, avatar, runtime_profile_id, identity_id, room_instructions, status, listen_mode, sort_order, reasoning_effort, speed_mode, created_at, updated_at)
+         VALUES (?, ?, ?, ?, NULL, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -362,6 +362,7 @@ export class ChatRepository {
         input.listenMode ?? DEFAULT_PARTICIPANT_LISTEN_MODE,
         input.sortOrder,
         normalizeReasoningEffort(input.reasoningEffort),
+        normalizeSpeedMode(input.speedMode),
         now,
         now,
       );
@@ -386,6 +387,7 @@ export class ChatRepository {
       roomInstructions: input.roomInstructions,
       listenMode: input.listenMode ?? identity.defaultListenMode ?? DEFAULT_PARTICIPANT_LISTEN_MODE,
       reasoningEffort: input.reasoningEffort ?? identity.defaultReasoningEffort,
+      speedMode: input.speedMode ?? identity.defaultSpeedMode,
       sortOrder: row.sort_order,
     });
   }
@@ -419,11 +421,15 @@ export class ChatRepository {
         input.reasoningEffort === undefined
           ? current.reasoningEffort
           : normalizeReasoningEffort(input.reasoningEffort),
+      speedMode:
+        input.speedMode === undefined
+          ? current.speedMode
+          : normalizeSpeedMode(input.speedMode),
     };
     getDb()
       .prepare(
         `UPDATE participants
-         SET display_name = ?, runtime_profile_id = ?, identity_id = ?, room_instructions = ?, listen_mode = ?, reasoning_effort = ?, avatar = ?, updated_at = ?
+         SET display_name = ?, runtime_profile_id = ?, identity_id = ?, room_instructions = ?, listen_mode = ?, reasoning_effort = ?, speed_mode = ?, avatar = ?, updated_at = ?
          WHERE id = ?`,
       )
       .run(
@@ -433,6 +439,7 @@ export class ChatRepository {
         next.roomInstructions,
         next.listenMode,
         next.reasoningEffort,
+        next.speedMode,
         next.avatar,
         now,
         participantId,
@@ -502,8 +509,8 @@ export class ChatRepository {
     getDb()
       .prepare(
         `INSERT INTO identities
-         (id, name, icon, system_prompt, style_prompt, default_runtime_profile_id, default_listen_mode, default_reasoning_effort, temperature, skill_ids, tool_access_policy, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, name, icon, system_prompt, style_prompt, default_runtime_profile_id, default_listen_mode, default_reasoning_effort, default_speed_mode, temperature, skill_ids, tool_access_policy, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -514,6 +521,7 @@ export class ChatRepository {
         input.defaultRuntimeProfileId ?? fallbackRuntime,
         input.defaultListenMode ?? DEFAULT_PARTICIPANT_LISTEN_MODE,
         normalizeReasoningEffort(input.defaultReasoningEffort),
+        normalizeSpeedMode(input.defaultSpeedMode),
         input.temperature ?? 0.7,
         json([]),
         json({ mode: "read-only", allowedToolIds: [] }),
@@ -540,13 +548,17 @@ export class ChatRepository {
         input.defaultReasoningEffort === undefined
           ? current.defaultReasoningEffort
           : normalizeReasoningEffort(input.defaultReasoningEffort),
+      defaultSpeedMode:
+        input.defaultSpeedMode === undefined
+          ? current.defaultSpeedMode
+          : normalizeSpeedMode(input.defaultSpeedMode),
       temperature: input.temperature ?? current.temperature,
       updatedAt: new Date().toISOString(),
     };
     getDb()
       .prepare(
         `UPDATE identities
-         SET name = ?, icon = ?, system_prompt = ?, style_prompt = ?, default_runtime_profile_id = ?, default_listen_mode = ?, default_reasoning_effort = ?, temperature = ?, updated_at = ?
+         SET name = ?, icon = ?, system_prompt = ?, style_prompt = ?, default_runtime_profile_id = ?, default_listen_mode = ?, default_reasoning_effort = ?, default_speed_mode = ?, temperature = ?, updated_at = ?
          WHERE id = ?`,
       )
       .run(
@@ -557,6 +569,7 @@ export class ChatRepository {
         next.defaultRuntimeProfileId,
         next.defaultListenMode,
         next.defaultReasoningEffort,
+        next.defaultSpeedMode,
         next.temperature,
         next.updatedAt,
         identityId,
@@ -1391,6 +1404,7 @@ function rowToParticipant(row: any): Participant {
     listenMode: row.listen_mode ?? DEFAULT_PARTICIPANT_LISTEN_MODE,
     sortOrder: row.sort_order,
     reasoningEffort: row.reasoning_effort,
+    speedMode: row.speed_mode ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -1428,6 +1442,7 @@ function rowToIdentity(row: any): Identity {
     defaultRuntimeProfileId: row.default_runtime_profile_id,
     defaultListenMode: row.default_listen_mode ?? DEFAULT_PARTICIPANT_LISTEN_MODE,
     defaultReasoningEffort: row.default_reasoning_effort ?? null,
+    defaultSpeedMode: row.default_speed_mode ?? null,
     temperature: row.temperature,
     skillIds: parseJson(row.skill_ids, []),
     toolAccessPolicy: parseJson(row.tool_access_policy, { mode: "none", allowedToolIds: [] }),
@@ -1587,6 +1602,11 @@ function safeUploadSubdir(value: string) {
 function normalizeReasoningEffort(value: string | null | undefined) {
   if (!value) return null;
   return ["low", "medium", "high", "xhigh"].includes(value) ? value : null;
+}
+
+function normalizeSpeedMode(value: string | null | undefined) {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
 }
 
 function modelSlug(model: string) {
