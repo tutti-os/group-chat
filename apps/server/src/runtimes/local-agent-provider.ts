@@ -42,6 +42,11 @@ type TuttiAgentProviderStatus = {
     status?: string;
   };
   models?: unknown;
+  speedModes?: unknown;
+  speedOptions?: unknown;
+  speeds?: unknown;
+  availableSpeeds?: unknown;
+  performanceModes?: unknown;
   modelCatalog?: unknown;
   configuration?: unknown;
   defaults?: unknown;
@@ -603,19 +608,22 @@ function parseTuttiAgentProviderDefaultReasoningEffort(status: TuttiAgentProvide
 function parseTuttiAgentProviderSpeedModes(status: TuttiAgentProviderStatus): LocalAgentProviderSpeedMode[] | undefined {
   const root = toRecord(status);
   const configuration = toRecord(status.configuration);
-  const rawModes = readArray(root, "speedModes", "speeds")
-    ?? readArray(configuration, "speedModes", "speeds");
+  const defaults = toRecord(status.defaults);
+  const rawModes =
+    readArray(root, "speedModes", "speedOptions", "speeds", "availableSpeeds", "performanceModes", "performance")
+    ?? readArray(configuration, "speedModes", "speedOptions", "speeds", "availableSpeeds", "performanceModes", "performance")
+    ?? readArray(defaults, "speedModes", "speedOptions", "speeds", "availableSpeeds", "performanceModes", "performance");
   if (!rawModes?.length) return undefined;
   const modes: LocalAgentProviderSpeedMode[] = [];
   const seen = new Set<string>();
   for (const entry of rawModes) {
     const record = toRecord(entry);
-    const id = record ? readString(record, "id", "value", "key") : typeof entry === "string" ? entry.trim() : "";
+    const id = record ? readString(record, "id", "value", "key", "mode", "name") : typeof entry === "string" ? entry.trim() : "";
     if (!id || seen.has(id)) continue;
     seen.add(id);
     modes.push({
       id,
-      label: record ? readString(record, "label", "displayName", "display_name", "name") ?? id : id,
+      label: record ? readString(record, "label", "displayName", "display_name", "title", "name") ?? id : id,
     });
   }
   return modes.length ? modes : undefined;
@@ -625,9 +633,9 @@ function parseTuttiAgentProviderDefaultSpeedMode(status: TuttiAgentProviderStatu
   const root = toRecord(status);
   const configuration = toRecord(status.configuration);
   const defaults = toRecord(status.defaults);
-  return readString(root, "defaultSpeedMode", "speedMode", "speed")
-    ?? readString(configuration, "defaultSpeedMode", "speedMode", "speed")
-    ?? readString(defaults, "speedMode", "speed");
+  return readString(root, "defaultSpeedMode", "defaultSpeed", "selectedSpeedMode", "selectedSpeed", "speedMode", "speed")
+    ?? readString(configuration, "defaultSpeedMode", "defaultSpeed", "selectedSpeedMode", "selectedSpeed", "speedMode", "speed")
+    ?? readString(defaults, "speedMode", "speed", "defaultSpeedMode", "defaultSpeed");
 }
 
 function normalizeTuttiAgentProvider(provider: string) {

@@ -306,6 +306,7 @@
   "reasoning.mode": "Reasoning effort",
   "reasoning.modeWithDesc": "Reasoning effort ({desc})",
   "speed.standard": "Standard",
+  "speed.fast": "Fast",
 
   "replyMode.auto": "Auto",
   "replyMode.all": "All",

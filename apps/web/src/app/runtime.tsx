@@ -1,5 +1,5 @@
 import { Info, RefreshCw, Terminal } from "lucide-react";
-import type { LocalAgentProviderStatus, ReasoningEffort, RuntimeProfile } from "@group-chat/shared";
+import type { LocalAgentProviderSpeedMode, LocalAgentProviderStatus, ReasoningEffort, RuntimeProfile } from "@group-chat/shared";
 import { t, useTranslation } from "./i18n/index.js";
 
 const DEFAULT_LOCAL_AGENT_MODEL_ID = "default";
@@ -117,6 +117,33 @@ export function listRuntimeReasoningOptions(
   const allowed = new Set<ReasoningEffort>(supported);
   const filtered = allOptions.filter((option) => option.value === "" || allowed.has(option.value));
   return filtered.length > 1 ? filtered : allOptions;
+}
+
+export function listRuntimeSpeedOptions(
+  profile: RuntimeProfile | null,
+  localAgentProviders: LocalAgentProviderStatus[],
+): LocalAgentProviderSpeedMode[] {
+  const provider = localAgentStatus(profile, localAgentProviders);
+  if (provider?.speedModes?.length) return provider.speedModes;
+  if (profile?.kind === "local-agent" && profile.provider === "codex") {
+    return [
+      { id: "standard", label: t("speed.standard") },
+      { id: "fast", label: t("speed.fast") },
+    ];
+  }
+  return [{ id: "standard", label: t("speed.standard") }];
+}
+
+export function resolveRuntimeSpeedMode(
+  profile: RuntimeProfile | null,
+  localAgentProviders: LocalAgentProviderStatus[],
+  speedMode: string | null | undefined,
+) {
+  const options = listRuntimeSpeedOptions(profile, localAgentProviders);
+  if (speedMode && options.some((option) => option.id === speedMode)) return speedMode;
+  const providerDefault = localAgentStatus(profile, localAgentProviders)?.defaultSpeedMode;
+  if (providerDefault && options.some((option) => option.id === providerDefault)) return providerDefault;
+  return options[0]?.id ?? "standard";
 }
 
 function isCanonicalLocalAgentProfile(profile: RuntimeProfile) {

@@ -306,6 +306,7 @@
   "reasoning.mode": "推理强度",
   "reasoning.modeWithDesc": "推理强度（{desc}）",
   "speed.standard": "标准",
+  "speed.fast": "快速",
 
   "replyMode.auto": "自动判断",
   "replyMode.all": "全部",

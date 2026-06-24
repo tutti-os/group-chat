@@ -69,3 +69,14 @@ test("local agent model options normalize canonical default profiles to CLI defa
   );
   assert.equal(preferredRuntimeModelId(codexProfile, []), "default");
 });
+
+test("codex speed options fall back to standard and fast", async () => {
+  const { listRuntimeSpeedOptions, resolveRuntimeSpeedMode } = await loadModule();
+
+  assert.deepEqual(
+    listRuntimeSpeedOptions(codexProfile, []).map((option) => option.id),
+    ["standard", "fast"],
+  );
+  assert.equal(resolveRuntimeSpeedMode(codexProfile, [], "fast"), "fast");
+  assert.equal(resolveRuntimeSpeedMode(codexProfile, [], "unknown"), "standard");
+});

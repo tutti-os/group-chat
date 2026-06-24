@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { Check } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Check, ChevronDown } from "lucide-react";
 import type {
   AddParticipantRequest,
   CreateIdentityRequest,
@@ -29,9 +30,11 @@ import {
   listCanonicalRuntimeProfiles,
   listRuntimeModels,
   listRuntimeReasoningOptions,
+  listRuntimeSpeedOptions,
   localAgentStatus,
   normalizeRuntimeModelId,
   preferredRuntimeModelId,
+  resolveRuntimeSpeedMode,
   resolveCanonicalRuntimeProfile,
   runtimeOptionLabel,
 } from "../../runtime.js";
@@ -87,6 +90,7 @@ export function AgentManageForm(props: {
     () => Boolean(participant.roomInstructions.trim()),
   );
   const [saving, setSaving] = useState(false);
+  const [openSelectId, setOpenSelectId] = useState<string | null>(null);
 
   const runtimeOptions = useMemo(
     () => listCanonicalRuntimeProfiles(props.runtimeProfiles),
@@ -111,14 +115,8 @@ export function AgentManageForm(props: {
     getReasoningEffortOptions(),
   );
   const providerStatus = localAgentStatus(selectedRuntime ?? null, props.localAgentProviders);
-  const speedOptions = providerStatus?.speedModes?.length
-    ? providerStatus.speedModes
-    : [{ id: "standard", label: t("speed.standard") }];
-  const selectedSpeed = speedOptions.some((option) => option.id === speedMode)
-    ? speedMode
-    : providerStatus?.defaultSpeedMode && speedOptions.some((option) => option.id === providerStatus.defaultSpeedMode)
-      ? providerStatus.defaultSpeedMode
-      : speedOptions[0]?.id ?? "standard";
+  const speedOptions = listRuntimeSpeedOptions(selectedRuntime ?? null, props.localAgentProviders);
+  const selectedSpeed = resolveRuntimeSpeedMode(selectedRuntime ?? null, props.localAgentProviders, speedMode);
   const hasRoomInstructions = Boolean(roomInstructions.trim());
   const showRoomInstructions = hasRoomInstructions || (!readOnly && showRoomInstructionsEditor);
 
@@ -155,6 +153,10 @@ export function AgentManageForm(props: {
       );
     }
   }, [normalizedModel, providerStatus?.defaultReasoningEffort, reasoningEffort, reasoningOptions]);
+
+  useEffect(() => {
+    if (speedMode !== selectedSpeed) setSpeedMode(selectedSpeed);
+  }, [selectedSpeed, speedMode]);
 
   const buildIdentityPayload = (): CreateIdentityRequest => ({
     name: normalizeParticipantDisplayName(displayName, identity?.name || t("common.agent")),
@@ -274,80 +276,85 @@ export function AgentManageForm(props: {
       <div className={"[display:grid] [grid-template-columns:repeat(4,_minmax(0,_1fr))] [gap:10px] max-[760px]:[grid-template-columns:repeat(2,_minmax(0,_1fr))] max-[520px]:[grid-template-columns:1fr]"}>
         <label>
           <span>Runtime</span>
-          <select
+          <AgentSelect
+            id="runtime"
             value={canonicalRuntime?.id ?? runtimeProfileId}
             disabled={readOnly}
-            onChange={(event) => {
-              const nextProfile = props.runtimeProfiles.find((profile) => profile.id === event.target.value) ?? null;
-              setRuntimeProfileId(event.target.value);
+            ariaLabel={`${participant.displayName} Runtime`}
+            open={openSelectId === "runtime"}
+            onOpenChange={(open) => setOpenSelectId(open ? "runtime" : null)}
+            options={runtimeOptions.map((profile) => ({
+              value: profile.id,
+              label: runtimeOptionLabel(profile, props.localAgentProviders),
+            }))}
+            onChange={(value) => {
+              const nextProfile = props.runtimeProfiles.find((profile) => profile.id === value) ?? null;
+              setRuntimeProfileId(value);
               const nextModel = preferredRuntimeModelId(nextProfile, props.localAgentProviders);
               setModel(nextModel);
               const nextProvider = localAgentStatus(nextProfile, props.localAgentProviders);
               if (nextProvider?.defaultReasoningEffort) {
                 setReasoningEffort(nextProvider.defaultReasoningEffort);
               }
+              setSpeedMode(resolveRuntimeSpeedMode(nextProfile, props.localAgentProviders, ""));
             }}
-            aria-label={`${participant.displayName} Runtime`}
             className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
-          >
-            {runtimeOptions.map((profile) => (
-              <option key={profile.id} value={profile.id}>
-                {runtimeOptionLabel(profile, props.localAgentProviders)}
-              </option>
-            ))}
-          </select>
+          />
         </label>
         <label>
           <span>{t("agentForm.model")}</span>
           {modelOptions.length ? (
-            <select
+            <AgentSelect
+              id="model"
               value={normalizedModel}
               disabled={readOnly}
-              onChange={(event) => setModel(event.target.value)}
-              aria-label={t("agentForm.modelAria", { name: participant.displayName })}
+              onChange={setModel}
+              ariaLabel={t("agentForm.modelAria", { name: participant.displayName })}
+              open={openSelectId === "model"}
+              onOpenChange={(open) => setOpenSelectId(open ? "model" : null)}
+              options={modelOptions.map((option) => ({
+                value: option.id,
+                label: option.label,
+              }))}
               className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
-            >
-              {modelOptions.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+            />
           ) : (
             <input value={model || t("common.notConfigured")} readOnly aria-readonly />
           )}
         </label>
         <label>
           <span>{reasoningModeFieldLabel(reasoningEffort)}</span>
-          <select
+          <AgentSelect
+            id="reasoning"
             value={reasoningEffort}
             disabled={readOnly}
-            onChange={(event) => setReasoningEffort(event.target.value as "" | ReasoningEffort)}
-            aria-label={t("agentForm.reasoningAria", { name: participant.displayName })}
+            onChange={(value) => setReasoningEffort(value as "" | ReasoningEffort)}
+            ariaLabel={t("agentForm.reasoningAria", { name: participant.displayName })}
+            open={openSelectId === "reasoning"}
+            onOpenChange={(open) => setOpenSelectId(open ? "reasoning" : null)}
+            options={reasoningOptions.map((option) => ({
+              value: option.value,
+              label: option.label,
+            }))}
             className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
-          >
-            {reasoningOptions.map((option) => (
-              <option key={option.value || "auto"} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+          />
         </label>
         <label>
           <span>{t("agentForm.speed")}</span>
-          <select
+          <AgentSelect
+            id="speed"
             value={selectedSpeed}
             disabled={readOnly}
-            onChange={(event) => setSpeedMode(event.target.value)}
-            aria-label={t("agentForm.speedAria", { name: participant.displayName })}
+            onChange={setSpeedMode}
+            ariaLabel={t("agentForm.speedAria", { name: participant.displayName })}
+            open={openSelectId === "speed"}
+            onOpenChange={(open) => setOpenSelectId(open ? "speed" : null)}
+            options={speedOptions.map((option) => ({
+              value: option.id,
+              label: option.label,
+            }))}
             className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
-          >
-            {speedOptions.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+          />
         </label>
       </div>
 
@@ -444,5 +451,121 @@ export function AgentManageForm(props: {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function AgentSelect(props: {
+  id: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+  ariaLabel: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [position, setPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+  const selected = props.options.find((option) => option.value === props.value) ?? props.options[0] ?? null;
+
+  const updatePosition = () => {
+    const button = buttonRef.current;
+    if (!button) return;
+    const rect = button.getBoundingClientRect();
+    setPosition({
+      top: rect.bottom + 8,
+      left: rect.left,
+      width: rect.width,
+    });
+  };
+
+  useEffect(() => {
+    if (!props.open) return;
+    updatePosition();
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (buttonRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      props.onOpenChange(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        props.onOpenChange(false);
+        buttonRef.current?.focus();
+      }
+    };
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [props.open, props.onOpenChange]);
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        disabled={props.disabled}
+        aria-label={props.ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={props.open}
+        data-agent-select-id={props.id}
+        className={`[display:grid] [grid-template-columns:minmax(0,_1fr)_18px] [align-items:center] [height:34px] [width:100%] [min-width:0] [border:1px_solid_var(--border)] [border-radius:12px] [padding:0_10px] [color:var(--text)] [background:#ffffff] [font-size:13px] [text-align:left] [outline:none] [cursor:pointer] focus-visible:[border-color:#8ab4f8] focus-visible:[box-shadow:0_0_0_3px_rgb(74_144_226_/_18%)] disabled:[color:var(--muted)] disabled:[background:#f3f4f6] disabled:[cursor:default] ${props.className ?? ""}`}
+        onClick={() => {
+          if (props.disabled) return;
+          updatePosition();
+          props.onOpenChange(!props.open);
+        }}
+      >
+        <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>
+          {selected?.label ?? ""}
+        </span>
+        <ChevronDown size={16} className={"[justify-self:end] [color:var(--muted)]"} />
+      </button>
+      {props.open && position ? createPortal(
+        <div
+          ref={menuRef}
+          role="listbox"
+          aria-label={props.ariaLabel}
+          className={"[position:fixed] [z-index:10000] [display:grid] [max-height:260px] [overflow:auto] [border:1px_solid_#2f2f2f] [border-radius:14px] [padding:6px] [color:#f7f7f7] [background:#4f4f4f] [box-shadow:0_18px_44px_rgb(0_0_0_/_22%)]"}
+          style={{ top: position.top, left: position.left, width: position.width }}
+        >
+          {props.options.map((option) => {
+            const active = option.value === props.value;
+            return (
+              <button
+                key={option.value || "empty"}
+                type="button"
+                role="option"
+                aria-selected={active}
+                className={`[display:grid] [grid-template-columns:20px_minmax(0,_1fr)] [align-items:center] [gap:6px] [min-height:34px] [border:0] [border-radius:10px] [padding:0_10px] [color:inherit] [background:transparent] [font:inherit] [text-align:left] [cursor:pointer] hover:[background:#ffffff1f] focus-visible:[outline:none] focus-visible:[background:#ffffff2b] ${active ? "[background:#4f8fea]" : ""}`}
+                onClick={() => {
+                  props.onChange(option.value);
+                  props.onOpenChange(false);
+                  buttonRef.current?.focus();
+                }}
+              >
+                <span className={"[width:16px] [color:#ffffff]"}>
+                  {active ? "✓" : ""}
+                </span>
+                <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>
+                  {option.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>,
+        document.body,
+      ) : null}
+    </>
   );
 }

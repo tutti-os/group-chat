@@ -3181,6 +3181,7 @@ function needsLeadingSpaceBeforeCaret(range: Range, editor: HTMLDivElement): boo
 }
 
 function insertMentionChipAtCaret(editor: HTMLDivElement, label: string, mentionId: string): Text | null {
+  removeEmptyComposerScaffold(editor);
   removeTrailingPartialMentionQuery(editor);
   removeOrphanAtTextNodes(editor);
 
@@ -3209,6 +3210,7 @@ function insertMentionChipAtCaret(editor: HTMLDivElement, label: string, mention
 }
 
 function appendMentionChipToEditor(editor: HTMLDivElement, label: string, mentionId: string): Text | null {
+  removeEmptyComposerScaffold(editor);
   removeTrailingPartialMentionQuery(editor);
   removeOrphanAtTextNodes(editor);
 
@@ -3224,8 +3226,25 @@ function appendMentionChipToEditor(editor: HTMLDivElement, label: string, mentio
 }
 
 function normalizeEditorAfterMentionInsert(editor: HTMLDivElement) {
+  removeEmptyComposerScaffold(editor);
   removeOrphanAtTextNodes(editor);
   editor.normalize();
+}
+
+function removeEmptyComposerScaffold(editor: HTMLDivElement) {
+  if (editor.childNodes.length === 0) return;
+  if (editorText(editor).replace(/\u200b/g, "").trim()) return;
+  if (editor.querySelector("[data-mention-chip='true'], [data-whisper-chip='true'], [data-message-link-id], [data-summary-link-id], [data-upload-item-id]")) {
+    return;
+  }
+  editor.replaceChildren();
+  const selection = window.getSelection();
+  if (!selection) return;
+  const range = document.createRange();
+  range.setStart(editor, 0);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
 }
 
 function removeOrphanAtTextNodes(editor: HTMLDivElement) {
