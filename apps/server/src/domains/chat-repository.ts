@@ -1005,7 +1005,7 @@ export class ChatRepository {
   createArtifact(
     conversationId: string,
     input: UploadArtifactRequest,
-    options: { kind?: ArtifactKind; messageId?: string | null; sourceRunId?: string | null } = {},
+    options: { kind?: ArtifactKind; messageId?: string | null; sourceRunId?: string | null; uploadSubdir?: string | null } = {},
   ): Artifact {
     const conversation = this.getConversation(conversationId);
     if (!conversation) throw new Error("Conversation not found");
@@ -1015,8 +1015,10 @@ export class ChatRepository {
     mkdirSync(join(roomRoot, "uploads"), { recursive: true });
     const id = nanoid();
     const uploadRoot = join(roomRoot, "uploads");
-    const diskFilename = availableUploadFilename(uploadRoot, input.filename);
-    const localPath = join(uploadRoot, diskFilename);
+    const storageRoot = options.uploadSubdir ? join(uploadRoot, safeUploadSubdir(options.uploadSubdir)) : uploadRoot;
+    mkdirSync(storageRoot, { recursive: true });
+    const diskFilename = availableUploadFilename(storageRoot, input.filename);
+    const localPath = join(storageRoot, diskFilename);
     const bytes = Buffer.from(input.dataBase64, "base64");
     const contentHash = sha256ForBytes(bytes);
     writeFileSync(localPath, bytes);
@@ -1558,8 +1560,8 @@ function rowToPrivateTask(row: any): PrivateTaskSnapshot {
 }
 
 function safeFilename(filename: string) {
-  const clean = basename(filename).replace(/[^\w.\- ()]/g, "_");
-  return clean || "upload.bin";
+  const clean = basename(filename).replace(/[\/\\\0-\x1f\x7f]/g, "_").trim();
+  return clean && !/^\.+$/.test(clean) ? clean : "upload.bin";
 }
 
 function availableUploadFilename(uploadRoot: string, filename: string) {
@@ -1575,6 +1577,11 @@ function availableUploadFilename(uploadRoot: string, filename: string) {
 
   const fallback = `${base}-${nanoid()}${extension}`;
   return fallback;
+}
+
+function safeUploadSubdir(value: string) {
+  const clean = safeFilename(value).replace(/^\.+$/g, "_");
+  return clean || "run-output";
 }
 
 function normalizeReasoningEffort(value: string | null | undefined) {

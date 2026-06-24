@@ -1987,6 +1987,7 @@ export class ChatService {
             kind: "run-output",
             messageId: params.messageId,
             sourceRunId: params.runId,
+            uploadSubdir: `run-${params.runId}`,
           },
         );
       } catch {
