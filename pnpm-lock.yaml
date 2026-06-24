@@ -55,8 +55,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared
       '@tutti-os/ui-rich-text':
-        specifier: file:/tmp/ui-rich-text-dist-link
-        version: file:../../../../../tmp/ui-rich-text-dist-link(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+        specifier: 0.0.24
+        version: 0.0.24(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@vitejs/plugin-react':
         specifier: ^5.1.1
         version: 5.2.0(vite@7.3.5(@types/node@24.13.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4))
@@ -1666,17 +1666,17 @@ packages:
   '@tutti-os/agent-acp-kit@0.2.2':
     resolution: {integrity: sha512-G6XlJHCJK0gZ8GAe21PMKT/9UwZbDWJ7XOtj/re+YbqYQsDxX1qEVbXeZ00jRIIiRalq8ZyqIiSAQU2T1qDkuA==}
 
-  '@tutti-os/ui-i18n-runtime@0.0.23':
-    resolution: {integrity: sha512-ZvDcj8ck72JvS/j3DOlMbmbHepwlGSE4KDZiIy7SxgwGkqHSO7+UI+pIdXdm6p802U9UmJjxtCd+WxvAThTp3g==}
+  '@tutti-os/ui-i18n-runtime@0.0.24':
+    resolution: {integrity: sha512-fqRrowE36XMJJU/aVvky37rEUcsyonTCRk8eyjjMs05Suo/PBgTYYRBpIPEou0o5ielSJrKgZl5xLanaffNkeQ==}
 
-  '@tutti-os/ui-rich-text@file:../../../../../tmp/ui-rich-text-dist-link':
-    resolution: {directory: ../../../../../tmp/ui-rich-text-dist-link, type: directory}
+  '@tutti-os/ui-rich-text@0.0.24':
+    resolution: {integrity: sha512-1OpWsx6LvcLGsF2Y/1MccgxLtfbmTSG5WOLDsFAaaVBcfkbqIFGRMlpsoTU9eXa2+XUlSkhJUADagFp/CNQg3w==}
     peerDependencies:
       react: ^19.1.0
       react-dom: ^19.1.0
 
-  '@tutti-os/ui-system@0.0.23':
-    resolution: {integrity: sha512-Ksj479QN9aIFgLXNbkqQraCVaI9r2ODCTKtKkKoVIzP/11h+2v4mK/bEMrn9Fy2FBiSJpypTBMw1e6uyh/AwzA==}
+  '@tutti-os/ui-system@0.0.24':
+    resolution: {integrity: sha512-DnFKYw05NawHSUXrvTmAO+Z0DkQO3pqthh7SrBjcx5Ip3JOyJUr6VgpBWVf6ge5Uzjms1vPV7c4BMqP/Jmud+g==}
     hasBin: true
     peerDependencies:
       react: ^19.1.0
@@ -4514,9 +4514,9 @@ snapshots:
       - '@cfworker/json-schema'
       - supports-color
 
-  '@tutti-os/ui-i18n-runtime@0.0.23': {}
+  '@tutti-os/ui-i18n-runtime@0.0.24': {}
 
-  '@tutti-os/ui-rich-text@file:../../../../../tmp/ui-rich-text-dist-link(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
+  '@tutti-os/ui-rich-text@0.0.24(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
     dependencies:
       '@tiptap/core': 3.27.1(@tiptap/pm@3.27.1)
       '@tiptap/extension-document': 3.27.1(@tiptap/core@3.27.1(@tiptap/pm@3.27.1))
@@ -4524,8 +4524,8 @@ snapshots:
       '@tiptap/extension-paragraph': 3.27.1(@tiptap/core@3.27.1(@tiptap/pm@3.27.1))
       '@tiptap/extension-text': 3.27.1(@tiptap/core@3.27.1(@tiptap/pm@3.27.1))
       '@tiptap/react': 3.27.1(@floating-ui/dom@1.7.6)(@tiptap/core@3.27.1(@tiptap/pm@3.27.1))(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@tutti-os/ui-i18n-runtime': 0.0.23
-      '@tutti-os/ui-system': 0.0.23(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@tutti-os/ui-i18n-runtime': 0.0.24
+      '@tutti-os/ui-system': 0.0.24(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       react: 19.2.7
       react-dom: 19.2.7(react@19.2.7)
     transitivePeerDependencies:
@@ -4536,7 +4536,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@tutti-os/ui-system@0.0.23(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
+  '@tutti-os/ui-system@0.0.24(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
     dependencies:
       '@fontsource-variable/lexend': 5.2.11
       class-variance-authority: 0.7.1
