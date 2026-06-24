@@ -10,7 +10,7 @@
     "check": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@tutti-os/ui-rich-text": "file:/tmp/group-chat-local-pack/tutti-os-ui-rich-text-0.1.0.tgz",
-    "@tutti-os/workspace-external-core": "file:/tmp/group-chat-local-pack/tutti-os-workspace-external-core-0.1.0-local.tgz"
+    "@tutti-os/ui-rich-text": "0.0.26",
+    "@tutti-os/workspace-external-core": "0.0.26"
   }
 }

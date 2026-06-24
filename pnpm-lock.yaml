@@ -4,11 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  '@tutti-os/ui-i18n-runtime@0.1.0': file:/tmp/group-chat-local-pack/tutti-os-ui-i18n-runtime-0.1.0.tgz
-  '@tutti-os/ui-rich-text': file:/tmp/group-chat-local-pack/tutti-os-ui-rich-text-0.1.0.tgz
-  '@tutti-os/ui-system@0.1.0': file:/tmp/group-chat-local-pack/tutti-os-ui-system-0.1.0.tgz
-
 importers:
 
   .:
@@ -60,11 +55,11 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared
       '@tutti-os/ui-rich-text':
-        specifier: file:/tmp/group-chat-local-pack/tutti-os-ui-rich-text-0.1.0.tgz
-        version: file:../../../../../tmp/group-chat-local-pack/tutti-os-ui-rich-text-0.1.0.tgz(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+        specifier: 0.0.26
+        version: 0.0.26(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@tutti-os/workspace-external-core':
-        specifier: file:/tmp/group-chat-local-pack/tutti-os-workspace-external-core-0.1.0-local.tgz
-        version: file:../../../../../tmp/group-chat-local-pack/tutti-os-workspace-external-core-0.1.0-local.tgz(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(valtio@2.3.2(@types/react@19.2.7)(react@19.2.3))
+        specifier: 0.0.26
+        version: 0.0.26(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(valtio@2.3.2(@types/react@19.2.7)(react@19.2.3))
       '@vitejs/plugin-react':
         specifier: ^5.1.1
         version: 5.1.1(vite@7.2.7(@types/node@24.13.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4))
@@ -103,11 +98,11 @@ importers:
   packages/shared:
     dependencies:
       '@tutti-os/ui-rich-text':
-        specifier: file:/tmp/group-chat-local-pack/tutti-os-ui-rich-text-0.1.0.tgz
-        version: file:../../../../../tmp/group-chat-local-pack/tutti-os-ui-rich-text-0.1.0.tgz(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+        specifier: 0.0.26
+        version: 0.0.26(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@tutti-os/workspace-external-core':
-        specifier: file:/tmp/group-chat-local-pack/tutti-os-workspace-external-core-0.1.0-local.tgz
-        version: file:../../../../../tmp/group-chat-local-pack/tutti-os-workspace-external-core-0.1.0-local.tgz(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(valtio@2.3.2(@types/react@19.2.17)(react@19.2.7))
+        specifier: 0.0.26
+        version: 0.0.26(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(valtio@2.3.2(@types/react@19.2.17)(react@19.2.7))
 
 packages:
 
@@ -1681,65 +1676,51 @@ packages:
   '@tutti-os/agent-acp-kit@0.2.2':
     resolution: {integrity: sha512-G6XlJHCJK0gZ8GAe21PMKT/9UwZbDWJ7XOtj/re+YbqYQsDxX1qEVbXeZ00jRIIiRalq8ZyqIiSAQU2T1qDkuA==}
 
-  '@tutti-os/ui-i18n-runtime@0.0.24':
-    resolution: {integrity: sha512-fqRrowE36XMJJU/aVvky37rEUcsyonTCRk8eyjjMs05Suo/PBgTYYRBpIPEou0o5ielSJrKgZl5xLanaffNkeQ==}
+  '@tutti-os/ui-i18n-runtime@0.0.26':
+    resolution: {integrity: sha512-2ucs3fflLlvmYKRUIs0BYUgG3hgTTvobahZJm6k2+DHYrzlWHVLUpVksACtIkr7GAAu+sWUErDbE2G/6MGpNTA==}
 
-  '@tutti-os/ui-i18n-runtime@file:../../../../../tmp/group-chat-local-pack/tutti-os-ui-i18n-runtime-0.1.0.tgz':
-    resolution: {integrity: sha512-gPmzlPib6fbzrhTCwD1OX7SG+uxKzfdc4XldjQnZDoF/dFTNd2BXFPO0mL9UyqOGLQgV5/0JjQpmnsRl9MsEng==, tarball: file:../../../../../tmp/group-chat-local-pack/tutti-os-ui-i18n-runtime-0.1.0.tgz}
-    version: 0.1.0
-
-  '@tutti-os/ui-react-hooks@0.0.24':
-    resolution: {integrity: sha512-0llM3FeEtKXhBXHxIm58dvuUDjxJBVY0oMSwLZJ7hRXLi5vj2oL17TnMGlnAqnISlDBWAbjhHdZWtXsj7zoGJQ==}
+  '@tutti-os/ui-react-hooks@0.0.26':
+    resolution: {integrity: sha512-8BqSvD9nwCB07U26ZYEdxvNhkAUK/TwevhVlAFM9PJEna1ppRjIfAf3wy4I4JlK0DGJ6cAbu8KX0ndmp7AOfgQ==}
     peerDependencies:
       react: ^19.1.0
 
-  '@tutti-os/ui-rich-text@file:../../../../../tmp/group-chat-local-pack/tutti-os-ui-rich-text-0.1.0.tgz':
-    resolution: {integrity: sha512-Zbt00kS0A5Vmj+fKV+CRUIJks5OCrYWCJU6GEuue7iorFs0L8UVuwXXzldrkbylSOtpidfSjsP46hoiuODbRNw==, tarball: file:../../../../../tmp/group-chat-local-pack/tutti-os-ui-rich-text-0.1.0.tgz}
-    version: 0.1.0
+  '@tutti-os/ui-rich-text@0.0.26':
+    resolution: {integrity: sha512-789VXk4RPCTg5rrYzXutMOgRPSetQdCfeJdlWO5U/IkUcYiRzaoJhSFhUh3EPEn+K2n//q6AD/2M0qBh+bJdxw==}
     peerDependencies:
       react: ^19.1.0
       react-dom: ^19.1.0
 
-  '@tutti-os/ui-system@0.0.24':
-    resolution: {integrity: sha512-DnFKYw05NawHSUXrvTmAO+Z0DkQO3pqthh7SrBjcx5Ip3JOyJUr6VgpBWVf6ge5Uzjms1vPV7c4BMqP/Jmud+g==}
+  '@tutti-os/ui-system@0.0.26':
+    resolution: {integrity: sha512-DIxL7EkLkm3VTs1RPSfY32y1XRmTpfx+0+as5A6x23MMR8NNwe3zcj+BQ0eGOkVLbGHS9RWXLFS+5A7CDF/EJg==}
     hasBin: true
     peerDependencies:
       react: ^19.1.0
       react-dom: ^19.1.0
 
-  '@tutti-os/ui-system@file:../../../../../tmp/group-chat-local-pack/tutti-os-ui-system-0.1.0.tgz':
-    resolution: {integrity: sha512-nc5Lz6wHr47uNuyvZbZCsSgAhwpkZJ8xCH6BTwVwis1lw8N5L6P+tYVMFy9Fe+fl2pwuKK6YdrOqkRXtOdPFKQ==, tarball: file:../../../../../tmp/group-chat-local-pack/tutti-os-ui-system-0.1.0.tgz}
-    version: 0.1.0
-    hasBin: true
-    peerDependencies:
-      react: ^19.1.0
-      react-dom: ^19.1.0
+  '@tutti-os/workspace-external-core@0.0.26':
+    resolution: {integrity: sha512-rAuRM285J+iCC2FSa0f3Ncvra9o/Fo1qG/PdAx9s0hDzgriyxkjs9762llp2VU2Fe9j6FZ5VX0iR2dsjdJ/3ag==}
 
-  '@tutti-os/workspace-external-core@file:../../../../../tmp/group-chat-local-pack/tutti-os-workspace-external-core-0.1.0-local.tgz':
-    resolution: {integrity: sha512-BNaa1maEuESB0RxpkEnUTvUyXWAA1edxHMGnaJ6pGgs1n8ZXGBbA3B8eR5b1stNR4lLVdkFs8MvHnSnqdkUnvA==, tarball: file:../../../../../tmp/group-chat-local-pack/tutti-os-workspace-external-core-0.1.0-local.tgz}
-    version: 0.1.0
-
-  '@tutti-os/workspace-file-manager@0.0.24':
-    resolution: {integrity: sha512-5w9WYuXqkMgR84oRu3EJrwJ2jzgDmlDxeGaWkWHS4pH2nd8thys/tYmH6MQvufXIMKoPmSMxR4auQrgdXOe1kA==}
+  '@tutti-os/workspace-file-manager@0.0.26':
+    resolution: {integrity: sha512-mp7oSkWZ8KE3xXdLcTZh3zSLlfcCa2XYx9ZqmtCAMFTaxHniYWckWzC3bkHXknb18nDJsJGpfhWWxmPGqt+dcw==}
     peerDependencies:
       react: ^19.1.0
       react-dom: ^19.1.0
       valtio: ^2.3.2
 
-  '@tutti-os/workspace-file-preview@0.0.24':
-    resolution: {integrity: sha512-vf2k9WuV5fzNfM8BVRp4DYkSFIiu8rtU8Sq+x92TOolER1UrHQD3riZq6+lZftjx0ffP99Qk4lNLmqGA1rPX2Q==}
+  '@tutti-os/workspace-file-preview@0.0.26':
+    resolution: {integrity: sha512-EtdumuaZH2xKq16vMv6wprdgy6v4P3D8ffrBg6f3jLOyJCWw6w0cyqMfjva6YP3Js8acWod7svboTstoTEFwOQ==}
     peerDependencies:
       react: ^19.1.0
 
-  '@tutti-os/workspace-file-reference@0.0.24':
-    resolution: {integrity: sha512-4QHiy+jRVsfeyk2gkfYNOQduqqXFcL9YC056z2Mcgs0CawoRyFdDIfU0bp0+J7XM2U4sHvrps8ecYydeEqP5Kw==}
+  '@tutti-os/workspace-file-reference@0.0.26':
+    resolution: {integrity: sha512-INjGlbrVymvP+Wi1gEzXKO5J7iSOd7mcaUkLLBiHud0hnJSoFu0oYThVUwn20+NUABewSa4CIx7+qLJWvLQtmA==}
     peerDependencies:
       react: ^19.1.0
       react-dom: ^19.1.0
       valtio: ^2.3.2
 
-  '@tutti-os/workspace-user-project@0.0.24':
-    resolution: {integrity: sha512-vogSkHWG97oZPP9vIMPc7dHUaq2Sx20RaO2AjU1b+1uP52VzDRgvSF5c8H2RJ06dF2J5iuMbox5+hopqDHfSyA==}
+  '@tutti-os/workspace-user-project@0.0.26':
+    resolution: {integrity: sha512-PXP03tqvUy0AVtqdJPW3rfb44XaWtks6q8ZW2v4UhvuZCzFu8MUyYRmVA0F8MHXSDJJExpoehdJP9ejFsxgLjg==}
     peerDependencies:
       react: ^19.1.0
       react-dom: ^19.1.0
@@ -5365,19 +5346,17 @@ snapshots:
       - '@cfworker/json-schema'
       - supports-color
 
-  '@tutti-os/ui-i18n-runtime@0.0.24': {}
+  '@tutti-os/ui-i18n-runtime@0.0.26': {}
 
-  '@tutti-os/ui-i18n-runtime@file:../../../../../tmp/group-chat-local-pack/tutti-os-ui-i18n-runtime-0.1.0.tgz': {}
-
-  '@tutti-os/ui-react-hooks@0.0.24(react@19.2.3)':
+  '@tutti-os/ui-react-hooks@0.0.26(react@19.2.3)':
     dependencies:
       react: 19.2.3
 
-  '@tutti-os/ui-react-hooks@0.0.24(react@19.2.7)':
+  '@tutti-os/ui-react-hooks@0.0.26(react@19.2.7)':
     dependencies:
       react: 19.2.7
 
-  '@tutti-os/ui-rich-text@file:../../../../../tmp/group-chat-local-pack/tutti-os-ui-rich-text-0.1.0.tgz(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
+  '@tutti-os/ui-rich-text@0.0.26(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
     dependencies:
       '@tiptap/core': 3.27.1(@tiptap/pm@3.27.1)
       '@tiptap/extension-document': 3.27.1(@tiptap/core@3.27.1(@tiptap/pm@3.27.1))
@@ -5385,8 +5364,8 @@ snapshots:
       '@tiptap/extension-paragraph': 3.27.1(@tiptap/core@3.27.1(@tiptap/pm@3.27.1))
       '@tiptap/extension-text': 3.27.1(@tiptap/core@3.27.1(@tiptap/pm@3.27.1))
       '@tiptap/react': 3.27.1(@floating-ui/dom@1.7.6)(@tiptap/core@3.27.1(@tiptap/pm@3.27.1))(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@tutti-os/ui-i18n-runtime': file:../../../../../tmp/group-chat-local-pack/tutti-os-ui-i18n-runtime-0.1.0.tgz
-      '@tutti-os/ui-system': file:../../../../../tmp/group-chat-local-pack/tutti-os-ui-system-0.1.0.tgz(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@tutti-os/ui-i18n-runtime': 0.0.26
+      '@tutti-os/ui-system': 0.0.26(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       react: 19.2.7
       react-dom: 19.2.7(react@19.2.7)
     transitivePeerDependencies:
@@ -5397,7 +5376,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@tutti-os/ui-rich-text@file:../../../../../tmp/group-chat-local-pack/tutti-os-ui-rich-text-0.1.0.tgz(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)':
+  '@tutti-os/ui-rich-text@0.0.26(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)':
     dependencies:
       '@tiptap/core': 3.27.1(@tiptap/pm@3.27.1)
       '@tiptap/extension-document': 3.27.1(@tiptap/core@3.27.1(@tiptap/pm@3.27.1))
@@ -5405,8 +5384,8 @@ snapshots:
       '@tiptap/extension-paragraph': 3.27.1(@tiptap/core@3.27.1(@tiptap/pm@3.27.1))
       '@tiptap/extension-text': 3.27.1(@tiptap/core@3.27.1(@tiptap/pm@3.27.1))
       '@tiptap/react': 3.27.1(@floating-ui/dom@1.7.6)(@tiptap/core@3.27.1(@tiptap/pm@3.27.1))(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      '@tutti-os/ui-i18n-runtime': file:../../../../../tmp/group-chat-local-pack/tutti-os-ui-i18n-runtime-0.1.0.tgz
-      '@tutti-os/ui-system': file:../../../../../tmp/group-chat-local-pack/tutti-os-ui-system-0.1.0.tgz(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@tutti-os/ui-i18n-runtime': 0.0.26
+      '@tutti-os/ui-system': 0.0.26(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       react: 19.2.3
       react-dom: 19.2.3(react@19.2.3)
     transitivePeerDependencies:
@@ -5417,7 +5396,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@tutti-os/ui-system@0.0.24(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
+  '@tutti-os/ui-system@0.0.26(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
     dependencies:
       '@fontsource-variable/lexend': 5.2.11
       class-variance-authority: 0.7.1
@@ -5437,7 +5416,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@tutti-os/ui-system@0.0.24(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)':
+  '@tutti-os/ui-system@0.0.26(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)':
     dependencies:
       '@fontsource-variable/lexend': 5.2.11
       class-variance-authority: 0.7.1
@@ -5457,51 +5436,11 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@tutti-os/ui-system@file:../../../../../tmp/group-chat-local-pack/tutti-os-ui-system-0.1.0.tgz(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
+  '@tutti-os/workspace-external-core@0.0.26(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(valtio@2.3.2(@types/react@19.2.17)(react@19.2.7))':
     dependencies:
-      '@fontsource-variable/lexend': 5.2.11
-      class-variance-authority: 0.7.1
-      clsx: 2.1.1
-      radix-ui: 1.6.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      react: 19.2.7
-      react-dom: 19.2.7(react@19.2.7)
-      react-resizable-panels: 4.11.2(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      sonner: 2.0.7(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      tailwind-merge: 3.6.0
-      tw-animate-css: 1.4.0
-      vaul: 1.1.2(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      ws: 8.21.0
-    transitivePeerDependencies:
-      - '@types/react'
-      - '@types/react-dom'
-      - bufferutil
-      - utf-8-validate
-
-  '@tutti-os/ui-system@file:../../../../../tmp/group-chat-local-pack/tutti-os-ui-system-0.1.0.tgz(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)':
-    dependencies:
-      '@fontsource-variable/lexend': 5.2.11
-      class-variance-authority: 0.7.1
-      clsx: 2.1.1
-      radix-ui: 1.6.0(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      react: 19.2.3
-      react-dom: 19.2.3(react@19.2.3)
-      react-resizable-panels: 4.11.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      sonner: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      tailwind-merge: 3.6.0
-      tw-animate-css: 1.4.0
-      vaul: 1.1.2(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      ws: 8.21.0
-    transitivePeerDependencies:
-      - '@types/react'
-      - '@types/react-dom'
-      - bufferutil
-      - utf-8-validate
-
-  '@tutti-os/workspace-external-core@file:../../../../../tmp/group-chat-local-pack/tutti-os-workspace-external-core-0.1.0-local.tgz(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(valtio@2.3.2(@types/react@19.2.17)(react@19.2.7))':
-    dependencies:
-      '@tutti-os/ui-rich-text': file:../../../../../tmp/group-chat-local-pack/tutti-os-ui-rich-text-0.1.0.tgz(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@tutti-os/workspace-file-reference': 0.0.24(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(valtio@2.3.2(@types/react@19.2.17)(react@19.2.7))
-      '@tutti-os/workspace-user-project': 0.0.24(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(valtio@2.3.2(@types/react@19.2.17)(react@19.2.7))
+      '@tutti-os/ui-rich-text': 0.0.26(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@tutti-os/workspace-file-reference': 0.0.26(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(valtio@2.3.2(@types/react@19.2.17)(react@19.2.7))
+      '@tutti-os/workspace-user-project': 0.0.26(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(valtio@2.3.2(@types/react@19.2.17)(react@19.2.7))
     transitivePeerDependencies:
       - '@floating-ui/dom'
       - '@tiptap/pm'
@@ -5513,11 +5452,11 @@ snapshots:
       - utf-8-validate
       - valtio
 
-  '@tutti-os/workspace-external-core@file:../../../../../tmp/group-chat-local-pack/tutti-os-workspace-external-core-0.1.0-local.tgz(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(valtio@2.3.2(@types/react@19.2.7)(react@19.2.3))':
+  '@tutti-os/workspace-external-core@0.0.26(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(valtio@2.3.2(@types/react@19.2.7)(react@19.2.3))':
     dependencies:
-      '@tutti-os/ui-rich-text': file:../../../../../tmp/group-chat-local-pack/tutti-os-ui-rich-text-0.1.0.tgz(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      '@tutti-os/workspace-file-reference': 0.0.24(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(valtio@2.3.2(@types/react@19.2.7)(react@19.2.3))
-      '@tutti-os/workspace-user-project': 0.0.24(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(valtio@2.3.2(@types/react@19.2.7)(react@19.2.3))
+      '@tutti-os/ui-rich-text': 0.0.26(@floating-ui/dom@1.7.6)(@tiptap/pm@3.27.1)(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@tutti-os/workspace-file-reference': 0.0.26(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(valtio@2.3.2(@types/react@19.2.7)(react@19.2.3))
+      '@tutti-os/workspace-user-project': 0.0.26(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(valtio@2.3.2(@types/react@19.2.7)(react@19.2.3))
     transitivePeerDependencies:
       - '@floating-ui/dom'
       - '@tiptap/pm'
@@ -5529,11 +5468,11 @@ snapshots:
       - utf-8-validate
       - valtio
 
-  '@tutti-os/workspace-file-manager@0.0.24(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(valtio@2.3.2(@types/react@19.2.17)(react@19.2.7))':
+  '@tutti-os/workspace-file-manager@0.0.26(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(valtio@2.3.2(@types/react@19.2.17)(react@19.2.7))':
     dependencies:
-      '@tutti-os/ui-i18n-runtime': 0.0.24
-      '@tutti-os/ui-system': 0.0.24(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@tutti-os/workspace-file-preview': 0.0.24(react@19.2.7)
+      '@tutti-os/ui-i18n-runtime': 0.0.26
+      '@tutti-os/ui-system': 0.0.26(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@tutti-os/workspace-file-preview': 0.0.26(react@19.2.7)
       react: 19.2.7
       react-dom: 19.2.7(react@19.2.7)
       valtio: 2.3.2(@types/react@19.2.17)(react@19.2.7)
@@ -5543,11 +5482,11 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@tutti-os/workspace-file-manager@0.0.24(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(valtio@2.3.2(@types/react@19.2.7)(react@19.2.3))':
+  '@tutti-os/workspace-file-manager@0.0.26(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(valtio@2.3.2(@types/react@19.2.7)(react@19.2.3))':
     dependencies:
-      '@tutti-os/ui-i18n-runtime': 0.0.24
-      '@tutti-os/ui-system': 0.0.24(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      '@tutti-os/workspace-file-preview': 0.0.24(react@19.2.3)
+      '@tutti-os/ui-i18n-runtime': 0.0.26
+      '@tutti-os/ui-system': 0.0.26(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@tutti-os/workspace-file-preview': 0.0.26(react@19.2.3)
       react: 19.2.3
       react-dom: 19.2.3(react@19.2.3)
       valtio: 2.3.2(@types/react@19.2.7)(react@19.2.3)
@@ -5557,20 +5496,20 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@tutti-os/workspace-file-preview@0.0.24(react@19.2.3)':
+  '@tutti-os/workspace-file-preview@0.0.26(react@19.2.3)':
     dependencies:
       react: 19.2.3
 
-  '@tutti-os/workspace-file-preview@0.0.24(react@19.2.7)':
+  '@tutti-os/workspace-file-preview@0.0.26(react@19.2.7)':
     dependencies:
       react: 19.2.7
 
-  '@tutti-os/workspace-file-reference@0.0.24(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(valtio@2.3.2(@types/react@19.2.17)(react@19.2.7))':
+  '@tutti-os/workspace-file-reference@0.0.26(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(valtio@2.3.2(@types/react@19.2.17)(react@19.2.7))':
     dependencies:
-      '@tutti-os/ui-react-hooks': 0.0.24(react@19.2.7)
-      '@tutti-os/ui-system': 0.0.24(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@tutti-os/workspace-file-manager': 0.0.24(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(valtio@2.3.2(@types/react@19.2.17)(react@19.2.7))
-      '@tutti-os/workspace-file-preview': 0.0.24(react@19.2.7)
+      '@tutti-os/ui-react-hooks': 0.0.26(react@19.2.7)
+      '@tutti-os/ui-system': 0.0.26(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@tutti-os/workspace-file-manager': 0.0.26(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(valtio@2.3.2(@types/react@19.2.17)(react@19.2.7))
+      '@tutti-os/workspace-file-preview': 0.0.26(react@19.2.7)
       react: 19.2.7
       react-dom: 19.2.7(react@19.2.7)
       valtio: 2.3.2(@types/react@19.2.17)(react@19.2.7)
@@ -5580,12 +5519,12 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@tutti-os/workspace-file-reference@0.0.24(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(valtio@2.3.2(@types/react@19.2.7)(react@19.2.3))':
+  '@tutti-os/workspace-file-reference@0.0.26(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(valtio@2.3.2(@types/react@19.2.7)(react@19.2.3))':
     dependencies:
-      '@tutti-os/ui-react-hooks': 0.0.24(react@19.2.3)
-      '@tutti-os/ui-system': 0.0.24(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      '@tutti-os/workspace-file-manager': 0.0.24(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(valtio@2.3.2(@types/react@19.2.7)(react@19.2.3))
-      '@tutti-os/workspace-file-preview': 0.0.24(react@19.2.3)
+      '@tutti-os/ui-react-hooks': 0.0.26(react@19.2.3)
+      '@tutti-os/ui-system': 0.0.26(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@tutti-os/workspace-file-manager': 0.0.26(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(valtio@2.3.2(@types/react@19.2.7)(react@19.2.3))
+      '@tutti-os/workspace-file-preview': 0.0.26(react@19.2.3)
       react: 19.2.3
       react-dom: 19.2.3(react@19.2.3)
       valtio: 2.3.2(@types/react@19.2.7)(react@19.2.3)
@@ -5595,10 +5534,10 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@tutti-os/workspace-user-project@0.0.24(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(valtio@2.3.2(@types/react@19.2.17)(react@19.2.7))':
+  '@tutti-os/workspace-user-project@0.0.26(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(valtio@2.3.2(@types/react@19.2.17)(react@19.2.7))':
     dependencies:
-      '@tutti-os/ui-i18n-runtime': 0.0.24
-      '@tutti-os/ui-system': 0.0.24(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@tutti-os/ui-i18n-runtime': 0.0.26
+      '@tutti-os/ui-system': 0.0.26(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       react: 19.2.7
       react-dom: 19.2.7(react@19.2.7)
       valtio: 2.3.2(@types/react@19.2.17)(react@19.2.7)
@@ -5608,10 +5547,10 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@tutti-os/workspace-user-project@0.0.24(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(valtio@2.3.2(@types/react@19.2.7)(react@19.2.3))':
+  '@tutti-os/workspace-user-project@0.0.26(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(valtio@2.3.2(@types/react@19.2.7)(react@19.2.3))':
     dependencies:
-      '@tutti-os/ui-i18n-runtime': 0.0.24
-      '@tutti-os/ui-system': 0.0.24(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@tutti-os/ui-i18n-runtime': 0.0.26
+      '@tutti-os/ui-system': 0.0.26(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       react: 19.2.3
       react-dom: 19.2.3(react@19.2.3)
       valtio: 2.3.2(@types/react@19.2.7)(react@19.2.3)
