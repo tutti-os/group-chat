@@ -427,11 +427,17 @@ function MentionParticipantAvatar(props: {
     runtimeProfiles: [...props.runtimeProfiles],
   });
   return (
-    <AgentAvatar
-      title={props.participant.displayName}
-      avatar={resolvedAvatar.avatar}
-      provider={resolvedAvatar.provider}
-      size={32}
-    />
+    <span
+      className={
+        "[display:inline-grid] [width:36px] [height:36px] [flex:0_0_36px] [overflow:visible] [place-items:center]"
+      }
+    >
+      <AgentAvatar
+        title={props.participant.displayName}
+        avatar={resolvedAvatar.avatar}
+        provider={resolvedAvatar.provider}
+        size={32}
+      />
+    </span>
   );
 }

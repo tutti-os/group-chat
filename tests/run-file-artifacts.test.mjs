@@ -76,3 +76,16 @@ test("run file artifact mime inference treats markdown as text", async () => {
   assert.equal(inferMimeTypeForPath("/tmp/requested_1111.md"), "text/markdown");
   assert.equal(inferMimeTypeForPath("/tmp/pixel.png"), "image/png");
 });
+
+test("run file artifact import skips internal agent workspace files", async () => {
+  const { shouldImportRunFileArtifactPath } = await loadRunFileArtifactsModule();
+  const workspaceRoot = "/Users/example/.tutti-dev/apps/installations/group-chat/install/data/rooms/room/agents/agent";
+
+  assert.equal(shouldImportRunFileArtifactPath(`${workspaceRoot}/IDENTITY.md`, workspaceRoot), false);
+  assert.equal(shouldImportRunFileArtifactPath(`${workspaceRoot}/MEMORY.md`, workspaceRoot), false);
+  assert.equal(shouldImportRunFileArtifactPath(`${workspaceRoot}/source.md`, workspaceRoot), false);
+  assert.equal(shouldImportRunFileArtifactPath(`${workspaceRoot}/memory/users/local-user.md`, workspaceRoot), false);
+  assert.equal(shouldImportRunFileArtifactPath(`${workspaceRoot}/conversations/room.summary.md`, workspaceRoot), false);
+  assert.equal(shouldImportRunFileArtifactPath(`${workspaceRoot}/requested_1111.md`, workspaceRoot), true);
+  assert.equal(shouldImportRunFileArtifactPath("/Users/example/workspace/requested_1111.md", workspaceRoot), true);
+});
