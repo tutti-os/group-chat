@@ -13,11 +13,12 @@ export function buildLocalAgentProcessEnv(
     if (CODEX_DESKTOP_AMBIENT_ENV_KEYS.has(key)) continue;
     if (typeof value === "string") env[key] = value;
   }
-  for (const key of CODEX_DESKTOP_AMBIENT_ENV_KEYS) {
-    delete env[key];
-  }
-  return {
+  const merged = {
     ...env,
     ...overrides,
   };
+  for (const key of CODEX_DESKTOP_AMBIENT_ENV_KEYS) {
+    delete merged[key];
+  }
+  return merged;
 }

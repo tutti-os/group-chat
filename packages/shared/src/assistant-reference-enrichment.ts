@@ -1,4 +1,5 @@
 import type { MentionTarget } from "./index.js";
+import { sanitizeRichTextMentionScopeForAgentContext } from "@tutti-os/ui-rich-text/core";
 
 type MessageLike = {
   conversationId: string;
@@ -272,15 +273,15 @@ function parseReferenceMentionsFromContent(content: string): MentionTarget[] {
         if (providerId !== "workspace-app" && providerId !== "workspace-issue" && providerId !== "agent-session") {
           continue;
         }
-        const scope = Object.fromEntries(url.searchParams.entries());
+        const scope = sanitizeRichTextMentionScopeForAgentContext(Object.fromEntries(url.searchParams.entries()));
         mentions.push({
           participantId: entityId,
           displayNameSnapshot: label,
           mentionType: "reference",
           referenceProviderId: providerId,
           referenceEntityId: entityId,
-          referenceScope: Object.keys(scope).length ? scope : undefined,
-          referenceInsert: Object.keys(scope).length
+          referenceScope: scope,
+          referenceInsert: scope
             ? {
                 kind: "mention",
                 mention: {

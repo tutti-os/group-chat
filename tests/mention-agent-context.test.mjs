@@ -132,3 +132,49 @@ test("local agent prompt serializes sanitized mention context", async () => {
   assert.match(prompt, /"workspaceId":"ws-1"/);
   assert.ok(prompt.length < 10_000, `prompt length ${prompt.length}`);
 });
+
+test("assistant parsed mention links sanitize scope before storage", async () => {
+  const { resolveTriggerUserMentions } = await loadSharedModule();
+
+  const mentions = resolveTriggerUserMentions(
+    {
+      conversationId: "conversation-1",
+      createdAt: "2026-06-24T00:01:00.000Z",
+      role: "assistant",
+    },
+    [
+      {
+        conversationId: "conversation-1",
+        createdAt: "2026-06-24T00:00:00.000Z",
+        role: "user",
+        status: "success",
+        content:
+          "[Automation](mention://workspace-app/automation?workspaceId=ws-1&iconUrl=DATA%3Aimage%2Fpng%3Bbase64%2Cbad&meta.source=ui)",
+        mentions: [],
+      },
+    ],
+  );
+
+  assert.deepEqual(mentions, [
+    {
+      participantId: "automation",
+      displayNameSnapshot: "Automation",
+      mentionType: "reference",
+      referenceProviderId: "workspace-app",
+      referenceEntityId: "automation",
+      referenceScope: {
+        workspaceId: "ws-1",
+      },
+      referenceInsert: {
+        kind: "mention",
+        mention: {
+          entityId: "automation",
+          label: "Automation",
+          scope: {
+            workspaceId: "ws-1",
+          },
+        },
+      },
+    },
+  ]);
+});

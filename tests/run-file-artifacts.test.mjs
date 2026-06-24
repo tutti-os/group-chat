@@ -85,6 +85,7 @@ test("run file artifact import skips internal agent workspace files", async () =
   assert.equal(shouldImportRunFileArtifactPath(`${workspaceRoot}/MEMORY.md`, workspaceRoot), false);
   assert.equal(shouldImportRunFileArtifactPath(`${workspaceRoot}/source.md`, workspaceRoot), false);
   assert.equal(shouldImportRunFileArtifactPath(`${workspaceRoot}/memory/users/local-user.md`, workspaceRoot), false);
+  assert.equal(shouldImportRunFileArtifactPath(`${workspaceRoot}/Memory/users/local-user.md`, workspaceRoot), false);
   assert.equal(shouldImportRunFileArtifactPath(`${workspaceRoot}/conversations/room.summary.md`, workspaceRoot), false);
   assert.equal(shouldImportRunFileArtifactPath(`${workspaceRoot}/requested_1111.md`, workspaceRoot), true);
   assert.equal(shouldImportRunFileArtifactPath("/Users/example/workspace/requested_1111.md", workspaceRoot), true);

@@ -188,8 +188,9 @@ export function resolveReferenceMentionScope(
   referenceInsert?: TuttiReferenceInsert,
   referenceScope?: Readonly<Record<string, string>>,
 ) {
-  if (referenceInsert?.kind === "mention" && referenceInsert.mention.scope) {
-    return referenceInsert.mention.scope;
+  if (referenceInsert?.kind === "mention") {
+    const legacyScope = (referenceInsert as { scope?: Readonly<Record<string, string>> }).scope;
+    return referenceInsert.mention?.scope ?? legacyScope ?? referenceScope;
   }
   return referenceScope;
 }

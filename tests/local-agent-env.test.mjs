@@ -30,3 +30,23 @@ test("local agent env does not inherit Codex Desktop thread state", async () => 
     },
   );
 });
+
+test("local agent env strips Codex Desktop thread state from overrides", async () => {
+  const { buildLocalAgentProcessEnv } = await loadModule();
+
+  assert.deepEqual(
+    buildLocalAgentProcessEnv(
+      {
+        HOME: "/Users/example",
+      },
+      {
+        CODEX_THREAD_ID: "019ef408-0b02-7e62-859f-4161c99bfd34",
+        PATH: "/usr/bin",
+      },
+    ),
+    {
+      HOME: "/Users/example",
+      PATH: "/usr/bin",
+    },
+  );
+});
