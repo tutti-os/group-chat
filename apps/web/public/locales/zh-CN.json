@@ -289,11 +289,6 @@
   "agentForm.addFailed": "无法添加 Agent，请关闭后重试",
 
   "rolePreset.custom": "自定义",
-  "rolePreset.product-manager": "产品经理",
-  "rolePreset.designer": "设计师",
-  "rolePreset.developer": "开发",
-  "rolePreset.qa-tester": "测试",
-  "rolePreset.marketer": "市场",
 
   "reasoning.auto": "自动",
   "reasoning.autoDesc": "使用运行时默认设置",

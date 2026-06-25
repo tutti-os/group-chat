@@ -289,11 +289,6 @@
   "agentForm.addFailed": "Unable to add agent. Close and try again.",
 
   "rolePreset.custom": "Custom",
-  "rolePreset.product-manager": "Product manager",
-  "rolePreset.designer": "Designer",
-  "rolePreset.developer": "Developer",
-  "rolePreset.qa-tester": "QA",
-  "rolePreset.marketer": "Marketing",
 
   "reasoning.auto": "Auto",
   "reasoning.autoDesc": "Use runtime default",

@@ -8,8 +8,10 @@ import test from "node:test";
 
 const execFileAsync = promisify(execFile);
 const instructionsModuleUrl = new URL("../apps/server/src/domains/agent-instructions.ts", import.meta.url).href;
+const providerModuleUrl = new URL("../apps/server/src/runtimes/local-agent-provider.ts", import.meta.url).href;
+const acpModuleUrl = new URL("../apps/server/src/runtimes/local-agent-acp.ts", import.meta.url).href;
 
-test("product agents receive a PRD contract in their effective role instructions", async () => {
+test("roles are custom-only and empty roles do not take effect", async () => {
   const checkScript = join(await mkdtemp(join(tmpdir(), "group-chat-agent-instructions-")), "check-instructions.ts");
   await writeFile(
     checkScript,
@@ -17,7 +19,9 @@ test("product agents receive a PRD contract in their effective role instructions
       import assert from "node:assert/strict";
 
       async function main() {
-        const { buildEffectiveRoleDescription } = await import(${JSON.stringify(instructionsModuleUrl)});
+        const { buildAgentInstructions, buildEffectiveRoleDescription } = await import(${JSON.stringify(instructionsModuleUrl)});
+        const { buildKitSystemPrompt } = await import(${JSON.stringify(providerModuleUrl)});
+        const { acpPromptFromLocalAgentInput } = await import(${JSON.stringify(acpModuleUrl)});
         const participant = {
           id: "product-agent",
           conversationId: "conversation-1",
@@ -35,11 +39,44 @@ test("product agents receive a PRD contract in their effective role instructions
           createdAt: "2026-06-25T00:00:00.000Z",
           updatedAt: "2026-06-25T00:00:00.000Z",
         };
-        const identity = {
+        const conversation = {
+          id: "conversation-1",
+          roomId: "room-1",
+          type: "group",
+          title: "AI 讨论室",
+          groupSystemPrompt: "",
+          collaborationRules: "",
+          collaborationRulesVersion: 1,
+          replyPolicy: { mode: "mentioned", order: "sequential", maxRounds: 1, mentionFollowupRounds: 0 },
+          activeBranchId: null,
+          pinned: false,
+          lastMessage: "@产品 帮我写一个详细的可口可乐的prd，500字左右",
+          lastMessageAt: "2026-06-25T00:00:00.000Z",
+          createdAt: "2026-06-25T00:00:00.000Z",
+          updatedAt: "2026-06-25T00:00:00.000Z",
+        };
+        const userMessage = {
+          id: "msg-1",
+          conversationId: "conversation-1",
+          role: "user",
+          senderParticipantId: null,
+          senderName: "老板",
+          content: "@产品 帮我写一个详细的可口可乐的prd，500字左右",
+          mentions: [{ mentionType: "participant", participantId: "product-agent", displayNameSnapshot: "产品" }],
+          visibility: "public",
+          status: "success",
+          branchId: null,
+          parentMessageId: null,
+          runId: null,
+          tokenUsage: null,
+          createdAt: "2026-06-25T00:00:00.000Z",
+          updatedAt: "2026-06-25T00:00:00.000Z",
+        };
+        const emptyIdentity = {
           id: "identity-product",
-          name: "Product Manager",
+          name: "产品",
           icon: "",
-          systemPrompt: "You are a senior product manager agent.",
+          systemPrompt: "",
           stylePrompt: "",
           defaultRuntimeProfileId: "local-agent:codex",
           defaultListenMode: "passive",
@@ -52,30 +89,50 @@ test("product agents receive a PRD contract in their effective role instructions
           updatedAt: "2026-06-25T00:00:00.000Z",
         };
 
-        const description = buildEffectiveRoleDescription(participant, identity);
+        assert.equal(buildEffectiveRoleDescription(participant, emptyIdentity), "");
+        assert.match(buildAgentInstructions({ conversation, participant, identity: emptyIdentity }), /No role description configured\\./);
+        assert.equal(
+          buildEffectiveRoleDescription(participant, {
+            ...emptyIdentity,
+            systemPrompt: "You are a senior product manager agent.\\n\\nYour job is to turn ambiguous ideas into clear product direction.",
+          }),
+          "",
+        );
 
-        assert.match(description, /## PRD Request Contract/);
-        assert.match(description, /Do not answer with only acceptance criteria/);
-        assert.match(description, /Do not silently turn a brand or physical product, such as Coca-Cola, into a website/);
+        const customIdentity = {
+          ...emptyIdentity,
+          systemPrompt: "你是用户自定义的产品顾问，输出前先说明关键假设。",
+        };
+        assert.equal(buildEffectiveRoleDescription(participant, customIdentity), customIdentity.systemPrompt);
 
-        const alreadyGuided = buildEffectiveRoleDescription(
+        const systemPrompt = buildKitSystemPrompt({
+          runId: "run-1",
+          conversation,
           participant,
-          {
-            ...identity,
-            systemPrompt: [
-              "You are a senior product manager agent.",
-              "When the user asks for a PRD, produce a real product requirements document.",
-              "Do not silently turn a brand or physical product, such as Coca-Cola, into a website.",
-            ].join("\\n"),
-          },
-        );
-        assert.doesNotMatch(alreadyGuided, /## PRD Request Contract/);
+          identity: emptyIdentity,
+          runtimeProfile: null,
+          userMessage,
+          recentMessages: [],
+          attachments: [],
+        });
+        assert.match(systemPrompt, /target length such as 500字左右/);
+        assert.match(systemPrompt, /honor that request even when the reply is longer/);
 
-        const unrelated = buildEffectiveRoleDescription(
-          { ...participant, displayName: "工程", identityId: "identity-dev" },
-          { ...identity, id: "identity-dev", name: "Developer", systemPrompt: "You are a senior software engineer agent." },
-        );
-        assert.doesNotMatch(unrelated, /## PRD Request Contract/);
+        const acpPrompt = acpPromptFromLocalAgentInput({
+          protocolVersion: "group-chat.local-agent.v1",
+          workspaceRoot: "/tmp/group-chat",
+          conversation,
+          participant,
+          turn: { kind: "message", userMessage, attachments: [] },
+          tools: {
+            contextUrl: "http://127.0.0.1/context",
+            artifactUrlTemplate: "http://127.0.0.1/artifacts/{artifactId}",
+            sendMessageUrl: "http://127.0.0.1/messages",
+            saveArtifactUrl: "http://127.0.0.1/artifacts",
+          },
+        });
+        assert.match(acpPrompt, /target length such as 500字左右/);
+        assert.match(acpPrompt, /honor that request even when the reply is longer/);
       }
 
       main().catch((error) => {

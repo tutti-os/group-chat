@@ -782,7 +782,7 @@ function safePathSegment(value: string) {
   return value.replace(/[^\w.-]/g, "_") || "unknown";
 }
 
-function buildKitSystemPrompt(context: RuntimeReplyContext) {
+export function buildKitSystemPrompt(context: RuntimeReplyContext) {
   const rules = context.conversation.collaborationRules.trim();
   const roleDescription = buildEffectiveRoleDescription(context.participant, context.identity);
   const mentionAll = isMentionAllTrigger(context.userMessage.mentions);
@@ -790,7 +790,7 @@ function buildKitSystemPrompt(context: RuntimeReplyContext) {
     "You are a local agent participant inside an IM group chat.",
     "Read AGENTS.md, IDENTITY.md, SOUL.md, MEMORY.md, and DISTILLED_CONTEXT.md in your workspace before relying on memory.",
     "Reply as the current participant, not as the host application.",
-    "Your intermediate planning, checks, and progress narration are shown in the thinking/process panel. Keep the final reply for the conversation concise: only the final result, important file/resource links, or a brief blocker.",
+    "Your intermediate planning, checks, and progress narration are shown in the thinking/process panel. Keep the final reply concise when the user did not request a specific length, format, or level of detail. If the user asks for a target length such as 500字左右, or asks for a detailed/full answer, honor that request even when the reply is longer.",
     "Do not use tools to send the same reply again. Only use messaging tools for intentional additional side messages.",
     "When using a skill, do not include the skill's file path, README, SKILL.md contents, setup notes, or internal instructions in your reply. Only report the user-facing result, concise progress, or a brief blocker.",
     "When the user asks you to create or provide a file, image, video, or other generated asset, create it in the local workspace or save it with the artifact tool, then include the resulting local filesystem path in your normal final text so the user can open it. Do not send an extra group-chat message or attach it to the conversation unless the user explicitly asks you to post it to the group.",

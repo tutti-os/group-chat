@@ -1,21 +1,15 @@
-import type { Identity } from "@group-chat/shared";
-import { defaultRoleDescription, roleDescriptionPresetLabel, roleDescriptionPresets } from "./constants.js";
+import { isDefaultIdentityRoleDescription, type Identity } from "@group-chat/shared";
 import { t } from "./i18n/index.js";
 
 export function matchRolePresetId(description: string) {
-  const normalized = description.trim();
-  if (!normalized) return "custom";
-  const matched = roleDescriptionPresets.find(
-    (preset) => preset.id !== "custom" && preset.description.trim() === normalized,
-  );
-  return matched?.id ?? "custom";
+  return "custom";
 }
 
 export function normalizeRoleDescriptionForEditor(
   identity: Pick<Identity, "systemPrompt" | "stylePrompt"> | null | undefined,
 ) {
   const description = getIdentityRoleDescription(identity);
-  if (description === defaultRoleDescription) return "";
+  if (isDefaultIdentityRoleDescription(description)) return "";
   return description;
 }
 
@@ -32,7 +26,7 @@ export function getConfiguredIdentityRoleDescription(
   identity: Pick<Identity, "systemPrompt" | "stylePrompt"> | null | undefined,
 ): string {
   const description = getIdentityRoleDescription(identity);
-  if (!description || description === defaultRoleDescription) {
+  if (isDefaultIdentityRoleDescription(description)) {
     return "";
   }
   return description;
@@ -43,8 +37,5 @@ export function getIdentityRoleLabel(
 ): string | null {
   const description = getConfiguredIdentityRoleDescription(identity);
   if (!description) return null;
-  const matched = roleDescriptionPresets.find(
-    (preset) => preset.id !== "custom" && preset.description.trim() === description.trim(),
-  );
-  return matched ? roleDescriptionPresetLabel(matched.id) : t("rolePreset.custom");
+  return t("rolePreset.custom");
 }

@@ -12,6 +12,13 @@ export type ParticipantStatus = "active" | "muted" | "removed";
 export type ParticipantListenMode = "active" | "passive" | "adaptive";
 export const DEFAULT_PARTICIPANT_LISTEN_MODE: ParticipantListenMode = "passive";
 export const LEGACY_DEFAULT_IDENTITY_ROLE_DESCRIPTION = "You are a helpful local agent in this room.";
+const LEGACY_PRESET_ROLE_DESCRIPTION_PREFIXES = [
+  "You are a senior product manager agent.",
+  "You are a senior product designer agent.",
+  "You are a senior software engineer agent.",
+  "You are a senior QA tester agent.",
+  "You are a senior marketing strategist agent.",
+];
 
 export function getIdentityRoleDescription(
   identity: Pick<Identity, "systemPrompt" | "stylePrompt"> | null | undefined,
@@ -26,10 +33,19 @@ export function getConfiguredIdentityRoleDescription(
   identity: Pick<Identity, "systemPrompt" | "stylePrompt"> | null | undefined,
 ): string {
   const description = getIdentityRoleDescription(identity);
-  if (!description || description === LEGACY_DEFAULT_IDENTITY_ROLE_DESCRIPTION) {
+  if (isDefaultIdentityRoleDescription(description)) {
     return "";
   }
   return description;
+}
+
+export function isDefaultIdentityRoleDescription(description: string) {
+  const normalized = description.trim();
+  return (
+    !normalized
+    || normalized === LEGACY_DEFAULT_IDENTITY_ROLE_DESCRIPTION
+    || LEGACY_PRESET_ROLE_DESCRIPTION_PREFIXES.some((prefix) => normalized.startsWith(prefix))
+  );
 }
 
 export function stripAssistantSkillDetails(content: string): string {

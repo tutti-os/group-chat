@@ -18,12 +18,11 @@ import {
   truncateParticipantDisplayName,
   uniqueParticipantDisplayNameInRoom,
 } from "@group-chat/shared";
-import { roleDescriptionPresetLabel, roleDescriptionPresets, getReasoningEffortOptions, reasoningModeFieldLabel } from "../../constants.js";
+import { getReasoningEffortOptions, reasoningModeFieldLabel } from "../../constants.js";
 import { useTranslation } from "../../i18n/index.js";
 import { isNewAgentDraft } from "../../identity-draft.js";
 import {
   getConfiguredIdentityRoleDescription,
-  matchRolePresetId,
   normalizeRoleDescriptionForEditor,
 } from "../../identity-role.js";
 import {
@@ -84,9 +83,6 @@ export function AgentManageForm(props: {
   );
   const [speedMode, setSpeedMode] = useState(() => participant.speedMode ?? identity?.defaultSpeedMode ?? "");
   const [roleDescription, setRoleDescription] = useState(() => normalizeRoleDescriptionForEditor(identity));
-  const [selectedRolePresetId, setSelectedRolePresetId] = useState(() =>
-    matchRolePresetId(normalizeRoleDescriptionForEditor(identity)),
-  );
   const [showRoomInstructionsEditor, setShowRoomInstructionsEditor] = useState(
     () => Boolean(participant.roomInstructions.trim()),
   );
@@ -131,9 +127,7 @@ export function AgentManageForm(props: {
     setModel(normalizeRuntimeModelId(props.runtimeProfile, props.runtimeProfile?.model));
     setReasoningEffort(participant.reasoningEffort ?? identity?.defaultReasoningEffort ?? "");
     setSpeedMode(participant.speedMode ?? identity?.defaultSpeedMode ?? "");
-    const nextRoleDescription = normalizeRoleDescriptionForEditor(identity);
-    setRoleDescription(nextRoleDescription);
-    setSelectedRolePresetId(matchRolePresetId(nextRoleDescription));
+    setRoleDescription(normalizeRoleDescriptionForEditor(identity));
     setShowRoomInstructionsEditor(Boolean(participant.roomInstructions.trim()));
   }, [identity, participant, props.runtimeProfile]);
 
@@ -359,36 +353,13 @@ export function AgentManageForm(props: {
 
       <div className={"[display:grid] [gap:10px]"}>
         <span className={"[color:var(--muted)] [font-size:12px] [font-weight:700]"}>{t("agentForm.roleSetting")}</span>
-        {!readOnly ? (
-          <div className={"[display:flex] [flex-wrap:wrap] [gap:8px]"}>
-            {roleDescriptionPresets.map((preset) => {
-              const selected = selectedRolePresetId === preset.id;
-              return (
-                <button
-                  key={preset.id}
-                  type="button"
-                  aria-pressed={selected}
-                  className={`[border:1px_solid_var(--border)] [border-radius:999px] [padding:6px_12px] [color:#525252] [background:#f7f7f8] [font-size:12px] [font-weight:650] [transition:background-color_0.12s_ease,_border-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[border-color:#17171733] [&:hover]:[color:var(--text)] ${selected ? "![border-color:#171717] ![color:#ffffff] ![background:#171717]" : ""}`}
-                  onClick={() => {
-                    setSelectedRolePresetId(preset.id);
-                    setRoleDescription(preset.description);
-                  }}
-                >
-                  {roleDescriptionPresetLabel(preset.id)}
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
         <textarea
           value={roleDescription}
           readOnly={readOnly}
           aria-readonly={readOnly || undefined}
           onChange={(event) => {
             if (readOnly) return;
-            const nextValue = event.target.value;
-            setSelectedRolePresetId(matchRolePresetId(nextValue));
-            setRoleDescription(nextValue);
+            setRoleDescription(event.target.value);
           }}
           className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
           placeholder={t("agentForm.rolePlaceholder")}

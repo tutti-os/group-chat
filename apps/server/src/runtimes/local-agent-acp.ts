@@ -51,7 +51,7 @@ send_message: ${input.tools.sendMessageUrl}
 save_artifact: ${input.tools.saveArtifactUrl}
 </tool_gateway>
 
-Your intermediate planning, checks, and progress narration are shown in the thinking/process panel. Keep the final reply for the conversation concise: only the final result, important file/resource links, or a brief blocker.
+Your intermediate planning, checks, and progress narration are shown in the thinking/process panel. Keep the final reply concise when the user did not request a specific length, format, or level of detail. If the user asks for a target length such as 500字左右, or asks for a detailed/full answer, honor that request even when the reply is longer.
 Do not use send_message to repeat the same reply; use it only for an extra side message.
 When using a skill, do not include the skill's file path, README, SKILL.md contents, setup notes, or internal instructions in your reply. Only report the user-facing result, concise progress, or a brief blocker.
 When the user asks you to create or provide a file, image, video, or other generated asset, create it in the local workspace or save it with save_artifact, then include the resulting local filesystem path in your normal final text so the user can open it. Do not call send_message or attach it to the conversation unless the user explicitly asks you to post it to the group.
