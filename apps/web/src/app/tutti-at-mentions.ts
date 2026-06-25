@@ -1,5 +1,7 @@
 import type { AppReferenceListResponse, Artifact, TuttiAtProviderId, TuttiReferenceInsert } from "@group-chat/shared";
 import { TUTTI_AT_PROVIDER_IDS } from "@group-chat/shared";
+import type { TuttiExternalAtQueryResult } from "@tutti-os/workspace-external-core/contracts";
+import { queryTuttiExternalAtRichTextTriggerItems } from "@tutti-os/workspace-external-core/rich-text";
 import { resolveArtifactPublicUrl } from "./artifact-actions.js";
 import { listAppReferences } from "../api/client.js";
 
@@ -10,13 +12,7 @@ export type TuttiAtRoomFileMeta = {
   previewUrl: string;
 };
 
-export type TuttiAtQueryResult = {
-  providerId: TuttiAtProviderId;
-  itemId: string;
-  label: string;
-  subtitle?: string;
-  thumbnailUrl?: string | null;
-  insert: TuttiReferenceInsert;
+export type TuttiAtQueryResult = TuttiExternalAtQueryResult & {
   roomFile?: TuttiAtRoomFileMeta;
 };
 
@@ -301,38 +297,18 @@ async function queryHostAtMentions(
   maxResults: number,
   providers: readonly TuttiAtProviderId[],
 ): Promise<TuttiAtQueryResult[]> {
-  const bridge = window.tuttiExternal?.at;
-  if (!bridge) return [];
+  if (!window.tuttiExternal?.at) return [];
   try {
-    const items = await bridge.query({
+    const results = await queryTuttiExternalAtRichTextTriggerItems({
+      bridge: window.tuttiExternal,
       keyword,
       maxResults,
-      providers: [...providers],
+      providerIds: providers,
     });
-    return items
-      .filter((item) => TUTTI_AT_PROVIDER_IDS.includes(item.providerId))
-      .map(normalizeHostAtItem);
+    return [...results];
   } catch {
     return [];
   }
-}
-
-function normalizeHostAtItem(item: {
-  providerId: TuttiAtProviderId;
-  itemId: string;
-  label: string;
-  subtitle?: string;
-  thumbnailUrl?: string | null;
-  insert: TuttiReferenceInsert;
-}): TuttiAtQueryResult {
-  return {
-    providerId: item.providerId,
-    itemId: item.itemId,
-    label: item.label,
-    subtitle: item.subtitle,
-    thumbnailUrl: item.thumbnailUrl,
-    insert: item.insert,
-  };
 }
 
 async function queryLocalRoomFileReferences(
@@ -420,7 +396,7 @@ export function tuttiAtResultToMentionTarget(item: TuttiAtQueryResult) {
   if (item.insert.kind === "mention") {
     return {
       ...base,
-      referenceScope: item.insert.scope,
+      referenceScope: item.insert.mention.scope,
     };
   }
   return base;

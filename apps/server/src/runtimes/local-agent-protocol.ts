@@ -1,4 +1,9 @@
 import { participantWorkspaceRoot } from "../local/paths.js";
+import {
+  resolveMentionTargetReferenceLabel,
+  resolveMentionTargetReferenceScope,
+  sanitizeMentionTargetForAgentContext,
+} from "@group-chat/shared";
 import type { RuntimeReplyContext } from "./runtime-provider.js";
 
 export const LOCAL_AGENT_PROTOCOL_VERSION = "group-chat.local-agent.v1";
@@ -127,13 +132,14 @@ export function resolveWorkspaceAppIntent(
       && mention.referenceProviderId === "workspace-app"
       && mention.referenceEntityId?.trim()
     )
-    .map((mention) => ({
-      appId: mention.referenceEntityId!.trim(),
-      label: mention.displayNameSnapshot.trim()
-        || (mention.referenceInsert?.kind === "mention" ? mention.referenceInsert.label : "")
-        || mention.referenceEntityId!.trim(),
-      scope: mention.referenceInsert?.kind === "mention" ? mention.referenceInsert.scope : mention.referenceScope,
-    }));
+    .map((mention) => {
+      const sanitizedMention = sanitizeMentionTargetForAgentContext(mention);
+      return {
+        appId: sanitizedMention.referenceEntityId!.trim(),
+        label: resolveMentionTargetReferenceLabel(sanitizedMention) || sanitizedMention.referenceEntityId!.trim(),
+        scope: resolveMentionTargetReferenceScope(sanitizedMention),
+      };
+    });
   if (!workspaceApps.length) return null;
 
   const addressed = context.userMessage.mentions.some((mention) =>

@@ -28,6 +28,7 @@ import {
   type ReplyMode,
   type RuntimeProfile,
   resolveMentionSpeakingOrder,
+  sanitizeMentionTargetForAgentContext,
   stripAssistantSkillDetails,
 } from "@group-chat/shared";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -39,7 +40,12 @@ import { sha256ForFile } from "./artifact-content-hash.js";
 import { AgentToolTokenStore } from "./agent-tool-tokens.js";
 import { AgentWorkspaceService } from "./agent-workspace.js";
 import { ChatRepository } from "./chat-repository.js";
-import { extractLocalFilePathsFromContent, inferMimeTypeForPath, linkRunFileArtifactPathsInContent } from "./run-file-artifacts.js";
+import {
+  extractLocalFilePathsFromContent,
+  inferMimeTypeForPath,
+  linkRunFileArtifactPathsInContent,
+  shouldImportRunFileArtifactPath,
+} from "./run-file-artifacts.js";
 import {
   resolveDirectWorkspaceAppIntent,
   runDirectWorkspaceAppCli,
@@ -816,7 +822,7 @@ export class ChatService {
     return mentions
       .map((mention) => {
         if (mention.mentionType === "reference") {
-          return {
+          return sanitizeMentionTargetForAgentContext({
             participantId: mention.participantId,
             displayNameSnapshot: mention.displayNameSnapshot,
             mentionType: mention.mentionType,
@@ -824,7 +830,7 @@ export class ChatService {
             referenceEntityId: mention.referenceEntityId,
             referenceScope: mention.referenceScope,
             referenceInsert: mention.referenceInsert,
-          };
+          });
         }
         if (mention.mentionType === "all") {
           return {
@@ -2061,6 +2067,7 @@ export class ChatService {
       if (!normalizedRawPath) continue;
       const filePath = resolveRunOutputPath(normalizedRawPath, workspaceRoot);
       if (!isPathInsideDirectory(filePath, allowedRoot)) continue;
+      if (params.participantId && !shouldImportRunFileArtifactPath(filePath, workspaceRoot)) continue;
       const existingLinkedArtifact = artifactByPath.get(filePath);
       if (existingLinkedArtifact) {
         pushRunArtifactAliases(linked, normalizedRawPath, filePath, existingLinkedArtifact);

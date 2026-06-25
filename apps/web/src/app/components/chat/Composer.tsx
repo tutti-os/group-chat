@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AppWindow, AtSign, Bot, Check, Ear, FileOutput, FileText, LayoutList, LoaderCircle, Paperclip, Plus, Send, Square, Video, X } from "lucide-react";
+import { Ear, Paperclip, Send, Square, X } from "lucide-react";
+import { makeAtPanelKeyDown } from "@tutti-os/ui-rich-text/at-panel";
 import type { AgentRun, Artifact, Conversation, Identity, LocalAgentProviderStatus, MentionTarget, Message, MessageBlock, Participant, Room, RuntimeProfile, TuttiAtProviderId } from "@group-chat/shared";
-import { resolveArtifactLinkedMessageId } from "@group-chat/shared";
+import { resolveArtifactLinkedMessageId, sanitizeMentionTargetForAgentContext } from "@group-chat/shared";
 import { cancelRun, sendMessage, updateMessage, uploadArtifact } from "../../../api/client.js";
 import { getArtifactCategory, revealArtifactInTuttiFileManager, resolveArtifactPublicUrl } from "../../artifact-actions.js";
 import { formatBytes, formatMessageTime } from "../../formatting.js";
@@ -22,8 +23,7 @@ import { resolveArtifactsByIds } from "../../message-artifacts.js";
 import type { BackgroundTask } from "../../background-tasks.js";
 import { markMessageGroupBreak, MESSAGE_GROUP_IDLE_MS } from "../../message-group-breaks.js";
 import { AttachmentPreviewDialog, isTextAttachment, type AttachmentPreview } from "./AttachmentPreviewDialog.js";
-import { AgentAvatar } from "../ui/AgentAvatar.js";
-import { getRuntimeProviderAvatarIconUrl, getRuntimeProviderAvatarStyle, resolveAgentAvatarFromContext } from "../../identity-avatar.js";
+import { getRuntimeProviderAvatarIconUrl } from "../../identity-avatar.js";
 import { WHISPER_FEATURE_ENABLED } from "../../feature-flags.js";
 import { attachmentLabel, useTranslation, t } from "../../i18n/index.js";
 import { dispatchAgentGuiTask, openAgentGuiProvider, resolveAgentGuiDispatchFromMentions } from "../../agent-gui-dispatch.js";
@@ -39,7 +39,7 @@ import {
 } from "../../agent-launcher-availability.js";
 import { tryOpenFileInTuttiSync, buildTuttiMentionHref, isOpenableTuttiReferenceProvider } from "../../tutti-bridge.js";
 import { openReferenceMentionTarget } from "../../reference-mention-open.js";
-import { buildLocalAgentLauncherReference, buildLocalAgentMentionOptions, type LocalAgentMentionOption } from "../../local-agent-mention-options.js";
+import { buildLocalAgentLauncherReference, buildLocalAgentMentionOptions } from "../../local-agent-mention-options.js";
 import {
   parseTuttiAtMentionKey,
   isTuttiAtMentionCacheReady,
@@ -60,10 +60,19 @@ import { AGENT_LAUNCHER_MENTION_ICON_CLASS, PARTICIPANT_MENTION_CLASS, REFERENCE
 import { MessageReferenceContent } from "./MessageReferenceContent.js";
 import {
   MENTION_PANEL_TABS,
-  mentionTabI18nKey,
-  referenceProviderToMentionTab,
   type MentionPanelTab,
 } from "../../mention-panel-tabs.js";
+import {
+  ComposerMentionPalette,
+  buildComposerMentionPaletteModel,
+  buildComposerMentionPaletteCategories,
+  buildParticipantMentionOptions,
+  isReferenceMentionItem,
+  moveMentionPaletteHighlight,
+  nextMentionPanelTab,
+  selectedMentionOptionForKey,
+  type ComposerMentionItem,
+} from "./ComposerMentionPalette.js";
 
 const MENTION_MENU_Z_INDEX = 90;
 const COMPOSER_UPLOAD_CLIPBOARD_MIME = "application/x-agent-chat-composer-uploads";
@@ -144,7 +153,7 @@ export function Composer(props: {
     () => readCachedAvailableAgentLauncherAppIds(),
   );
   const [activeMentionTab, setActiveMentionTab] = useState<MentionPanelTab>("members");
-  const [activeMentionIndex, setActiveMentionIndex] = useState(0);
+  const [activeMentionKey, setActiveMentionKey] = useState<string | null>(null);
   const [fileMultiSelectMode, setFileMultiSelectMode] = useState(false);
   const [selectedFileMentionKeys, setSelectedFileMentionKeys] = useState<Set<string>>(() => new Set());
   const [uploadItems, setUploadItems] = useState<UploadItem[]>([]);
@@ -167,7 +176,6 @@ export function Composer(props: {
   const mentionSelectionRef = useRef<Range | null>(null);
   const mentionQueryRangeRef = useRef<Range | null>(null);
   const mentionMenuRef = useRef<HTMLDivElement | null>(null);
-  const mentionMenuListRef = useRef<HTMLDivElement | null>(null);
   const prefetchedMentionPanelKeysRef = useRef<Set<string>>(new Set());
   const lastActiveReferenceTabRef = useRef<MentionPanelTab | null>(null);
   const lastLocalAgentProviderRefreshAtRef = useRef(0);
@@ -256,46 +264,19 @@ export function Composer(props: {
       handledFocusRequestSeqRef.current = pendingFocusSeqRef.current;
     }
   }, []);
-  const referenceMentionOptions = useMemo<MentionOption[]>(
+  const mentionPaletteModel = useMemo(
     () =>
-      externalMentionOptions.map((item) => ({
-        kind: "reference" as const,
-        key: tuttiAtMentionKey(item.providerId, item.itemId),
-        label: item.label,
-        subtitle: item.subtitle,
-        thumbnailUrl: item.thumbnailUrl,
-        providerId: item.providerId,
-        item,
-      })),
-    [externalMentionOptions],
+      buildComposerMentionPaletteModel({
+        activeTab: activeMentionTab,
+        categories: buildComposerMentionPaletteCategories(),
+        memberOptions: memberMentionOptions,
+        groupAgentOptions: groupAgentMentionOptions,
+        localAgentOptions: localAgentMentionOptions,
+        referenceOptions: externalMentionOptions,
+        loading: externalMentionsLoading && activeMentionTab !== "members",
+      }),
+    [activeMentionTab, memberMentionOptions, groupAgentMentionOptions, localAgentMentionOptions, externalMentionOptions, externalMentionsLoading],
   );
-  const mentionOptionsByTab = useMemo<Record<MentionPanelTab, MentionOption[]>>(() => {
-    const referencesByTab = Object.fromEntries(
-      MENTION_PANEL_TABS.map((tab) => [tab, [] as MentionOption[]]),
-    ) as Record<MentionPanelTab, MentionOption[]>;
-    for (const option of referenceMentionOptions) {
-      if (option.kind !== "reference") continue;
-      const tab = referenceProviderToMentionTab(option.providerId);
-      if (!tab) continue;
-      if (tab === "files" && !option.item.roomFile) continue;
-      referencesByTab[tab].push(option);
-    }
-    const allOption = memberMentionOptions.find((option) => option.kind === "all") ?? null;
-    const realMemberOptions = memberMentionOptions.filter((option) => option.kind !== "all");
-    return {
-      members: [
-        ...(allOption ? [allOption] : []),
-        ...localAgentMentionOptions,
-        ...groupAgentMentionOptions,
-        ...realMemberOptions,
-      ],
-      files: referencesByTab.files,
-      sessions: referencesByTab.sessions,
-      apps: referencesByTab.apps.filter((option) => option.kind !== "reference" || !isAgentLauncherAppId(option.item.itemId)),
-      tasks: referencesByTab.tasks,
-    };
-  }, [memberMentionOptions, localAgentMentionOptions, groupAgentMentionOptions, referenceMentionOptions]);
-  const mentionOptions = mentionOptionsByTab[activeMentionTab] ?? [];
   const roomArtifacts = useMemo(
     () => props.artifacts.filter((artifact) => artifact.roomId === props.conversation.roomId),
     [props.artifacts, props.conversation.roomId],
@@ -381,7 +362,7 @@ export function Composer(props: {
     });
     if (cachedItems) {
       setExternalMentionOptions(cachedItems);
-      setActiveMentionIndex(0);
+      setActiveMentionKey(null);
     }
     if (cachedItems && isFilesTab) {
       setExternalMentionsLoading(false);
@@ -399,7 +380,7 @@ export function Composer(props: {
       if (cancelled) return;
       setExternalMentionOptions((current) => sameTuttiAtQueryResults(current, items) ? current : items);
       setExternalMentionsLoading(false);
-      setActiveMentionIndex(0);
+      setActiveMentionKey(null);
     });
     return () => {
       cancelled = true;
@@ -733,7 +714,7 @@ export function Composer(props: {
         })();
     setMentionQuery((current) => {
       if (current !== nextQuery) {
-        setActiveMentionIndex(0);
+        setActiveMentionKey(null);
         if (nextQuery !== null && current === null) {
           setActiveMentionTab("members");
         }
@@ -984,7 +965,7 @@ export function Composer(props: {
         try {
           referenceInsert = JSON.parse(element.dataset.mentionReferenceInsert) as MentionTarget["referenceInsert"];
           if (referenceInsert?.kind === "mention") {
-            referenceScope = referenceInsert.scope;
+            referenceScope = referenceInsert.mention.scope;
           }
         } catch {
           referenceInsert = undefined;
@@ -1027,15 +1008,13 @@ export function Composer(props: {
     }
   }, [props.artifacts]);
 
-  const selectMentionOption = (option: MentionOption) => {
+  const selectMentionOption = (option: ComposerMentionItem) => {
     const editor = editorRef.current;
     if (editor) captureActiveMentionQueryRange(editor);
-    if (option.kind === "all") {
-      insertAllMention();
-    } else if (option.kind === "reference") {
+    if (isReferenceMentionItem(option)) {
       const isFileRef = option.providerId === "file" || option.providerId === "agent-generated-file";
       if (isFileRef) {
-        const artifactId = option.item.roomFile?.artifactId ?? option.item.itemId;
+        const artifactId = option.roomFile?.artifactId ?? option.itemId;
         const artifact = props.allArtifacts.find((item) => item.id === artifactId);
         if (artifact) {
           if (editor) {
@@ -1069,8 +1048,10 @@ export function Composer(props: {
           return;
         }
       }
-      const mentionId = tuttiAtMentionKey(option.providerId, option.item.itemId);
-      insertMentionChipAtActiveQuery(option.label, mentionId, option.item);
+      const mentionId = tuttiAtMentionKey(option.providerId, option.itemId);
+      insertMentionChipAtActiveQuery(option.label, mentionId, option);
+    } else if (option.kind === "all") {
+      insertAllMention();
     } else if (option.kind === "local-agent") {
       const reference = buildLocalAgentLauncherReference(option);
       insertMentionChipAtActiveQuery(option.label, tuttiAtMentionKey(reference.providerId, reference.itemId), reference);
@@ -1080,9 +1061,8 @@ export function Composer(props: {
     setMentionQuery(null);
   };
 
-  const toggleFileMentionSelect = (option: MentionOption) => {
-    if (option.kind !== "reference") return;
-    const key = tuttiAtMentionKey(option.providerId, option.item.itemId);
+  const toggleFileMentionSelect = (option: TuttiAtQueryResult) => {
+    const key = tuttiAtMentionKey(option.providerId, option.itemId);
     setSelectedFileMentionKeys((current) => {
       const next = new Set(current);
       if (next.has(key)) {
@@ -1092,6 +1072,14 @@ export function Composer(props: {
       }
       return next;
     });
+  };
+
+  const activateMentionOption = (option: ComposerMentionItem) => {
+    if (fileMultiSelectMode && activeMentionTab === "files" && isReferenceMentionItem(option)) {
+      toggleFileMentionSelect(option);
+      return;
+    }
+    selectMentionOption(option);
   };
 
   const handleToggleFileMultiSelect = () => {
@@ -1104,15 +1092,12 @@ export function Composer(props: {
 
   const handleConfirmFileMultiSelect = () => {
     if (selectedFileMentionKeys.size === 0) return;
-    const fileOptions = mentionOptionsByTab.files ?? [];
-    const selectedOptions = fileOptions.filter((option) => {
-      if (option.kind !== "reference") return false;
-      return selectedFileMentionKeys.has(tuttiAtMentionKey(option.providerId, option.item.itemId));
+    const selectedOptions = externalMentionOptions.filter((option) => {
+      return selectedFileMentionKeys.has(tuttiAtMentionKey(option.providerId, option.itemId));
     });
     const artifacts: Artifact[] = [];
     for (const option of selectedOptions) {
-      if (option.kind !== "reference") continue;
-      const artifactId = option.item.roomFile?.artifactId ?? option.item.itemId;
+      const artifactId = option.roomFile?.artifactId ?? option.itemId;
       const artifact = props.allArtifacts.find((item) => item.id === artifactId);
       if (artifact) artifacts.push(artifact);
     }
@@ -1668,11 +1653,13 @@ export function Composer(props: {
   }, [saveCurrentComposerDraft]);
 
   useEffect(() => {
-    setActiveMentionIndex((current) => (mentionOptions.length ? Math.min(current, mentionOptions.length - 1) : 0));
-  }, [mentionOptions.length, activeMentionTab]);
+    if (activeMentionKey === null) {
+      setActiveMentionKey(moveMentionPaletteHighlight(mentionPaletteModel.state, null, 1));
+    }
+  }, [activeMentionKey, mentionPaletteModel.state]);
 
   useEffect(() => {
-    setActiveMentionIndex(0);
+    setActiveMentionKey(null);
   }, [activeMentionTab]);
 
   useEffect(() => {
@@ -1699,7 +1686,7 @@ export function Composer(props: {
     setMentionMenuDismissed(false);
     setExternalMentionOptions([]);
     setExternalMentionsLoading(false);
-    setActiveMentionIndex(0);
+    setActiveMentionKey(null);
     setActiveMentionTab("members");
     setFileMultiSelectMode(false);
     setSelectedFileMentionKeys(new Set());
@@ -1871,12 +1858,6 @@ export function Composer(props: {
 
   const mentionMenuVisible = mentionQuery !== null;
   const mentionMenuOpen = mentionMenuVisible && !mentionMenuDismissed;
-  const referenceTabLoading = externalMentionsLoading && activeMentionTab !== "members";
-
-  useLayoutEffect(() => {
-    if (!mentionMenuOpen || activeMentionTab !== "members") return;
-    mentionMenuListRef.current?.scrollTo({ top: 0 });
-  }, [mentionMenuOpen, activeMentionTab, localAgentMentionOptions.length]);
 
   const updateMentionMenuPosition = useCallback(() => {
     const anchor = footerRef.current;
@@ -1909,7 +1890,39 @@ export function Composer(props: {
       window.removeEventListener("resize", handleReposition);
       window.removeEventListener("scroll", handleReposition, true);
     };
-  }, [mentionMenuOpen, mentionOptions.length, updateMentionMenuPosition]);
+  }, [mentionMenuOpen, mentionPaletteModel.state.groups, updateMentionMenuPosition]);
+
+  const handleMentionMenuKey = useCallback((event: KeyboardEvent | ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!mentionMenuOpen) return false;
+      const handled = makeAtPanelKeyDown({
+        moveSelection: (delta) => setActiveMentionKey((current) => moveMentionPaletteHighlight(mentionPaletteModel.state, current, delta)),
+        commitSelection: () => {
+          const selectedOption = selectedMentionOptionForKey(mentionPaletteModel.state, activeMentionKey);
+          if (selectedOption) activateMentionOption(selectedOption);
+        },
+        close: () => {
+          setMentionMenuDismissed(true);
+          setMentionQuery(null);
+        },
+        cycleFilter: (delta) => setActiveMentionTab((current) => nextMentionPanelTab(current, delta)),
+      })(event);
+      if (handled) {
+        event.stopPropagation();
+        return true;
+      }
+      return false;
+  }, [activeMentionKey, activateMentionOption, mentionMenuOpen, mentionPaletteModel.state]);
+
+  useEffect(() => {
+    if (!mentionMenuOpen) return;
+    const handleMentionMenuKeyDown = (event: KeyboardEvent) => {
+      handleMentionMenuKey(event);
+    };
+    window.addEventListener("keydown", handleMentionMenuKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", handleMentionMenuKeyDown, true);
+    };
+  }, [handleMentionMenuKey, mentionMenuOpen]);
 
   useEffect(() => {
     if (!mentionMenuVisible) return;
@@ -2092,7 +2105,15 @@ export function Composer(props: {
               }}
               onPaste={pasteFiles}
               onCopy={copyComposerUploads}
-              onKeyUp={() => syncEditorText(true)}
+              onKeyUp={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setMentionMenuDismissed(true);
+                  setMentionQuery(null);
+                  return;
+                }
+                syncEditorText(true);
+              }}
               onFocus={() => {
                 scheduleLocalAgentProviderRefreshBurst();
                 syncEditorText();
@@ -2182,35 +2203,7 @@ export function Composer(props: {
                   syncEditorText();
                   return;
                 }
-                if (mentionMenuOpen && event.key === "ArrowDown") {
-                  event.preventDefault();
-                  setActiveMentionIndex((current) => (current + 1) % Math.max(mentionOptions.length, 1));
-                  return;
-                }
-                if (mentionMenuOpen && event.key === "ArrowUp") {
-                  event.preventDefault();
-                  setActiveMentionIndex((current) => (current - 1 + Math.max(mentionOptions.length, 1)) % Math.max(mentionOptions.length, 1));
-                  return;
-                }
-                if (mentionMenuOpen && event.key === "ArrowRight") {
-                  event.preventDefault();
-                  setActiveMentionTab((current) => {
-                    const index = MENTION_PANEL_TABS.indexOf(current);
-                    return MENTION_PANEL_TABS[(index + 1) % MENTION_PANEL_TABS.length]!;
-                  });
-                  return;
-                }
-                if (mentionMenuOpen && event.key === "ArrowLeft") {
-                  event.preventDefault();
-                  setActiveMentionTab((current) => {
-                    const index = MENTION_PANEL_TABS.indexOf(current);
-                    return MENTION_PANEL_TABS[(index - 1 + MENTION_PANEL_TABS.length) % MENTION_PANEL_TABS.length]!;
-                  });
-                  return;
-                }
-                if (mentionMenuOpen && (event.key === "Enter" || event.key === "Tab") && mentionOptions.length > 0) {
-                  event.preventDefault();
-                  selectMentionOption(mentionOptions[activeMentionIndex] ?? mentionOptions[0]!);
+                if (handleMentionMenuKey(event)) {
                   return;
                 }
                 if (event.key === "Escape") {
@@ -2250,303 +2243,25 @@ export function Composer(props: {
       </div>
       {mentionMenuOpen
         ? createPortal(
-            <div
-              ref={mentionMenuRef}
-              style={mentionMenuStyle}
-              className={`[overflow:hidden] [border:1px_solid_var(--border)] [border-radius:18px] [background:var(--panel)] [box-shadow:0_14px_42px_rgb(0_0_0_/_12%)] ${fileMultiSelectMode && activeMentionTab === "files" ? "[display:grid] [grid-template-rows:auto_minmax(0,_1fr)_auto]" : "[display:grid] [grid-template-rows:auto_minmax(0,_1fr)]"}`}
-              role="listbox"
-              aria-label={t("composer.mentionSuggestions")}
-            >
-              <div
-                className={"[display:flex] [align-items:center] [gap:4px] [overflow-x:auto] [border-bottom:1px_solid_var(--border)] [padding:6px_6px_0] [scrollbar-width:none] [&::-webkit-scrollbar]:[display:none]"}
-                role="tablist"
-                aria-label={t("composer.mentionSuggestions")}
-              >
-                {MENTION_PANEL_TABS.map((tab) => (
-                  <button
-                    key={tab}
-                    type="button"
-                    role="tab"
-                    aria-selected={activeMentionTab === tab}
-                    data-active={activeMentionTab === tab || undefined}
-                    className={"[flex:0_0_auto] [border:0] [border-bottom:2px_solid_transparent] [border-radius:10px_10px_0_0] [padding:6px_10px] [color:var(--muted)] [background:transparent] [font-size:11px] [font-weight:600] [line-height:16px] [white-space:nowrap] [cursor:pointer] [transition:color_0.12s_ease,_background-color_0.12s_ease,_border-color_0.12s_ease] [&[data-active=true]]:[color:var(--text)] [&[data-active=true]]:[border-bottom-color:var(--primary)] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000008]"}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => setActiveMentionTab(tab)}
-                  >
-                    {t(mentionTabI18nKey(tab))}
-                  </button>
-                ))}
-                {activeMentionTab === "files" ? (
-                  <button
-                    type="button"
-                    className={`[flex:0_0_auto] [margin-left:auto] [display:inline-grid] [width:28px] [height:28px] [place-items:center] [border:0] [border-radius:8px] [&:focus-visible]:[outline:none] ${fileMultiSelectMode ? "[color:#ffffff] [background:#171717]" : "[color:var(--muted)] [background:transparent] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000008]"}`}
-                    aria-label={fileMultiSelectMode ? t("files.exitMultiSelect") : t("files.enterMultiSelect")}
-                    title={fileMultiSelectMode ? t("files.exitMultiSelect") : t("files.enterMultiSelect")}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={handleToggleFileMultiSelect}
-                  >
-                    {fileMultiSelectMode ? <Check size={14} /> : <Plus size={14} />}
-                  </button>
-                ) : null}
-              </div>
-              <div ref={mentionMenuListRef} className={"[overflow-y:auto] [overflow-anchor:none] [padding:6px]"}>
-          {referenceTabLoading ? (
-            <div className={"[display:flex] [align-items:center] [gap:8px] [padding:8px_10px] [color:var(--muted)] [font-size:12px]"}>
-              <LoaderCircle size={14} className={"animate-spin"} />
-              <span>{t("composer.atMentionLoading")}</span>
-            </div>
-          ) : mentionOptions.length === 0 ? (
-            <div className={"[padding:10px_12px] [color:var(--muted)] [font-size:12px] [line-height:18px]"}>
-              {t("composer.atTabEmpty")}
-            </div>
-          ) : null}
-          {(() => {
-            let localAgentHeaderShown = false;
-            let memberDividerShown = false;
-            let participantHeaderShown = false;
-            return mentionOptions.flatMap((option, index) => {
-              const nodes: ReactNode[] = [];
-              if (
-                activeMentionTab === "members"
-                && option.kind === "local-agent"
-                && !localAgentHeaderShown
-              ) {
-                localAgentHeaderShown = true;
-                nodes.push(
-                  <div
-                    key="mention-local-agent-header"
-                    role="presentation"
-                    className={"[padding:8px_10px_4px] [color:var(--muted)] [font-size:11px] [font-weight:500] [line-height:16px]"}
-                  >
-                    {t("composer.atSection.agent")}
-                  </div>,
-                );
-              }
-              if (
-                activeMentionTab === "members"
-                && option.kind === "participant"
-                && localAgentHeaderShown
-                && !memberDividerShown
-              ) {
-                memberDividerShown = true;
-                nodes.push(
-                  <div
-                    key="mention-member-divider"
-                    role="presentation"
-                    className={"[margin:6px_6px_4px] [border-top:1px_solid_var(--border)]"}
-                  />,
-                );
-              }
-              if (
-                activeMentionTab === "members"
-                && option.kind === "participant"
-                && !participantHeaderShown
-              ) {
-                participantHeaderShown = true;
-                nodes.push(
-                  <div
-                    key="mention-likely-header"
-                    role="presentation"
-                    className={"[padding:8px_10px_4px] [color:var(--muted)] [font-size:11px] [font-weight:500] [line-height:16px]"}
-                  >
-                    {t("composer.likelyMentions")}
-                  </div>,
-                );
-              }
-              nodes.push(
-                option.kind === "all" ? (
-              <button
-                key={option.key}
-                type="button"
-                role="option"
-                aria-selected={index === activeMentionIndex}
-                data-active={index === activeMentionIndex || undefined}
-                className={"[display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:9px] [width:100%] [min-width:0] [min-height:38px] [border:0] [border-radius:12px] [padding:0_8px] [color:var(--text)] [text-align:left] [background:transparent] [transition:background-color_0.12s_ease] [&[data-active=true]]:[background:#00000014] [&:hover]:[background:#00000014]"}
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  saveMentionSelection();
-                  selectMentionOption(option);
-                }}
-                onMouseEnter={() => setActiveMentionIndex(index)}
-              >
-                <span className={"[display:inline-grid] [width:32px] [height:32px] [place-items:center] [border-radius:999px] [color:#ffffff] [background:var(--primary)] [box-shadow:inset_0_0_0_1px_#ffffff66]"}>
-                  <AtSign size={14} />
-                </span>
-                <span className={"[display:inline-flex] [min-width:0] [align-items:baseline] [gap:6px]"}>
-                  <strong className={"[font-size:12px] [font-weight:500] [line-height:16px]"}>{option.label}</strong>
-                  <span className={"[color:var(--muted)] [font-size:11px] [line-height:16px] [white-space:nowrap]"}>
-                    {t("composer.notifyEveryone")}
-                  </span>
-                </span>
-              </button>
-            ) : option.kind === "reference" ? (
-              (() => {
-                const isFileOption = option.providerId === "file" || option.providerId === "agent-generated-file";
-                const roomFileMeta = isFileOption && option.item.roomFile
-                  ? formatMentionRoomFileMeta(option.item.roomFile, {
-                    artifactById: roomArtifactById,
-                    messagesById: allMessagesById,
-                    participants: props.allParticipants,
-                    identities: props.identities,
-                    userDisplayName: props.userDisplayName,
-                  })
-                  : "";
-                const referenceSubtitle = roomFileMeta || formatMentionReferenceSubtitle(option.providerId, option.subtitle) || t(`composer.atProvider.${option.providerId}`);
-                const showReferenceSubtitle = Boolean(referenceSubtitle) && (!(activeMentionTab === "files" && isFileOption) || Boolean(roomFileMeta));
-                const mentionKey = tuttiAtMentionKey(option.providerId, option.item.itemId);
-                const isFileSelected = isFileOption && fileMultiSelectMode && selectedFileMentionKeys.has(mentionKey);
-                const handleFileClick = () => {
-                  if (isFileOption && fileMultiSelectMode) {
-                    toggleFileMentionSelect(option);
-                  } else {
-                    saveMentionSelection();
-                    selectMentionOption(option);
-                  }
-                };
-                return (
-              <div
-                key={option.key}
-                role="option"
-                aria-selected={index === activeMentionIndex}
-                data-active={index === activeMentionIndex || undefined}
-                className={`[display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:9px] [width:100%] [min-width:0] [min-height:38px] [border-radius:12px] [padding:0_8px] [color:var(--text)] [transition:background-color_0.12s_ease] [&[data-active=true]]:[background:#00000014] [&:hover]:[background:#00000014] ${isFileSelected ? "[background:#eff6ff] [&[data-active=true]]:[background:#dbeafe] [&:hover]:[background:#dbeafe]" : ""}`}
-                onMouseEnter={() => setActiveMentionIndex(index)}
-              >
-                {isFileOption && fileMultiSelectMode ? (
-                  <span className={`[display:grid] [width:32px] [height:32px] [place-items:center] [border-radius:999px] ${isFileSelected ? "[background:#3b82f6]" : "[background:#f3f4f6]"}`}>
-                    {isFileSelected ? <Check size={14} className={"[color:#ffffff]"} /> : <FileText size={14} className={"[color:var(--muted)]"} />}
-                  </span>
-                ) : (
-                <MentionReferenceFileIcon
-                  providerId={option.providerId}
-                  label={option.label}
-                  roomFile={option.item.roomFile}
-                  thumbnailUrl={option.thumbnailUrl}
-                  onJump={option.item.roomFile ? () => focusRoomFileFromMention(option.item.roomFile!) : undefined}
-                />
-                )}
-                <button
-                  type="button"
-                  className={"[display:grid] [min-width:0] [gap:1px] [width:100%] [border:0] [padding:0] [color:inherit] [text-align:left] [background:transparent] [&:focus-visible]:[outline:none]"}
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    handleFileClick();
-                  }}
-                >
-                  <strong className={"[overflow:hidden] [font-size:12px] [font-weight:500] [line-height:16px] [text-overflow:ellipsis] [white-space:nowrap]"}>{option.label}</strong>
-                  {showReferenceSubtitle ? (
-                    <span className={"[overflow:hidden] [color:var(--muted)] [font-size:11px] [line-height:14px] [text-overflow:ellipsis] [white-space:nowrap]"}>
-                      {referenceSubtitle}
-                    </span>
-                  ) : null}
-                </button>
-              </div>
-                );
-              })()
-            ) : option.kind === "local-agent" ? (
-              <div
-                key={option.key}
-                role="option"
-                aria-selected={index === activeMentionIndex}
-                data-active={index === activeMentionIndex || undefined}
-                className={"[display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:9px] [width:100%] [min-width:0] [height:38px] [border-radius:12px] [padding:0_8px] [color:var(--text)] [transition:background-color_0.12s_ease] [&[data-active=true]]:[background:#00000014] [&:hover]:[background:#00000014]"}
-                onMouseEnter={() => setActiveMentionIndex(index)}
-              >
-                <MentionLocalAgentAvatar runtimeProfile={option.runtimeProfile} />
-                <button
-                  type="button"
-                  className={"[display:grid] [min-width:0] [gap:1px] [width:100%] [border:0] [padding:0] [color:inherit] [text-align:left] [background:transparent] [&:focus-visible]:[outline:none]"}
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    saveMentionSelection();
-                    selectMentionOption(option);
-                  }}
-                >
-                  <strong className={"[overflow:hidden] [font-size:12px] [font-weight:500] [line-height:16px] [text-overflow:ellipsis] [white-space:nowrap]"}>{option.label}</strong>
-                  <span className={"[overflow:hidden] [color:var(--muted)] [font-size:11px] [line-height:14px] [text-overflow:ellipsis] [white-space:nowrap]"}>
-                    {option.runtimeProfile.provider}
-                  </span>
-                </button>
-              </div>
-            ) : option.kind === "participant" ? (
-              <div
-                key={option.key}
-                role="option"
-                aria-selected={index === activeMentionIndex}
-                data-active={index === activeMentionIndex || undefined}
-                className={"[display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:9px] [width:100%] [min-width:0] [height:38px] [border-radius:12px] [padding:0_4px_0_8px] [color:var(--text)] [transition:background-color_0.12s_ease] [&[data-active=true]]:[background:#00000014] [&:hover]:[background:#00000014]"}
-                onMouseEnter={() => setActiveMentionIndex(index)}
-              >
-                <MentionParticipantAvatar
-                  participant={option.participant}
-                  identities={props.identities}
-                  runtimeProfiles={props.runtimeProfiles}
-                />
-                <div className={"[display:flex] [width:100%] [min-width:0] [align-items:center] [justify-content:flex-start] [gap:6px] [height:100%]"}>
-                  <button
-                    type="button"
-                    className={`[display:inline-flex] [min-width:0] [align-items:center] [gap:6px] [height:100%] [overflow:hidden] [border:0] [padding:0] [color:inherit] [text-align:left] [background:transparent] [&:focus-visible]:[outline:none] [&_strong]:[min-width:0] [&_strong]:[overflow:hidden] [&_strong]:[font-size:12px] [&_strong]:[font-weight:500] [&_strong]:[line-height:16px] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] ${WHISPER_FEATURE_ENABLED && option.participant.kind === "ai" ? "[max-width:calc(100%-36px)]" : "[width:100%]"}`}
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                      saveMentionSelection();
-                      selectMentionOption(option);
-                    }}
-                  >
-                    <strong>{option.label}</strong>
-                    {option.participant.status === "muted" ? (
-                      <span className={"[display:inline-flex] [flex:0_0_auto] [height:20px] [align-items:center] [border-radius:999px] [padding:0_7px] [color:#b45309] [background:#fef3c7] [font-size:10px] [font-weight:700]"}>
-                        {t("composer.muted")}
-                      </span>
-                    ) : null}
-                  </button>
-                  {WHISPER_FEATURE_ENABLED && option.participant.kind === "ai" ? (
-                    <button
-                      type="button"
-                      className={"[display:inline-grid] [flex:0_0_auto] [width:30px] [height:30px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [&:hover]:[color:#7c3aed] [&:hover]:[background:#f3e8ff] [&:focus-visible]:[outline:none] [&:focus-visible]:[box-shadow:0_0_0_2px_#ddd6fe]"}
-                      aria-label={t("composer.whisperTo", { name: option.label })}
-                      title={t("composer.whisper")}
-                      onMouseDown={(event) => {
-                        event.preventDefault();
-                        saveMentionSelection();
-                        insertWhisperMention(option.participant);
-                      }}
-                    >
-                      <Ear size={15} />
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            ) : null,
-              );
-              return nodes;
-            });
-          })()}
-              </div>
-              {fileMultiSelectMode && activeMentionTab === "files" ? (
-                <div className={"[display:flex] [align-items:center] [justify-content:flex-end] [gap:8px] [padding:8px_10px] [border-top:1px_solid_var(--border)] [background:var(--panel)]"}>
-                  <span className={"[margin-right:auto] [color:var(--muted)] [font-size:11px] [font-weight:500]"}>
-                    {t("files.selectedCount", { count: selectedFileMentionKeys.size })}
-                  </span>
-                  <button
-                    type="button"
-                    className={"[display:inline-flex] [height:30px] [align-items:center] [border:1px_solid_var(--border)] [border-radius:8px] [padding:0_12px] [font-size:12px] [font-weight:600] [color:var(--text)] [background:transparent] [&:hover]:[background:#00000008] [&:focus-visible]:[outline:none]"}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={handleToggleFileMultiSelect}
-                  >
-                    {t("files.cancel")}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={selectedFileMentionKeys.size === 0}
-                    className={"[display:inline-flex] [height:30px] [align-items:center] [gap:5px] [border:0] [border-radius:8px] [padding:0_12px] [font-size:12px] [font-weight:700] [color:#ffffff] [background:#171717] [&:hover:not(:disabled)]:[background:#2a2a2a] [&:focus-visible]:[outline:none] disabled:[opacity:0.4] disabled:[cursor:not-allowed]"}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={handleConfirmFileMultiSelect}
-                  >
-                    {t("files.confirmInsert", { count: selectedFileMentionKeys.size })}
-                  </button>
-                </div>
-              ) : null}
-            </div>,
+
+            <ComposerMentionPalette
+              activeTab={activeMentionTab}
+              model={mentionPaletteModel}
+              highlightedKey={activeMentionKey}
+              menuStyle={mentionMenuStyle}
+              menuRef={mentionMenuRef}
+              identities={props.identities}
+              runtimeProfiles={props.runtimeProfiles}
+              fileMultiSelectMode={fileMultiSelectMode}
+              selectedFileMentionKeys={selectedFileMentionKeys}
+              onActiveTabChange={setActiveMentionTab}
+              onHighlightChange={setActiveMentionKey}
+              onSelect={selectMentionOption}
+              onToggleFileMultiSelect={handleToggleFileMultiSelect}
+              onToggleFileSelection={toggleFileMentionSelect}
+              onConfirmFileMultiSelect={handleConfirmFileMultiSelect}
+            />,
+
             document.body,
           )
         : null}
@@ -2555,209 +2270,7 @@ export function Composer(props: {
   );
 }
 
-function MentionReferenceFileIcon(props: {
-  providerId: TuttiAtProviderId;
-  label: string;
-  roomFile?: TuttiAtRoomFileMeta;
-  thumbnailUrl?: string | null;
-  onJump?: () => void;
-}) {
-  const size = 14;
-  const [imageFailed, setImageFailed] = useState(false);
-  const previewSource = props.roomFile?.previewUrl || props.thumbnailUrl;
-  const previewUrl = resolveMentionThumbnailUrl(previewSource);
-  const category = props.roomFile
-    ? getArtifactCategory({
-        mimeType: props.roomFile.mimeType,
-        filename: props.label,
-      } as Artifact)
-    : null;
 
-  useEffect(() => {
-    setImageFailed(false);
-  }, [previewUrl]);
-
-  const fallbackIcon = (
-    <span className={"[display:grid] [width:100%] [height:100%] [place-items:center] [color:#6d28d9] [background:#f3e8ff]"}>
-      <MentionReferenceProviderIcon providerId={props.providerId} />
-    </span>
-  );
-
-  const icon = category === "image" && previewUrl && !imageFailed ? (
-    <img
-      src={previewUrl}
-      alt=""
-      className={"[width:100%] [height:100%] [object-fit:cover]"}
-      onError={() => setImageFailed(true)}
-    />
-  ) : category === "video" ? (
-    <span className={"[display:grid] [width:100%] [height:100%] [place-items:center] [color:#ffffff] [background:#8d96a3]"}>
-      <Video size={size} />
-    </span>
-  ) : props.roomFile ? (
-    <span className={"[display:grid] [width:100%] [height:100%] [place-items:center] [color:#ffffff] [background:#8d96a3]"}>
-      <FileText size={size} />
-    </span>
-  ) : previewUrl && !imageFailed ? (
-    <img
-      src={previewUrl}
-      alt=""
-      className={"[width:100%] [height:100%] [object-fit:cover]"}
-      onError={() => setImageFailed(true)}
-    />
-  ) : (
-    fallbackIcon
-  );
-
-  const shellClassName =
-    "[display:inline-grid] [width:32px] [height:32px] [overflow:hidden] [border-radius:10px] [background:#f3f4f6]";
-
-  if (!props.onJump) {
-    return <span className={shellClassName}>{icon}</span>;
-  }
-
-  return (
-    <button
-      type="button"
-      className={`${shellClassName} [border:0] [padding:0] [cursor:pointer] [transition:box-shadow_0.12s_ease,_transform_0.12s_ease] hover:[box-shadow:0_0_0_2px_#dbeafe] [&:focus-visible]:[outline:none] [&:focus-visible]:[box-shadow:0_0_0_2px_#93c5fd]`}
-      aria-label={t("files.jumpToMessage")}
-      title={t("files.jumpToMessage")}
-      onMouseDown={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-      }}
-      onClick={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        props.onJump?.();
-      }}
-    >
-      {icon}
-    </button>
-  );
-}
-
-function formatMentionRoomFileMeta(
-  roomFile: TuttiAtRoomFileMeta,
-  context: {
-    artifactById: Map<string, Artifact>;
-    messagesById: Map<string, Message>;
-    participants: Participant[];
-    identities: Identity[];
-    userDisplayName: string;
-  },
-) {
-  const artifact = context.artifactById.get(roomFile.artifactId) ?? null;
-  const message = roomFile.messageId ? context.messagesById.get(roomFile.messageId) ?? null : null;
-  const details = [
-    artifact ? formatBytes(artifact.sizeBytes) : "",
-    formatMessageTime(message?.createdAt ?? artifact?.createdAt ?? ""),
-  ].filter(Boolean).join(" · ");
-  const creator = message
-    ? messageSenderLabel(message, context.participants, context.identities, context.userDisplayName).trim()
-    : "";
-  return [creator, details].filter(Boolean).join(" · ");
-}
-
-const REFERENCE_STATUS_LABEL_KEYS = {
-  accepted: "reference.status.accepted",
-  active: "reference.status.active",
-  blocked: "reference.status.blocked",
-  cancelled: "reference.status.cancelled",
-  completed: "reference.status.completed",
-  done: "reference.status.completed",
-  error: "reference.status.failed",
-  failed: "reference.status.failed",
-  in_progress: "reference.status.inProgress",
-  not_started: "reference.status.notStarted",
-  pending: "reference.status.pending",
-  pending_acceptance: "reference.status.pendingAcceptance",
-  queued: "reference.status.queued",
-  rejected: "reference.status.rejected",
-  running: "reference.status.running",
-  todo: "reference.status.notStarted",
-} as const;
-
-function formatMentionReferenceSubtitle(providerId: TuttiAtProviderId, subtitle: string | undefined) {
-  const trimmed = subtitle?.trim();
-  if (!trimmed) return "";
-  if (providerId !== "agent-session" && providerId !== "workspace-issue") return trimmed;
-  return replaceReferenceStatusPrefix(trimmed);
-}
-
-function replaceReferenceStatusPrefix(value: string) {
-  const statusEntries = Object.entries(REFERENCE_STATUS_LABEL_KEYS).sort((left, right) => right[0].length - left[0].length);
-  for (const [status, key] of statusEntries) {
-    if (value === status) return t(key);
-    if (!value.startsWith(status)) continue;
-    const suffix = value.slice(status.length);
-    if (/^\s*(?:[·•|,，-]|\s)\s*/.test(suffix)) {
-      return `${t(key)}${suffix}`;
-    }
-  }
-  return value;
-}
-
-function MentionReferenceProviderIcon(props: { providerId: TuttiAtProviderId }) {
-  const size = 14;
-  switch (props.providerId) {
-    case "workspace-issue":
-      return <LayoutList size={size} />;
-    case "workspace-app":
-      return <AppWindow size={size} />;
-    case "agent-session":
-      return <Bot size={size} />;
-    case "agent-generated-file":
-      return <FileOutput size={size} />;
-    case "file":
-    default:
-      return <FileText size={size} />;
-  }
-}
-
-function MentionLocalAgentAvatar(props: { runtimeProfile: RuntimeProfile }) {
-  const style = getRuntimeProviderAvatarStyle(props.runtimeProfile.provider);
-  const usesAppIcon = Boolean(style?.iconUrl);
-  return (
-    <span
-      className={`[display:inline-grid] [width:32px] [height:32px] [overflow:hidden] [border-radius:10px] [place-items:center] ${usesAppIcon ? "[background:transparent]" : "[background:#f3f4f6]"}`}
-      style={style && !usesAppIcon ? { background: style.background } : undefined}
-    >
-      {style?.iconUrl ? (
-        <img
-          src={style.iconUrl}
-          alt=""
-          className={usesAppIcon ? "[width:32px] [height:32px] [object-fit:cover]" : "[width:18px] [height:18px] [object-fit:contain]"}
-        />
-      ) : (
-        <Bot size={14} className={"[color:#ffffff]"} />
-      )}
-    </span>
-  );
-}
-
-function MentionParticipantAvatar(props: {
-  participant: Participant;
-  identities: Identity[];
-  runtimeProfiles: RuntimeProfile[];
-}) {
-  const identity = props.identities.find((item) => item.id === props.participant.identityId);
-  const resolvedAvatar = resolveAgentAvatarFromContext({
-    avatar: props.participant.avatar,
-    icon: identity?.icon,
-    runtimeProfileId: props.participant.runtimeProfileId,
-    identity,
-    runtimeProfiles: props.runtimeProfiles,
-  });
-  return (
-    <AgentAvatar
-      title={props.participant.displayName}
-      avatar={resolvedAvatar.avatar}
-      provider={resolvedAvatar.provider}
-      size={32}
-    />
-  );
-}
 
 function clipboardFiles(dataTransfer: DataTransfer) {
   const files = Array.from(dataTransfer.files);
@@ -3294,10 +2807,9 @@ function collectMentionTargetsFromEditor(editor: HTMLDivElement | null, particip
         }
       }
       const referenceScope = {
-        ...(referenceInsert?.kind === "mention" ? referenceInsert.scope : {}),
-        ...(element.dataset.mentionIconUrl?.trim() ? { iconUrl: element.dataset.mentionIconUrl.trim() } : {}),
+        ...(referenceInsert?.kind === "mention" ? referenceInsert.mention.scope : {}),
       };
-      mentions.push({
+      mentions.push(sanitizeMentionTargetForAgentContext({
         participantId: mentionId,
         displayNameSnapshot: label,
         mentionType: "reference",
@@ -3305,7 +2817,7 @@ function collectMentionTargetsFromEditor(editor: HTMLDivElement | null, particip
         referenceEntityId: parsedReference?.itemId,
         referenceInsert,
         ...(Object.keys(referenceScope).length ? { referenceScope } : {}),
-      });
+      }));
       continue;
     }
     const participant = byId.get(mentionId);
@@ -3359,7 +2871,7 @@ function isStyledReferenceMention(reference: TuttiAtQueryResult) {
 function referenceLinkHref(reference: TuttiAtQueryResult) {
   if (reference.insert.kind === "markdown-link") return reference.insert.href;
   if (reference.insert.kind === "text") return reference.insert.text;
-  if (reference.insert.kind === "mention") return reference.insert.entityId;
+  if (reference.insert.kind === "mention") return reference.insert.mention.entityId;
   return reference.itemId;
 }
 
@@ -3369,7 +2881,7 @@ function tuttiMentionUrl(reference: TuttiAtQueryResult) {
   }
   return buildTuttiMentionHref(reference.providerId, reference.itemId, {
     referenceInsert: reference.insert,
-    referenceScope: reference.insert.kind === "mention" ? reference.insert.scope : undefined,
+    referenceScope: reference.insert.kind === "mention" ? reference.insert.mention.scope : undefined,
   });
 }
 
@@ -4388,54 +3900,4 @@ function uploadItemIdsCrossedByLeftDrag(
 
 function revokePreviewUrl(previewUrl: string | null) {
   if (previewUrl?.startsWith("blob:")) URL.revokeObjectURL(previewUrl);
-}
-
-type MentionOption =
-  | { kind: "all"; key: "all"; label: string }
-  | { kind: "participant"; key: string; label: string; participant: Participant }
-  | LocalAgentMentionOption
-  | {
-      kind: "reference";
-      key: string;
-      label: string;
-      subtitle?: string;
-      thumbnailUrl?: string | null;
-      providerId: TuttiAtProviderId;
-      item: TuttiAtQueryResult;
-    };
-
-function buildParticipantMentionOptions(
-  participants: Participant[],
-  query: string | null,
-  mentionedIds: Set<string>,
-  mentionedAll: boolean,
-  options?: { includeEveryone?: boolean },
-): MentionOption[] {
-  if (query === null) return [];
-  const normalizedQuery = query.toLowerCase();
-  const results: MentionOption[] = [];
-  const everyoneLabel = t("composer.everyone");
-  if (
-    options?.includeEveryone
-    && !mentionedAll
-    && (everyoneLabel.toLowerCase().includes(normalizedQuery) || "所有人".includes(normalizedQuery) || "all".includes(normalizedQuery))
-  ) {
-    results.push({ kind: "all", key: "all", label: everyoneLabel });
-  }
-  const matchingParticipants = participants
-    .filter((participant) => !mentionedIds.has(participant.id) && participant.displayName.toLowerCase().includes(normalizedQuery))
-    .sort((left, right) => {
-      const byCreatedAt = right.createdAt.localeCompare(left.createdAt);
-      if (byCreatedAt !== 0) return byCreatedAt;
-      return right.sortOrder - left.sortOrder;
-    });
-  for (const participant of matchingParticipants) {
-    results.push({
-      kind: "participant",
-      key: participant.id,
-      label: participant.displayName,
-      participant,
-    });
-  }
-  return results;
 }

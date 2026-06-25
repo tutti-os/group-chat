@@ -189,7 +189,7 @@ export function serializeReferenceMentionChip(element: HTMLElement) {
     try {
       referenceInsert = JSON.parse(element.dataset.mentionReferenceInsert) as MentionTarget["referenceInsert"];
       if (referenceInsert?.kind === "mention") {
-        referenceScope = referenceInsert.scope;
+        referenceScope = referenceInsert.mention.scope;
       }
     } catch {
       referenceInsert = undefined;

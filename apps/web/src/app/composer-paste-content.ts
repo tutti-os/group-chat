@@ -308,7 +308,7 @@ function buildPlainAtMentionCandidates(context: ComposerPasteContext): PlainAtCa
       `@${displayLabel}`,
       {
         referenceInsert: reference.insert,
-        referenceScope: reference.insert.kind === "mention" ? reference.insert.scope : undefined,
+        referenceScope: reference.insert.kind === "mention" ? reference.insert.mention.scope : undefined,
       },
     ));
     if (!href) continue;
@@ -374,9 +374,11 @@ export function buildReferencePasteTarget(href: string, label: string): {
     ...(insertScope.iconUrl?.trim() ? { thumbnailUrl: insertScope.iconUrl.trim() } : {}),
     insert: {
       kind: "mention",
-      entityId,
-      label: chipLabel,
-      scope: insertScope,
+      mention: {
+        entityId,
+        label: chipLabel,
+        scope: insertScope,
+      },
     },
   };
   return {

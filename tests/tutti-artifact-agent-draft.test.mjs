@@ -38,3 +38,18 @@ test("resolveArtifactAgentDraftHref does not downgrade workspace app files to re
   assert.match(href, /\/group-chat\/data\/rooms\/room-1\/uploads\/image6\.png$/);
   assert.doesNotMatch(href, /^rooms\//);
 });
+
+test("resolveReferenceMentionScope accepts legacy flat mention insert scopes", async () => {
+  const { resolveReferenceMentionScope } = await loadTuttiBridgeModule();
+
+  assert.deepEqual(
+    resolveReferenceMentionScope(
+      {
+        kind: "mention",
+        scope: { workspaceId: "legacy-ws" },
+      },
+      { workspaceId: "fallback-ws" },
+    ),
+    { workspaceId: "legacy-ws" },
+  );
+});

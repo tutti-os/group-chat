@@ -1,5 +1,5 @@
 import type { Artifact } from "@group-chat/shared";
-import { extname } from "node:path";
+import { extname, isAbsolute, relative, resolve } from "node:path";
 
 const TEXT_EXTENSIONS = new Map<string, string>([
   [".css", "text/css"],
@@ -33,11 +33,39 @@ const BINARY_EXTENSIONS = new Map<string, string>([
   [".webp", "image/webp"],
 ]);
 
+const INTERNAL_AGENT_WORKSPACE_ROOT_FILES = new Set([
+  "AGENTS.MD",
+  "BOOTSTRAP.MD",
+  "CLAUDE.MD",
+  "DISTILLED_CONTEXT.MD",
+  "IDENTITY.MD",
+  "MEMORY.MD",
+  "OWNER.MD",
+  "SOUL.MD",
+  "SOURCE.MD",
+]);
+
+const INTERNAL_AGENT_WORKSPACE_DIRS = new Set([
+  "conversations",
+  "memory",
+  "skills",
+]);
+
 export function inferMimeTypeForPath(filePath: string) {
   const extension = extname(filePath).toLowerCase();
   return TEXT_EXTENSIONS.get(extension)
     ?? BINARY_EXTENSIONS.get(extension)
     ?? "application/octet-stream";
+}
+
+export function shouldImportRunFileArtifactPath(filePath: string, workspaceRoot: string) {
+  const relativePath = relative(resolve(workspaceRoot), resolve(filePath)).replace(/\\/g, "/");
+  if (!relativePath || relativePath.startsWith("..") || isAbsolute(relativePath)) return true;
+
+  const [firstSegment, ...rest] = relativePath.split("/");
+  if (!firstSegment) return true;
+  if (INTERNAL_AGENT_WORKSPACE_DIRS.has(firstSegment.toLowerCase())) return false;
+  return rest.length > 0 || !INTERNAL_AGENT_WORKSPACE_ROOT_FILES.has(firstSegment.toUpperCase());
 }
 
 export function formatFileReferenceMarkdown(artifact: Pick<Artifact, "id" | "filename">) {

@@ -1,10 +1,12 @@
+import { sanitizeMentionTargetsForAgentContext, type MentionTarget } from "@group-chat/shared";
+
 export function acpPromptFromLocalAgentInput(input: {
   protocolVersion: string;
   workspaceRoot: string;
   conversation: { id: string; type: string; title: string; collaborationRules?: string; collaborationRulesVersion?: number };
   participant: { id: string; displayName: string; listenMode?: string };
   turn: {
-    userMessage: { id: string; senderName: string | null; content: string; mentions: unknown[] };
+    userMessage: { id: string; senderName: string | null; content: string; mentions: MentionTarget[] };
     attachments: unknown[];
     intent?: {
       requestText: string;
@@ -30,6 +32,7 @@ export function acpPromptFromLocalAgentInput(input: {
   const intent = input.turn.intent
     ? `\n<intent>\n${input.turn.intent.instruction}\nrequest_text: ${input.turn.intent.requestText}\nworkspace_apps: ${JSON.stringify(input.turn.intent.workspaceApps)}\n</intent>\n`
     : "";
+  const mentions = sanitizeMentionTargetsForAgentContext(input.turn.userMessage.mentions);
   return `<im_context>
 ${contextLines.join("\n")}
 </im_context>
@@ -39,7 +42,7 @@ ${intent}
 ${input.turn.userMessage.content}
 </message>
 
-<mentions>${JSON.stringify(input.turn.userMessage.mentions)}</mentions>
+<mentions>${JSON.stringify(mentions)}</mentions>
 <attachments>${JSON.stringify(input.turn.attachments)}</attachments>
 <tool_gateway>
 context: ${input.tools.contextUrl}

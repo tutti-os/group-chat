@@ -1,3 +1,9 @@
+import type {
+  TuttiExternalAtInsertResult,
+  TuttiExternalAtProviderId
+} from "@tutti-os/workspace-external-core/contracts";
+import { sanitizeRichTextMentionScopeForAgentContext } from "@tutti-os/ui-rich-text/core";
+
 export type Id = string;
 
 export type ConversationType = "single" | "group";
@@ -375,26 +381,11 @@ export const TUTTI_AT_PROVIDER_IDS = [
   "workspace-app",
   "agent-session",
   "agent-generated-file",
-] as const;
+] as const satisfies readonly TuttiExternalAtProviderId[];
 
-export type TuttiAtProviderId = (typeof TUTTI_AT_PROVIDER_IDS)[number];
+export type TuttiAtProviderId = TuttiExternalAtProviderId;
 
-export type TuttiReferenceInsert =
-  | {
-      kind: "mention";
-      entityId: string;
-      label: string;
-      scope?: Readonly<Record<string, string>>;
-    }
-  | {
-      kind: "markdown-link";
-      label: string;
-      href: string;
-    }
-  | {
-      kind: "text";
-      text: string;
-    };
+export type TuttiReferenceInsert = TuttiExternalAtInsertResult;
 
 export interface MentionTarget {
   participantId: Id;
@@ -404,6 +395,76 @@ export interface MentionTarget {
   referenceEntityId?: string;
   referenceScope?: Readonly<Record<string, string>>;
   referenceInsert?: TuttiReferenceInsert;
+}
+
+export function sanitizeMentionTargetForAgentContext(mention: MentionTarget): MentionTarget {
+  if (mention.mentionType !== "reference") {
+    return mention;
+  }
+  const referenceScope = sanitizeRichTextMentionScopeForAgentContext(mention.referenceScope);
+  return {
+    participantId: mention.participantId,
+    displayNameSnapshot: mention.displayNameSnapshot,
+    mentionType: mention.mentionType,
+    ...(mention.referenceProviderId ? { referenceProviderId: mention.referenceProviderId } : {}),
+    ...(mention.referenceEntityId ? { referenceEntityId: mention.referenceEntityId } : {}),
+    ...(referenceScope ? { referenceScope } : {}),
+    ...sanitizeReferenceInsertForAgentContext(mention.referenceInsert),
+  };
+}
+
+export function sanitizeMentionTargetsForAgentContext(mentions: readonly MentionTarget[]): MentionTarget[] {
+  return mentions.map((mention) => sanitizeMentionTargetForAgentContext(mention));
+}
+
+export function resolveMentionTargetReferenceScope(
+  mention: Pick<MentionTarget, "referenceInsert" | "referenceScope">,
+): Readonly<Record<string, string>> | undefined {
+  const insert = mention.referenceInsert;
+  if (insert?.kind !== "mention") return mention.referenceScope;
+  const legacyInsert = insert as unknown as {
+    mention?: { scope?: Readonly<Record<string, string>> };
+    scope?: Readonly<Record<string, string>>;
+  };
+  return legacyInsert.mention?.scope ?? legacyInsert.scope ?? mention.referenceScope;
+}
+
+export function resolveMentionTargetReferenceLabel(
+  mention: Pick<MentionTarget, "displayNameSnapshot" | "referenceEntityId" | "referenceInsert">,
+): string {
+  const displayName = mention.displayNameSnapshot.trim();
+  if (displayName) return displayName;
+  const insert = mention.referenceInsert;
+  if (insert?.kind === "mention") {
+    const legacyInsert = insert as unknown as { mention?: { label?: string }; label?: string };
+    const insertLabel = (legacyInsert.mention?.label ?? legacyInsert.label ?? "").trim();
+    if (insertLabel) return insertLabel;
+  }
+  return mention.referenceEntityId?.trim() ?? "";
+}
+
+function sanitizeReferenceInsertForAgentContext(
+  insert: TuttiReferenceInsert | undefined,
+): Pick<MentionTarget, "referenceInsert"> {
+  if (!insert) return {};
+  if (insert.kind !== "mention") {
+    return {};
+  }
+  if (!insert.mention) return {};
+  const entityId = insert.mention.entityId.trim();
+  const label = insert.mention.label.trim().replace(/^@+/, "").trim() || entityId;
+  if (!entityId || !label) return {};
+  const scope = sanitizeRichTextMentionScopeForAgentContext(insert.mention.scope);
+  return {
+    referenceInsert: {
+      kind: "mention",
+      mention: {
+        entityId,
+        label,
+        ...(scope ? { scope } : {}),
+      },
+    },
+  };
 }
 
 export type AppReferenceKind = "file";

@@ -19,9 +19,11 @@ import { buildEffectiveRoleDescription } from "../domains/agent-instructions.js"
 import { participantWorkspaceRoot } from "../local/paths.js";
 import { enrichLocalAgentProviderStatus } from "./local-agent-config-catalog.js";
 import { acpPromptFromLocalAgentInput } from "./local-agent-acp.js";
+import { isRecoverableResumeError } from "./local-agent-resume-errors.js";
 import { buildLocalAgentInput, decodeLocalAgentStdout, localToolBaseUrl, stripGeneratedReplyQuoteMarkers } from "./local-agent-protocol.js";
 import type { RuntimeProvider, RuntimeReplyContext, RuntimeStreamEvent } from "./runtime-provider.js";
 import { RuntimeProviderUnsupportedError } from "./runtime-provider.js";
+import { buildLocalAgentProcessEnv } from "./local-agent-env.js";
 
 type GroupChatLocalAgentProviderPlugin = LocalAgentProviderPlugin<"local-agent", string>;
 
@@ -383,13 +385,8 @@ function buildLocalAgentRunEnv(
   workspaceRoot: string,
   overrides?: Record<string, string>,
 ): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value === "string") env[key] = value;
-  }
   return {
-    ...env,
-    ...overrides,
+    ...buildLocalAgentProcessEnv(process.env, overrides),
     GROUP_CHAT_WORKSPACE: workspaceRoot,
     GROUP_CHAT_RUN_ID: context.runId ?? "",
     GROUP_CHAT_PARTICIPANT_ID: context.participant.id,
@@ -770,11 +767,6 @@ class LocalAgentSessionStore {
   private pathFor(conversationId: string) {
     return join(this.workspaceRoot, ".group-chat", "local-agent-sessions", `${safePathSegment(conversationId)}.json`);
   }
-}
-
-function isRecoverableResumeError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  return /thread\/resume|resume failed|no rollout found|session.*not found|conversation.*not found/i.test(message);
 }
 
 function isSkillLoadFailure(error: unknown) {

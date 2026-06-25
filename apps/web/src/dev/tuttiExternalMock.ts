@@ -18,9 +18,11 @@ type MockFixture = {
       }
     | {
         kind: "mention";
-        entityId: string;
-        label: LocalizedText;
-        scope: Readonly<Record<string, string>>;
+        mention: {
+          entityId: string;
+          label: LocalizedText;
+          scope: Readonly<Record<string, string>>;
+        };
       };
 };
 
@@ -54,11 +56,13 @@ const fixtureItems: readonly MockFixture[] = [
     subtitle: { en: "In progress (mock)", "zh-CN": "进行中（模拟）" },
     insert: {
       kind: "mention",
-      entityId: "issue-42",
-      label: { en: "Mention logic rollout", "zh-CN": "提及逻辑上线" },
-      scope: {
-        workspaceId: devWorkspaceId,
-        topicId: "dev-topic",
+      mention: {
+        entityId: "issue-42",
+        label: { en: "Mention logic rollout", "zh-CN": "提及逻辑上线" },
+        scope: {
+          workspaceId: devWorkspaceId,
+          topicId: "dev-topic",
+        },
       },
     },
   },
@@ -69,11 +73,13 @@ const fixtureItems: readonly MockFixture[] = [
     subtitle: { en: "Open (mock)", "zh-CN": "待处理（模拟）" },
     insert: {
       kind: "mention",
-      entityId: "issue-7",
-      label: { en: "Fix composer @ menu", "zh-CN": "修复输入框 @ 菜单" },
-      scope: {
-        workspaceId: devWorkspaceId,
-        topicId: "dev-topic",
+      mention: {
+        entityId: "issue-7",
+        label: { en: "Fix composer @ menu", "zh-CN": "修复输入框 @ 菜单" },
+        scope: {
+          workspaceId: devWorkspaceId,
+          topicId: "dev-topic",
+        },
       },
     },
   },
@@ -84,10 +90,12 @@ const fixtureItems: readonly MockFixture[] = [
     subtitle: { en: "Workspace app", "zh-CN": "工作区应用" },
     insert: {
       kind: "mention",
-      entityId: "ai-canvas",
-      label: { en: "AI Canvas", "zh-CN": "AI Canvas" },
-      scope: {
-        workspaceId: devWorkspaceId,
+      mention: {
+        entityId: "ai-canvas",
+        label: { en: "AI Canvas", "zh-CN": "AI Canvas" },
+        scope: {
+          workspaceId: devWorkspaceId,
+        },
       },
     },
   },
@@ -98,10 +106,12 @@ const fixtureItems: readonly MockFixture[] = [
     subtitle: { en: "Workspace app", "zh-CN": "工作区应用" },
     insert: {
       kind: "mention",
-      entityId: "prototype-design",
-      label: { en: "Prototype Design", "zh-CN": "Prototype Design" },
-      scope: {
-        workspaceId: devWorkspaceId,
+      mention: {
+        entityId: "prototype-design",
+        label: { en: "Prototype Design", "zh-CN": "Prototype Design" },
+        scope: {
+          workspaceId: devWorkspaceId,
+        },
       },
     },
   },
@@ -112,10 +122,12 @@ const fixtureItems: readonly MockFixture[] = [
     subtitle: { en: "Running (mock)", "zh-CN": "运行中（模拟）" },
     insert: {
       kind: "mention",
-      entityId: "session-7",
-      label: { en: "Refactor mention chips", "zh-CN": "重构提及标签" },
-      scope: {
-        workspaceId: devWorkspaceId,
+      mention: {
+        entityId: "session-7",
+        label: { en: "Refactor mention chips", "zh-CN": "重构提及标签" },
+        scope: {
+          workspaceId: devWorkspaceId,
+        },
       },
     },
   },
@@ -126,10 +138,12 @@ const fixtureItems: readonly MockFixture[] = [
     subtitle: { en: "Idle (mock)", "zh-CN": "空闲（模拟）" },
     insert: {
       kind: "mention",
-      entityId: "session-3",
-      label: { en: "Review multiplayer UX", "zh-CN": "审查多人 UX" },
-      scope: {
-        workspaceId: devWorkspaceId,
+      mention: {
+        entityId: "session-3",
+        label: { en: "Review multiplayer UX", "zh-CN": "审查多人 UX" },
+        scope: {
+          workspaceId: devWorkspaceId,
+        },
       },
     },
   },
@@ -192,7 +206,7 @@ function toQueryResult(fixture: MockFixture): TuttiAtQueryResult {
       },
     };
   }
-  const mentionLabel = pickText(fixture.insert.label);
+  const mentionLabel = pickText(fixture.insert.mention.label);
   return {
     providerId: fixture.providerId,
     itemId: fixture.itemId,
@@ -200,9 +214,11 @@ function toQueryResult(fixture: MockFixture): TuttiAtQueryResult {
     subtitle,
     insert: {
       kind: "mention",
-      entityId: fixture.insert.entityId,
-      label: mentionLabel,
-      scope: fixture.insert.scope,
+      mention: {
+        entityId: fixture.insert.mention.entityId,
+        label: mentionLabel,
+        scope: fixture.insert.mention.scope,
+      },
     },
   };
 }
