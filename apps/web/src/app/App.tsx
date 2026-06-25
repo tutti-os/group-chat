@@ -636,9 +636,9 @@ export function App() {
       .reverse()
       .map((id) => currentConversationMessages.find((message) => message.id === id) ?? null)
       .find((message): message is Message => Boolean(message));
+    if (!newestVisibleMessage) return currentConversationMessages.slice(-MESSAGE_PAGE_SIZE);
     return currentConversationMessages.filter((message) => {
       if (visibleIds.has(message.id)) return true;
-      if (!newestVisibleMessage) return false;
       return (
         message.createdAt.localeCompare(newestVisibleMessage.createdAt) > 0
         || (message.createdAt === newestVisibleMessage.createdAt && message.id.localeCompare(newestVisibleMessage.id) > 0)

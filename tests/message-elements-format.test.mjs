@@ -152,6 +152,18 @@ test("conversation timestamps show time today and date for older messages", asyn
   assert.match(older, /20/);
 });
 
+test("empty timeline state clears after the first user message exists", async () => {
+  const { hasTimelineMessages } = await bundleModule(
+    "src/app/message-timeline-state.ts",
+    "message-timeline-state",
+  );
+
+  assert.equal(hasTimelineMessages([]), false);
+  assert.equal(hasTimelineMessages([message()]), true);
+  assert.equal(hasTimelineMessages([message({ status: "deleted" })]), false);
+  assert.equal(hasTimelineMessages([message({ status: "recalled" })]), false);
+});
+
 function runEvent(id, type, status, metadata = null) {
   return {
     id,

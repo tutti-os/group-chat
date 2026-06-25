@@ -36,6 +36,7 @@ import {
   summaryLinkLabel,
 } from "../../chat-links.js";
 import { collectImageFileArtifactsForMessages } from "../../message-artifacts.js";
+import { hasTimelineMessages, isTimelineMessageRemoved } from "../../message-timeline-state.js";
 import { enrichContentWithParticipantMentions, enrichContentWithReferenceMentions } from "../../reference-mentions.js";
 import { MessageReferenceContent } from "./MessageReferenceContent.js";
 import { isMessageGroupBreak, MESSAGE_GROUP_IDLE_MS } from "../../message-group-breaks.js";
@@ -328,6 +329,10 @@ export function MessageTimeline(props: {
   const [summaryAgentPickerMessages, setSummaryAgentPickerMessages] = useState<Message[] | null>(null);
   const visibleMessages = useMemo(
     () => props.messages.filter(shouldShowMessage),
+    [props.messages],
+  );
+  const hasAnyTimelineMessages = useMemo(
+    () => hasTimelineMessages(props.messages),
     [props.messages],
   );
   const messagesById = useMemo(
@@ -827,7 +832,7 @@ export function MessageTimeline(props: {
       className={`[position:relative] [min-height:0] [overflow-y:auto] [background:var(--panel)] [padding:26px_18px_8px_14px] [&_article:last-of-type]:[margin-bottom:0] max-[1080px]:[padding-inline:14px_18px] max-[760px]:[padding:18px_18px_8px_14px]`}
       onScroll={handleTimelineScroll}
     >
-      {visibleMessages.length === 0 ? (
+      {!hasAnyTimelineMessages ? (
         <EmptyTimelineState
           participantsCount={props.participantsCount}
           onOpenMembers={props.onOpenMembers}
@@ -1074,7 +1079,7 @@ function EmptyTimelineState(props: { participantsCount: number; onOpenMembers: (
 }
 
 function isRemovedMessage(message: Message) {
-  return message.status === "deleted" || message.status === "recalled";
+  return isTimelineMessageRemoved(message);
 }
 
 function resolveMessageSenderKey(message: Message, allMessages: Message[]) {
