@@ -3,17 +3,9 @@ import { BrainCircuit, Braces, ChevronDown, FileText, LoaderCircle, Wrench, X } 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AgentRunEvent } from "@group-chat/shared";
-import type { ProcessSection } from "../../agent-thinking.js";
+import { compactToolExecutionSections, type ProcessSection, type ToolSummaryStats } from "../../agent-thinking.js";
 import { formatRunEventStatus, formatRunEventTypeLabel, useTranslation } from "../../i18n/index.js";
-
-type DisplayProcessSection =
-  | ProcessSection
-  | { kind: "tool_summary"; id: string; count: number; status: AgentRunEvent["status"]; events: ToolSummaryDisplayEvent[] };
-
-interface ToolSummaryDisplayEvent {
-  event: AgentRunEvent;
-  displayStatus: AgentRunEvent["status"];
-}
+import type { TranslateParams } from "../../i18n/translate.js";
 
 export function AgentThinkingPanel(props: {
   open: boolean;
@@ -106,7 +98,7 @@ export function AgentThinkingPanel(props: {
         ) : null}
         {displaySections.map((section) => {
           if (section.kind === "tool_summary") {
-            return <ToolSummarySection key={section.id} count={section.count} status={section.status} events={section.events} />;
+            return <ToolSummarySection key={section.id} count={section.count} status={section.status} stats={section.stats} events={section.events} />;
           }
           if (section.kind === "event") {
             return <RunEventSection key={section.id} event={section.event} />;
@@ -137,81 +129,14 @@ export function AgentThinkingPanel(props: {
   );
 }
 
-function compactToolExecutionSections(sections: ProcessSection[]): DisplayProcessSection[] {
-  const compacted: DisplayProcessSection[] = [];
-  const pendingTools = new Map<string, AgentRunEvent["status"]>();
-  const pendingEvents: AgentRunEvent[] = [];
-  let pendingId = "";
-
-  const flushTools = () => {
-    if (pendingTools.size === 0) return;
-    const statuses = [...pendingTools.values()];
-    const status: AgentRunEvent["status"] = statuses.includes("error")
-      ? "error"
-      : statuses.includes("streaming") || statuses.includes("pending")
-        ? "streaming"
-        : "success";
-    compacted.push({
-      kind: "tool_summary",
-      id: pendingId || `tool-summary-${compacted.length}`,
-      count: pendingTools.size,
-      status,
-      events: pendingEvents.map((event) => ({
-        event,
-        displayStatus: resolveToolSummaryDisplayStatus(event, pendingTools),
-      })),
-    });
-    pendingTools.clear();
-    pendingEvents.length = 0;
-    pendingId = "";
-  };
-
-  for (const section of sections) {
-    if (section.kind !== "event" || !isToolExecutionEvent(section.event)) {
-      flushTools();
-      compacted.push(section);
-      continue;
-    }
-
-    pendingId ||= `tool-summary-${section.id}`;
-    const key = toolExecutionKey(section.event);
-    pendingEvents.push(section.event);
-    const currentStatus = pendingTools.get(key);
-    if (section.event.type === "tool_result" || section.event.type === "file_write") {
-      pendingTools.set(key, section.event.status === "error" ? "error" : "success");
-    } else if (!currentStatus || currentStatus === "pending" || currentStatus === "streaming") {
-      pendingTools.set(key, section.event.status);
-    }
-  }
-
-  flushTools();
-  return compacted;
-}
-
-function isToolExecutionEvent(event: AgentRunEvent) {
-  return event.type === "tool_call" || event.type === "tool_result" || event.type === "file_write";
-}
-
-function toolExecutionKey(event: AgentRunEvent) {
-  if (typeof event.metadata?.toolCallId === "string") return event.metadata.toolCallId;
-  return event.id;
-}
-
-function resolveToolSummaryDisplayStatus(event: AgentRunEvent, statuses: Map<string, AgentRunEvent["status"]>) {
-  if (event.type !== "tool_call") return event.status;
-  const finalStatus = statuses.get(toolExecutionKey(event));
-  if (finalStatus === "success" || finalStatus === "error") return finalStatus;
-  return event.status;
-}
-
-function ToolSummarySection(props: { count: number; status: AgentRunEvent["status"]; events: ToolSummaryDisplayEvent[] }) {
+function ToolSummarySection(props: { count: number; status: AgentRunEvent["status"]; stats: ToolSummaryStats; events: Array<{ event: AgentRunEvent; displayStatus: AgentRunEvent["status"] }> }) {
   const { t } = useTranslation();
   return (
     <details className={`group [display:grid] [min-width:0] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:14px] [background:#ffffff] [color:var(--muted)] [font-size:12px] ${props.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${props.status === "error" ? "[border-color:#dc26262e] [background:#fef2f2]" : ""}`}>
       <summary className={"[display:flex] [min-width:0] [align-items:center] [gap:8px] [padding:10px_12px] [font-weight:700] [cursor:pointer] [list-style:none] [&::-webkit-details-marker]:[display:none]"}>
         <Wrench size={15} className={"[flex:0_0_auto]"} />
         <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{t("thinkingPanel.toolCallsSummary", { count: props.count })}</span>
-        <span className={"[flex:0_0_auto] [margin-left:auto] [font-weight:600]"}>{formatToolSummaryStatus(props.status)}</span>
+        <span className={"[flex:0_0_auto] [margin-left:auto] [font-weight:600]"}>{formatToolSummaryStatus(props.status, props.stats, t)}</span>
         <ChevronDown size={14} className={"[flex:0_0_auto] [transition:transform_0.12s_ease] group-open:[rotate:180deg]"} />
       </summary>
       <div
@@ -231,7 +156,10 @@ function ToolSummarySection(props: { count: number; status: AgentRunEvent["statu
   );
 }
 
-function formatToolSummaryStatus(status: AgentRunEvent["status"]) {
+function formatToolSummaryStatus(status: AgentRunEvent["status"], stats: ToolSummaryStats, t: (key: string, values?: TranslateParams) => string) {
+  if (stats.failedCount > 0) {
+    return t("thinkingPanel.toolCallsMixedStatus", { success: stats.successCount, failed: stats.failedCount });
+  }
   if (status === "streaming") return formatRunEventStatus({ status, type: "tool_call" } as AgentRunEvent);
   if (status === "error") return formatRunEventStatus({ status, type: "tool_result" } as AgentRunEvent);
   return formatRunEventStatus({ status: "success", type: "tool_result" } as AgentRunEvent);

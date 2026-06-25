@@ -13,12 +13,51 @@ export function buildRoleDescription(identity: Identity | null) {
 
 export function buildEffectiveRoleDescription(participant: Participant, identity: Identity | null) {
   const roomOverride = participant.roomInstructions.trim();
-  if (roomOverride) return roomOverride;
-  return buildRoleDescription(identity);
+  const roleDescription = roomOverride || buildRoleDescription(identity);
+  return shouldApplyProductPrdGuidance(participant, identity, roleDescription)
+    ? appendProductPrdGuidance(roleDescription)
+    : roleDescription;
 }
 
 export function hasRoomRoleOverride(participant: Participant) {
   return Boolean(participant.roomInstructions.trim());
+}
+
+const PRODUCT_PRD_GUIDANCE = `## PRD Request Contract
+When the user asks for a PRD, product requirements document, or 产品需求文档:
+- Do not answer with only acceptance criteria or a generic checklist.
+- First identify the product/surface. If the request is ambiguous and the answer would materially change the PRD, ask one clarifying question. If you proceed, state the assumption first.
+- Do not silently turn a brand or physical product, such as Coca-Cola, into a website, app, or ecommerce flow unless the user specified that surface.
+- A complete PRD should cover: background/problem, target users, scenarios, goals, non-goals, scope, user journey/core workflow, functional requirements with priority, content/data/UX states when relevant, success metrics, acceptance criteria, risks/dependencies, and open questions.
+- Match the user's language and keep the document structured enough for design, engineering, and QA to act on.`;
+
+function appendProductPrdGuidance(roleDescription: string) {
+  if (
+    roleDescription.includes("## PRD Request Contract")
+    || (/when the user asks for a prd/i.test(roleDescription) && /do not silently turn a brand or physical product/i.test(roleDescription))
+  ) {
+    return roleDescription;
+  }
+  return [roleDescription.trim(), PRODUCT_PRD_GUIDANCE].filter(Boolean).join("\n\n");
+}
+
+function shouldApplyProductPrdGuidance(
+  participant: Participant,
+  identity: Identity | null,
+  roleDescription: string,
+) {
+  const displayName = participant.displayName.trim();
+  const identityName = identity?.name.trim() ?? "";
+  const text = [displayName, identityName, participant.roomInstructions, roleDescription]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
+  return (
+    displayName === "产品"
+    || identityName === "产品"
+    || /产品(?:经理|负责人|专家|agent)/i.test(text)
+    || /\b(?:senior\s+)?product\s+(?:manager|lead|strategist|agent)\b/i.test(text)
+  );
 }
 
 export function buildAgentInstructions(input: AgentInstructionInput) {

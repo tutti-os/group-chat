@@ -151,3 +151,48 @@ test("conversation timestamps show time today and date for older messages", asyn
   assert.doesNotMatch(older, /:/);
   assert.match(older, /20/);
 });
+
+function runEvent(id, type, status, metadata = null) {
+  return {
+    id,
+    runId: "run-1",
+    conversationId: "conversation-1",
+    type,
+    content: "",
+    status,
+    metadata,
+    sortOrder: 0,
+    createdAt: "2026-01-01T00:00:00.000Z",
+  };
+}
+
+test("tool summaries count mixed successes and failures without marking the group failed", async () => {
+  const { compactToolExecutionSections } = await bundleModule(
+    "src/app/agent-thinking.ts",
+    "agent-thinking-tool-summary",
+  );
+  const sections = [
+    { kind: "event", id: "call-1", event: runEvent("call-1", "tool_call", "success") },
+    { kind: "event", id: "call-2", event: runEvent("call-2", "tool_call", "success") },
+    { kind: "event", id: "call-3", event: runEvent("call-3", "tool_call", "success") },
+    { kind: "event", id: "call-4", event: runEvent("call-4", "tool_call", "success") },
+    { kind: "event", id: "call-5", event: runEvent("call-5", "tool_call", "success") },
+    { kind: "event", id: "call-6", event: runEvent("call-6", "tool_call", "success") },
+    { kind: "event", id: "call-7", event: runEvent("call-7", "tool_call", "success") },
+    { kind: "event", id: "result-1", event: runEvent("result-1", "tool_result", "success", { toolCallId: "call-1" }) },
+    { kind: "event", id: "result-2", event: runEvent("result-2", "tool_result", "success", { toolCallId: "call-2" }) },
+    { kind: "event", id: "result-3", event: runEvent("result-3", "tool_result", "success", { toolCallId: "call-3" }) },
+    { kind: "event", id: "result-4", event: runEvent("result-4", "tool_result", "success", { toolCallId: "call-4" }) },
+    { kind: "event", id: "result-5", event: runEvent("result-5", "tool_result", "success", { toolCallId: "call-5" }) },
+    { kind: "event", id: "result-6", event: runEvent("result-6", "tool_result", "success", { toolCallId: "call-6" }) },
+    { kind: "event", id: "result-7", event: runEvent("result-7", "tool_result", "error", { toolCallId: "call-7" }) },
+  ];
+
+  const summary = compactToolExecutionSections(sections);
+
+  assert.equal(summary.length, 1);
+  assert.equal(summary[0].kind, "tool_summary");
+  assert.equal(summary[0].count, 7);
+  assert.equal(summary[0].status, "success");
+  assert.deepEqual(summary[0].stats, { successCount: 6, failedCount: 1, runningCount: 0 });
+});

@@ -5,6 +5,21 @@ export type ProcessSection =
   | { kind: "thinking"; id: string; content: string; streaming: boolean }
   | { kind: "event"; id: string; event: AgentRunEvent };
 
+export type DisplayProcessSection =
+  | ProcessSection
+  | { kind: "tool_summary"; id: string; count: number; status: AgentRunEvent["status"]; stats: ToolSummaryStats; events: ToolSummaryDisplayEvent[] };
+
+export interface ToolSummaryStats {
+  successCount: number;
+  failedCount: number;
+  runningCount: number;
+}
+
+export interface ToolSummaryDisplayEvent {
+  event: AgentRunEvent;
+  displayStatus: AgentRunEvent["status"];
+}
+
 export type ThinkingSection = Extract<ProcessSection, { kind: "reasoning" | "thinking" }>;
 
 export function resolveMessageRunId(message: Message, agentRuns: AgentRun[]) {
@@ -110,4 +125,89 @@ export function messageHasThinking(
   agentRuns: AgentRun[] = [],
 ) {
   return canViewMessageProcess(message) && collectMessageProcess(message, blocks, agentRunEvents, agentRuns).length > 0;
+}
+
+export function compactToolExecutionSections(sections: ProcessSection[]): DisplayProcessSection[] {
+  const compacted: DisplayProcessSection[] = [];
+  const pendingTools = new Map<string, AgentRunEvent["status"]>();
+  const pendingEvents: AgentRunEvent[] = [];
+  let pendingId = "";
+
+  const flushTools = () => {
+    if (pendingTools.size === 0) return;
+    const stats = summarizeToolStatuses([...pendingTools.values()]);
+    compacted.push({
+      kind: "tool_summary",
+      id: pendingId || `tool-summary-${compacted.length}`,
+      count: pendingTools.size,
+      status: resolveToolSummaryStatus(stats),
+      stats,
+      events: pendingEvents.map((event) => ({
+        event,
+        displayStatus: resolveToolSummaryDisplayStatus(event, pendingTools),
+      })),
+    });
+    pendingTools.clear();
+    pendingEvents.length = 0;
+    pendingId = "";
+  };
+
+  for (const section of sections) {
+    if (section.kind !== "event" || !isToolExecutionEvent(section.event)) {
+      flushTools();
+      compacted.push(section);
+      continue;
+    }
+
+    pendingId ||= `tool-summary-${section.id}`;
+    const key = toolExecutionKey(section.event);
+    pendingEvents.push(section.event);
+    const currentStatus = pendingTools.get(key);
+    if (section.event.type === "tool_result" || section.event.type === "file_write") {
+      pendingTools.set(key, section.event.status === "error" ? "error" : "success");
+    } else if (!currentStatus || currentStatus === "pending" || currentStatus === "streaming") {
+      pendingTools.set(key, section.event.status);
+    }
+  }
+
+  flushTools();
+  return compacted;
+}
+
+function summarizeToolStatuses(statuses: AgentRunEvent["status"][]): ToolSummaryStats {
+  return statuses.reduce<ToolSummaryStats>(
+    (stats, status) => {
+      if (status === "error") {
+        stats.failedCount += 1;
+      } else if (status === "success") {
+        stats.successCount += 1;
+      } else {
+        stats.runningCount += 1;
+      }
+      return stats;
+    },
+    { successCount: 0, failedCount: 0, runningCount: 0 },
+  );
+}
+
+function resolveToolSummaryStatus(stats: ToolSummaryStats): AgentRunEvent["status"] {
+  if (stats.runningCount > 0) return "streaming";
+  if (stats.failedCount > 0 && stats.successCount === 0) return "error";
+  return "success";
+}
+
+function isToolExecutionEvent(event: AgentRunEvent) {
+  return event.type === "tool_call" || event.type === "tool_result" || event.type === "file_write";
+}
+
+function toolExecutionKey(event: AgentRunEvent) {
+  if (typeof event.metadata?.toolCallId === "string") return event.metadata.toolCallId;
+  return event.id;
+}
+
+function resolveToolSummaryDisplayStatus(event: AgentRunEvent, statuses: Map<string, AgentRunEvent["status"]>) {
+  if (event.type !== "tool_call") return event.status;
+  const finalStatus = statuses.get(toolExecutionKey(event));
+  if (finalStatus === "success" || finalStatus === "error") return finalStatus;
+  return event.status;
 }

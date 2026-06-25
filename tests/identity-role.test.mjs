@@ -15,9 +15,28 @@ async function loadModule() {
   return import(`${pathToFileURL(output)}?t=${Date.now()}`);
 }
 
+async function bundleWebModule(source, outputName) {
+  const output = `/tmp/${outputName}.test.mjs`;
+  await execFileAsync("pnpm", [
+    "--filter", "@group-chat/web", "exec", "esbuild", source,
+    "--bundle", "--platform=node", "--format=esm", `--outfile=${output}`,
+  ]);
+  return import(`${pathToFileURL(output)}?t=${Date.now()}`);
+}
+
 test("unmatched role descriptions keep the custom preset selected", async () => {
   const { matchRolePresetId } = await loadModule();
 
   assert.equal(matchRolePresetId(""), "custom");
   assert.equal(matchRolePresetId("Use this agent for highly specific room behavior."), "custom");
+});
+
+test("product manager preset includes a concrete PRD output contract", async () => {
+  const { roleDescriptionPresets } = await bundleWebModule("src/app/constants.ts", "role-constants");
+  const preset = roleDescriptionPresets.find((item) => item.id === "product-manager");
+
+  assert.ok(preset);
+  assert.match(preset.description, /When the user asks for a PRD/);
+  assert.match(preset.description, /do not answer with only acceptance criteria/i);
+  assert.match(preset.description, /Do not silently turn a brand or physical product, such as Coca-Cola, into a website/);
 });
