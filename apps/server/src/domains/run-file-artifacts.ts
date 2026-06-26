@@ -45,9 +45,10 @@ const INTERNAL_AGENT_WORKSPACE_ROOT_FILES = new Set([
   "SOURCE.MD",
 ]);
 
+// Only "skills" holds purely internal content (installed skill bundles); "conversations" and
+// "memory" are agent-workspace folders that agents also use to store real deliverables, so those
+// are excluded file-by-file below instead of by directory name.
 const INTERNAL_AGENT_WORKSPACE_DIRS = new Set([
-  "conversations",
-  "memory",
   "skills",
 ]);
 
@@ -58,9 +59,19 @@ export function inferMimeTypeForPath(filePath: string) {
     ?? "application/octet-stream";
 }
 
-export function shouldImportRunFileArtifactPath(filePath: string, workspaceRoot: string) {
+export function shouldImportRunFileArtifactPath(
+  filePath: string,
+  workspaceRoot: string,
+  conversationId?: string | null,
+) {
   const relativePath = relative(resolve(workspaceRoot), resolve(filePath)).replace(/\\/g, "/");
   if (!relativePath || relativePath.startsWith("..") || isAbsolute(relativePath)) return true;
+
+  const lowerRelativePath = relativePath.toLowerCase();
+  if (conversationId && (lowerRelativePath === `conversations/${conversationId.toLowerCase()}.md` || lowerRelativePath === `conversations/${conversationId.toLowerCase()}.summary.md`)) {
+    return false;
+  }
+  if (lowerRelativePath === "memory/users/local-user.md") return false;
 
   const [firstSegment, ...rest] = relativePath.split("/");
   if (!firstSegment) return true;

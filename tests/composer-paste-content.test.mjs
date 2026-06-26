@@ -21,11 +21,11 @@ test("removes leaked group-chat protocol tokens from pasted text", async () => {
   assert.equal(sanitizeComposerPasteText("前文 group-chat://unknown/value 后文"), "前文  后文");
 });
 
-test("removes raw internal message links but retains structured composer links", async () => {
+test("retains raw and structured internal message links", async () => {
   const { sanitizeComposerPasteText } = await loadModule();
   assert.equal(
     sanitizeComposerPasteText("查看 group-chat://message/message-1 和 group-chat://summary/task-1"),
-    "查看  和",
+    "查看 group-chat://message/message-1 和 group-chat://summary/task-1",
   );
   assert.equal(
     sanitizeComposerPasteText("[@产品](group-chat://participant/participant-1) 处理 [文件](group-chat://reference/file/artifact-1)"),
@@ -37,7 +37,7 @@ test("removes raw internal message links but retains structured composer links",
   );
 });
 
-test("only structured internal links become composer message elements", async () => {
+test("both raw and structured internal links become composer message elements", async () => {
   const { splitComposerPasteContent } = await loadModule();
   const context = {
     participants: [],
@@ -48,7 +48,10 @@ test("only structured internal links become composer message elements", async ()
 
   assert.deepEqual(
     splitComposerPasteContent("查看 group-chat://message/message-1", context),
-    [{ kind: "text", text: "查看 group-chat://message/message-1" }],
+    [
+      { kind: "text", text: "查看 " },
+      { kind: "message", id: "message-1" },
+    ],
   );
   assert.deepEqual(
     splitComposerPasteContent("[消息](group-chat://message/message-1) 和 [总结](group-chat://summary/task-1)", context),

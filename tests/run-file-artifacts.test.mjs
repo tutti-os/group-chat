@@ -86,7 +86,18 @@ test("run file artifact import skips internal agent workspace files", async () =
   assert.equal(shouldImportRunFileArtifactPath(`${workspaceRoot}/source.md`, workspaceRoot), false);
   assert.equal(shouldImportRunFileArtifactPath(`${workspaceRoot}/memory/users/local-user.md`, workspaceRoot), false);
   assert.equal(shouldImportRunFileArtifactPath(`${workspaceRoot}/Memory/users/local-user.md`, workspaceRoot), false);
-  assert.equal(shouldImportRunFileArtifactPath(`${workspaceRoot}/conversations/room.summary.md`, workspaceRoot), false);
+  assert.equal(shouldImportRunFileArtifactPath(`${workspaceRoot}/skills/some-skill/SKILL.md`, workspaceRoot), false);
   assert.equal(shouldImportRunFileArtifactPath(`${workspaceRoot}/requested_1111.md`, workspaceRoot), true);
   assert.equal(shouldImportRunFileArtifactPath("/Users/example/workspace/requested_1111.md", workspaceRoot), true);
+});
+
+test("run file artifact import only skips the auto-generated conversation log for the active conversation", async () => {
+  const { shouldImportRunFileArtifactPath } = await loadRunFileArtifactsModule();
+  const workspaceRoot = "/Users/example/.tutti-dev/apps/installations/group-chat/install/data/rooms/room/agents/agent";
+
+  assert.equal(shouldImportRunFileArtifactPath(`${workspaceRoot}/conversations/room-1.md`, workspaceRoot, "room-1"), false);
+  assert.equal(shouldImportRunFileArtifactPath(`${workspaceRoot}/conversations/room-1.summary.md`, workspaceRoot, "room-1"), false);
+  assert.equal(shouldImportRunFileArtifactPath(`${workspaceRoot}/conversations/room-1.summary.md`, workspaceRoot, "room-2"), true);
+  // A deliverable the agent itself chose to save under "conversations/" should still surface as a file card.
+  assert.equal(shouldImportRunFileArtifactPath(`${workspaceRoot}/conversations/coca-cola-prd.md`, workspaceRoot, "room-1"), true);
 });

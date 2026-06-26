@@ -2166,7 +2166,7 @@ export class ChatService {
       if (!normalizedRawPath) continue;
       const filePath = resolveRunOutputPath(normalizedRawPath, workspaceRoot);
       if (!isPathInsideDirectory(filePath, allowedRoot)) continue;
-      if (params.participantId && !shouldImportRunFileArtifactPath(filePath, workspaceRoot)) continue;
+      if (params.participantId && !shouldImportRunFileArtifactPath(filePath, workspaceRoot, params.conversationId)) continue;
       const existingLinkedArtifact = artifactByPath.get(filePath);
       if (existingLinkedArtifact) {
         pushRunArtifactAliases(linked, normalizedRawPath, filePath, existingLinkedArtifact);

@@ -1,4 +1,5 @@
 import type { Identity, LocalAgentProviderStatus, MentionTarget, Participant, RuntimeProfile, TuttiAtProviderId } from "@group-chat/shared";
+import { findEmbeddedLinks } from "./chat-links.js";
 import { buildLocalAgentLauncherReference } from "./local-agent-mention-options.js";
 import {
   enrichContentWithParticipantMentions,
@@ -75,6 +76,7 @@ export function normalizeComposerPasteText(html: string, plain: string) {
 }
 
 const MEANINGFUL_GROUP_CHAT_MARKDOWN_PATTERN = /\[[^\]]+\]\(group-chat:\/\/(?:reference|participant|message|summary)\/[^)]+\)/g;
+const MEANINGFUL_GROUP_CHAT_LINK_PATTERN = /group-chat:\/\/(?:message\/[A-Za-z0-9_-]+(?:,[A-Za-z0-9_-]+)*|summary\/[A-Za-z0-9_-]+)/g;
 const INTERNAL_GROUP_CHAT_TOKEN_PATTERN = /group-chat:\/\/[^\s]*/g;
 
 /** Removes leaked or incomplete internal protocol URLs while retaining links the composer renders as structured content. */
@@ -86,7 +88,8 @@ export function sanitizeComposerPasteText(value: string) {
   };
 
   const protectedText = value
-    .replace(MEANINGFUL_GROUP_CHAT_MARKDOWN_PATTERN, protect);
+    .replace(MEANINGFUL_GROUP_CHAT_MARKDOWN_PATTERN, protect)
+    .replace(MEANINGFUL_GROUP_CHAT_LINK_PATTERN, protect);
   const withoutLeakedLinks = protectedText
     .replace(/^[ \t]*group-chat:\/\/[^\s]*[ \t]*(?:\n|$)/gm, "")
     .replace(INTERNAL_GROUP_CHAT_TOKEN_PATTERN, "")
@@ -212,6 +215,17 @@ export function splitComposerPasteContent(
     }
   }
 
+  for (const link of findEmbeddedLinks(normalized)) {
+    if (matches.some((item) => rangesOverlap(item.index, item.length, link.index, link.length))) continue;
+    matches.push({
+      index: link.index,
+      length: link.length,
+      segment: link.kind === "message"
+        ? { kind: "message", id: link.id }
+        : { kind: "summary", id: link.id },
+    });
+  }
+
   matches.sort((left, right) => left.index - right.index || right.length - left.length);
 
   const segments: ComposerPasteSegment[] = [];
@@ -228,6 +242,10 @@ export function splitComposerPasteContent(
     segments.push(...splitPlainComposerText(normalized.slice(cursor), context));
   }
   return segments.length ? segments : [{ kind: "text", text: normalized }];
+}
+
+function rangesOverlap(leftIndex: number, leftLength: number, rightIndex: number, rightLength: number) {
+  return leftIndex < rightIndex + rightLength && rightIndex < leftIndex + leftLength;
 }
 
 function splitPlainComposerText(
