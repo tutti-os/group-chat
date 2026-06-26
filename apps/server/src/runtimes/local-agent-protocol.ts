@@ -159,7 +159,7 @@ export function resolveWorkspaceAppIntent(
     instruction: [
       `The user addressed ${context.participant.displayName} and referenced workspace app(s): ${appLabels}.`,
       `Interpret the remaining request as: ${requestText || "(empty request)"}.`,
-      "The Group Chat host invokes directly supported workspace app(s) when possible. Do not start a duplicate app run only because the app was mentioned; use visible app status/result if present, and reply with concise process and result context for the user.",
+      "Handle the referenced workspace app through the injected Tutti workspace-app skill or available Tutti CLI/app workflow. Do not assume the Group Chat host has already started or will start a separate direct app run.",
       "Do not treat the app label as a generic design keyword, Figma document, shell command, or MCP server name.",
       workspaceApps.some((app) => app.appId === "vibe-design")
         ? "For vibe-design, the intended execution path is the Tutti Prototype Design workspace app workflow for creating or editing a prototype/site/app."
