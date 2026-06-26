@@ -106,7 +106,7 @@ test("workspace app and agent mentions produce a clean intent prompt", async () 
         assert.match(prompt, /<intent>/);
         assert.equal(prompt.includes("data:image/png;base64"), false);
         assert.match(prompt, /request_text: 你去做一个音乐网站/);
-        assert.match(prompt, /The Group Chat host invokes directly supported workspace app\\(s\\) when possible/);
+        assert.match(prompt, /Handle the referenced workspace app through the injected Tutti workspace-app skill/);
         assert.match(prompt, /Do not treat the app label as a generic design keyword, Figma document, shell command, or MCP server name/);
       }
       main().catch((error) => {
@@ -159,7 +159,7 @@ test("workspace app mentions keep structured context for the mentioned agent", a
           || intent.requestText !== "做一个贪食蛇网站"
           || !intent.instruction.includes("Vibe Design")
           || !intent.instruction.includes("vibe-design")
-          || !intent.instruction.includes("Group Chat host invokes directly supported workspace app")
+          || !intent.instruction.includes("Handle the referenced workspace app through the injected Tutti workspace-app skill")
         ) {
           console.error("missing workspace app intent", JSON.stringify(intent));
           process.exit(1);

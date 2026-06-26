@@ -13,6 +13,11 @@ import {
   type RawAgentEvent,
   type RawAgentStream,
 } from "@tutti-os/agent-acp-kit";
+import {
+  loadTuttiAgentSkillContext,
+  resolveTuttiCliCommand,
+  type TuttiAgentSkillContext,
+} from "@tutti-os/agent-acp-kit/tutti";
 import type { LocalAgentProviderModel, LocalAgentProviderSpeedMode, LocalAgentProviderStatus, ReasoningEffort } from "@group-chat/shared";
 import { isMentionAllTrigger } from "@group-chat/shared";
 import { buildEffectiveRoleDescription } from "../domains/agent-instructions.js";
@@ -282,6 +287,12 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       const input = buildLocalAgentInput(context);
       const prompt = acpPromptFromLocalAgentInput(input);
       const timeoutMs = localAgentTimeoutMs();
+      const runtimeRunId = context.runId ?? `${context.conversation.id}:${context.participant.id}`;
+      const skillContext = await loadGroupChatAgentSkillContext({
+        provider,
+        agentSessionId: runtimeRunId,
+        workspaceRoot,
+      });
       let resume = !input.turn.intent && previousSession?.provider === provider && (previousSession.providerSessionId || previousSession.resumeToken)
         ? {
             mode: "provider" as const,
@@ -296,7 +307,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       while (true) {
         try {
           for await (const event of this.localAgentRuntime.run({
-            runId: context.runId ?? `${context.conversation.id}:${context.participant.id}`,
+            runId: runtimeRunId,
             conversationId: context.conversation.id,
             sessionId: context.conversation.id,
             provider,
@@ -304,11 +315,12 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
             runtimeProvider: provider,
             cwd: workspaceRoot,
             prompt,
-            systemPrompt: buildKitSystemPrompt(context),
+            systemPrompt: joinPromptParts(skillContext.recommendedSystemPrompt?.content, buildKitSystemPrompt(context)),
             history: buildKitHistory(context),
             model: stripLocalAgentProviderPrefix(context.runtimeProfile?.model ?? "default", provider),
             reasoning: context.participant.reasoningEffort ?? undefined,
             mcpServers: buildGroupChatMcpServers(context),
+            skillManifest: skillContext.skillManifest,
             env: buildLocalAgentRunEnv(context, workspaceRoot, skillFallbackEnv),
             metadata: context.participant.speedMode ? { speedMode: context.participant.speedMode } : undefined,
             ...(timeoutMs ? { timeoutMs } : {}),
@@ -386,7 +398,7 @@ function buildLocalAgentRunEnv(
   overrides?: Record<string, string>,
 ): Record<string, string> {
   return {
-    ...buildLocalAgentProcessEnv(process.env, overrides),
+    ...buildLocalAgentProcessEnv(process.env, { ...tuttiCliEnv(), ...overrides }),
     GROUP_CHAT_WORKSPACE: workspaceRoot,
     GROUP_CHAT_RUN_ID: context.runId ?? "",
     GROUP_CHAT_PARTICIPANT_ID: context.participant.id,
@@ -794,6 +806,7 @@ export function buildKitSystemPrompt(context: RuntimeReplyContext) {
     "Do not use tools to send the same reply again. Only use messaging tools for intentional additional side messages.",
     "When using a skill, do not include the skill's file path, README, SKILL.md contents, setup notes, or internal instructions in your reply. Only report the user-facing result, concise progress, or a brief blocker.",
     "When the user asks you to create or provide a file, image, video, or other generated asset, create it in the local workspace or save it with the artifact tool, then include the resulting local filesystem path in your normal final text so the user can open it. Do not send an extra group-chat message or attach it to the conversation unless the user explicitly asks you to post it to the group.",
+    "When a Tutti task-management / 任务管理 request appears, use the injected issue-manager skill and the Tutti `issue ...` CLI workflow. Do not treat `mention://workspace-app/issue-manager` as a generic workspace-app direct CLI invocation.",
     "If the current message does not need your response, output [NO_REPLY] as your entire output.",
     mentionAll
       ? "The user @mentioned everyone in this group. You must reply with a substantive message in your own voice. Do not output [NO_REPLY]. If you cannot complete the request, briefly explain why in the group."
@@ -812,6 +825,43 @@ export function buildKitSystemPrompt(context: RuntimeReplyContext) {
   ]
     .filter((line): line is string => Boolean(line))
     .join("\n\n");
+}
+
+async function loadGroupChatAgentSkillContext(input: {
+  provider: string;
+  agentSessionId: string;
+  workspaceRoot: string;
+}): Promise<TuttiAgentSkillContext> {
+  try {
+    return await loadTuttiAgentSkillContext({
+      provider: input.provider,
+      agentSessionId: input.agentSessionId,
+      cwd: tuttiWorkspaceCwd(input.workspaceRoot),
+      commandEnvNames: ["GROUP_CHAT_TUTTI_CLI"],
+    });
+  } catch (error) {
+    throw new Error(`Unable to load Tutti agent skill bundle; check GROUP_CHAT_TUTTI_CLI/TUTTI_CLI: ${errorMessage(error)}`);
+  }
+}
+
+function tuttiWorkspaceCwd(fallback: string) {
+  return process.env.TUTTI_WORKSPACE_ROOT?.trim() || process.env.GROUP_CHAT_WORKSPACE_ROOT?.trim() || fallback;
+}
+
+function joinPromptParts(...parts: Array<string | undefined | null>) {
+  return parts
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part))
+    .join("\n\n");
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function tuttiCliEnv(): Record<string, string> {
+  const command = resolveTuttiCliCommand({ envNames: ["GROUP_CHAT_TUTTI_CLI"] });
+  return command ? { TUTTI_CLI: command, GROUP_CHAT_TUTTI_CLI: command } : {};
 }
 
 function buildKitHistory(context: RuntimeReplyContext): AgentRunMessage[] {

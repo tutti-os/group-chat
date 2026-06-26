@@ -55,15 +55,6 @@ import {
   linkRunFileArtifactPathsInContent,
   shouldImportRunFileArtifactPath,
 } from "./run-file-artifacts.js";
-import {
-  resolveDirectWorkspaceAppIntent,
-  runDirectWorkspaceAppCli,
-  workspaceAppFailureMessage,
-  workspaceAppMentionTarget,
-  workspaceAppResultMessage,
-  workspaceAppStartMessage,
-  type DirectWorkspaceAppIntent,
-} from "./workspace-app-direct-run.js";
 import { participantWorkspaceRoot, roomArtifactRoot } from "../local/paths.js";
 import { NO_REPLY_MARKER } from "../runtimes/local-agent-protocol.js";
 import { createRuntimeProviderRegistry } from "../runtimes/runtime-registry.js";
@@ -507,12 +498,6 @@ export class ChatService {
     const mentions = message.mentions;
     const targets = this.resolveTargets(conversation, mentions, content);
     this.materializeParticipants(conversation, targets);
-    const directWorkspaceAppIntent = message.visibility === "public"
-      ? resolveDirectWorkspaceAppIntent(message.content, message.mentions)
-      : null;
-    if (directWorkspaceAppIntent) {
-      void this.runDirectWorkspaceApp(conversation, message, directWorkspaceAppIntent);
-    }
     void this.generateReplies(conversation.roomId, conversationId, message, targets, {
       currentRound: 1,
       maxRounds: input.maxReplyRounds
@@ -523,103 +508,6 @@ export class ChatService {
       mentionScoped: isParticipantMentionScoped(message.mentions),
     });
     return { message, blocks, artifacts, targets };
-  }
-
-  private async runDirectWorkspaceApp(
-    conversation: Conversation,
-    triggerMessage: Message,
-    intent: DirectWorkspaceAppIntent,
-  ) {
-    const pendingContent = workspaceAppStartMessage(intent);
-    const assistantMessage = this.repo.createMessage({
-      conversationId: conversation.id,
-      role: "system",
-      content: pendingContent,
-      mentions: [],
-      visibility: "public",
-      status: "streaming",
-      parentMessageId: triggerMessage.id,
-    });
-    this.events.emit({
-      type: "message.created",
-      roomId: conversation.roomId,
-      conversationId: conversation.id,
-      payload: { message: assistantMessage },
-    });
-    const block = this.repo.createMessageBlock({
-      messageId: assistantMessage.id,
-      type: "main_text",
-      content: pendingContent,
-      status: "streaming",
-      metadata: { workspaceAppId: intent.appId },
-    });
-    this.events.emit({
-      type: "message_block.created",
-      roomId: conversation.roomId,
-      conversationId: conversation.id,
-      payload: { block },
-    });
-
-    try {
-      const result = await runDirectWorkspaceAppCli(intent);
-      const content = workspaceAppResultMessage(result);
-      const mentions = workspaceAppMentionTarget(result);
-      const finalMessage = this.repo.updateMessage(assistantMessage.id, {
-        content,
-        mentions,
-        status: "success",
-      });
-      const finalBlock = this.repo.updateMessageBlock(block.id, {
-        content,
-        status: "success",
-        metadata: { workspaceAppId: intent.appId, projectId: result.projectId, conversationId: result.conversationId },
-      });
-      this.repo.touchConversation(conversation.id, content);
-      if (finalMessage) {
-        this.events.emit({
-          type: "message.updated",
-          roomId: conversation.roomId,
-          conversationId: conversation.id,
-          payload: { message: finalMessage },
-        });
-      }
-      if (finalBlock) {
-        this.events.emit({
-          type: "message_block.updated",
-          roomId: conversation.roomId,
-          conversationId: conversation.id,
-          payload: { block: finalBlock },
-        });
-      }
-    } catch (error) {
-      const content = workspaceAppFailureMessage(intent, error);
-      const finalMessage = this.repo.updateMessage(assistantMessage.id, {
-        content,
-        mentions: [],
-        status: "error",
-      });
-      const finalBlock = this.repo.updateMessageBlock(block.id, {
-        content,
-        status: "error",
-      });
-      this.repo.touchConversation(conversation.id, content);
-      if (finalMessage) {
-        this.events.emit({
-          type: "message.updated",
-          roomId: conversation.roomId,
-          conversationId: conversation.id,
-          payload: { message: finalMessage },
-        });
-      }
-      if (finalBlock) {
-        this.events.emit({
-          type: "message_block.updated",
-          roomId: conversation.roomId,
-          conversationId: conversation.id,
-          payload: { block: finalBlock },
-        });
-      }
-    }
   }
 
   runPrivateTask(conversationId: string, input: PrivateTaskRequest) {
