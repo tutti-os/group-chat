@@ -795,13 +795,26 @@ export function App() {
       }));
     return [...optimisticTasks, ...runTasks];
   }, [currentActiveRuns, currentConversation, currentConversationAgentRuns, currentMessages, currentParticipantsById, pendingReplyTargets]);
-  const openAgentRun = openAgentRunId
-    ? currentActiveRuns.find((run) => run.id === openAgentRunId)
-      ?? (openAgentRunSnapshot?.id === openAgentRunId ? openAgentRunSnapshot : null)
+  const openPendingAgentRunKey = openAgentRunId && isPendingAgentRunId(openAgentRunId)
+    ? openAgentRunId.slice("pending:".length)
     : null;
-  const openAgentRunEvents = openAgentRunId
+  const openPendingAgentRun = openPendingAgentRunKey
+    ? currentConversationAgentRuns.find(
+        (run) =>
+          run.triggerMessageId
+          && run.participantId
+          && pendingAgentReplyKey(run.triggerMessageId, run.participantId) === openPendingAgentRunKey,
+      ) ?? null
+    : null;
+  const resolvedOpenAgentRunId = openPendingAgentRun?.id ?? openAgentRunId;
+  const openAgentRun = resolvedOpenAgentRunId
+    ? currentActiveRuns.find((run) => run.id === resolvedOpenAgentRunId)
+      ?? currentConversationAgentRuns.find((run) => run.id === resolvedOpenAgentRunId)
+      ?? (openAgentRunSnapshot?.id === resolvedOpenAgentRunId ? openAgentRunSnapshot : null)
+    : null;
+  const openAgentRunEvents = resolvedOpenAgentRunId
     ? state.agentRunEvents
-        .filter((event) => event.runId === openAgentRunId)
+        .filter((event) => event.runId === resolvedOpenAgentRunId)
         .slice()
         .sort((left, right) => {
           if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder;
@@ -812,13 +825,35 @@ export function App() {
     ? currentParticipants.find((participant) => participant.id === openAgentRun.participantId) ?? null
     : null;
   const openAgentRunPanel = useCallback((runId: string) => {
-    const run = state.activeRuns.find((item) => item.id === runId);
+    const pendingKey = isPendingAgentRunId(runId) ? runId.slice("pending:".length) : null;
+    const resolvedRun = pendingKey
+      ? state.activeRuns.find(
+          (item) =>
+            item.triggerMessageId
+            && item.participantId
+            && pendingAgentReplyKey(item.triggerMessageId, item.participantId) === pendingKey,
+        ) ?? null
+      : null;
+    const run = resolvedRun ?? state.activeRuns.find((item) => item.id === runId);
     if (run) setOpenAgentRunSnapshot(run);
-    setOpenAgentRunId(runId);
+    setOpenAgentRunId(run?.id ?? runId);
     setOpenThinkingMessageId(null);
     setFilesPanelOpen(false);
     setOpenBackgroundTaskId(null);
   }, [state.activeRuns]);
+  useEffect(() => {
+    if (!openAgentRunId || !isPendingAgentRunId(openAgentRunId)) return;
+    const pendingKey = openAgentRunId.slice("pending:".length);
+    const run = state.activeRuns.find(
+      (item) =>
+        item.triggerMessageId
+        && item.participantId
+        && pendingAgentReplyKey(item.triggerMessageId, item.participantId) === pendingKey,
+    );
+    if (!run) return;
+    setOpenAgentRunSnapshot(run);
+    setOpenAgentRunId(run.id);
+  }, [openAgentRunId, state.activeRuns]);
   const openMessageThinking = useCallback((message: Message) => {
     setOpenThinkingMessageId(message.id);
     setOpenAgentRunId(null);
