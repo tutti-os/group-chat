@@ -1303,10 +1303,12 @@ function SystemNoticeRow(props: {
 }
 
 const messageRoleContentClassName =
-  "[&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[background:#f2f3f5] "
-  + "[&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[border-radius:8px] "
-  + "[&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[border-color:transparent] "
-  + "[&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only])]:[background:#d6e9ff]";
+  "[&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[background:#f2f3f5] "
+  + "[&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[border-radius:8px] "
+  + "[&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[border-color:transparent] "
+  + "[&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[background:#d6e9ff] "
+  + "[&[data-role=user]:not([data-whisper=true])_[data-slot=message-composite-block]]:[border-color:transparent] "
+  + "[&[data-role=user]:not([data-whisper=true])_[data-slot=message-composite-block]]:[background:#d6e9ff]";
 
 function MessageRow(props: {
   message: Message;
@@ -1378,6 +1380,7 @@ function MessageRow(props: {
     return whisperFooter !== null && block.id === whisperFooterBlockId;
   });
   const isUserMessage = props.message.role === "user";
+  const shouldRenderCompositeConversationBlocks = isUserMessage && !isWhisper && visibleConversationBlocks.length > 1;
   const triggerUserMentions = props.message.role === "assistant"
     ? resolveTriggerUserMentions(props.message, props.allMessages)
     : [];
@@ -1390,6 +1393,43 @@ function MessageRow(props: {
     props.participant,
     participantIdentity,
     props.userProfile.displayName,
+  );
+  const renderConversationBlock = (
+    block: MessageBlock,
+    index: number,
+    options?: { compositeChild?: boolean },
+  ) => (
+    <MessageBlockRenderer
+      key={block.id}
+      block={block}
+      artifacts={props.artifacts}
+      allBlocks={props.allBlocks}
+      allMessages={props.allMessages}
+      allParticipants={props.allParticipants}
+      identities={props.identities}
+      userProfile={props.userProfile}
+      conversations={props.conversations}
+      rooms={props.rooms}
+      onOpenArtifact={props.onOpenArtifact}
+      onOpenMessageLink={props.onOpenMessageLink}
+      onOpenSummaryLink={props.onOpenSummaryLink}
+      onEnsureSummaryTask={props.onEnsureSummaryTask}
+      summaryTasks={props.summaryTasks}
+      quotedMessage={index === 0 ? props.quotedMessage : null}
+      onOpenReferencedMessage={(referencedMessage) => props.onOpenReferencedMessage(referencedMessage, props.message)}
+      whisperFooter={whisperFooter && block.id === whisperFooterBlockId ? whisperFooter : null}
+      whisperMentionsToStrip={
+        whisperFooter?.variant === "user" && block.id === whisperFooterBlockId
+          ? props.message.mentions
+          : undefined
+      }
+      referenceMentions={props.message.mentions}
+      messageRole={props.message.role}
+      triggerUserMentions={triggerUserMentions}
+      onOpenAgentProfile={props.onOpenAgentProfile}
+      runtimeProfiles={props.runtimeProfiles}
+      compositeChild={options?.compositeChild}
+    />
   );
 
   const messageAvatar = isUserMessage ? (
@@ -1515,38 +1555,16 @@ function MessageRow(props: {
           <DeletedMessageBubble status={props.message.status} />
         ) : (
           <div data-slot="message-copy-content" className={"[user-select:text] [min-width:0]"}>
-            {visibleConversationBlocks.map((block, index) => (
-              <MessageBlockRenderer
-                key={block.id}
-                block={block}
-                artifacts={props.artifacts}
-                allBlocks={props.allBlocks}
-                allMessages={props.allMessages}
-                allParticipants={props.allParticipants}
-                identities={props.identities}
-                userProfile={props.userProfile}
-                conversations={props.conversations}
-                rooms={props.rooms}
-                onOpenArtifact={props.onOpenArtifact}
-                onOpenMessageLink={props.onOpenMessageLink}
-                onOpenSummaryLink={props.onOpenSummaryLink}
-                onEnsureSummaryTask={props.onEnsureSummaryTask}
-                summaryTasks={props.summaryTasks}
-                quotedMessage={index === 0 ? props.quotedMessage : null}
-                onOpenReferencedMessage={(referencedMessage) => props.onOpenReferencedMessage(referencedMessage, props.message)}
-                whisperFooter={whisperFooter && block.id === whisperFooterBlockId ? whisperFooter : null}
-                whisperMentionsToStrip={
-                  whisperFooter?.variant === "user" && block.id === whisperFooterBlockId
-                    ? props.message.mentions
-                    : undefined
-                }
-                referenceMentions={props.message.mentions}
-                messageRole={props.message.role}
-                triggerUserMentions={triggerUserMentions}
-                onOpenAgentProfile={props.onOpenAgentProfile}
-                runtimeProfiles={props.runtimeProfiles}
-              />
-            ))}
+            {shouldRenderCompositeConversationBlocks ? (
+              <div
+                data-slot="message-composite-block"
+                className={"message-prose [box-sizing:border-box] [display:grid] [width:fit-content] [min-width:0] [max-width:100%] [gap:6px] [overflow-wrap:break-word] [word-break:normal] [white-space:pre-wrap] [border:0] [border-radius:4px_6px_6px_4px] [padding:10px_13px] [color:var(--text)] [&_[data-slot=artifact-block]]:[margin-top:0] [&_[data-slot=message-block]]:[max-width:100%]"}
+              >
+                {visibleConversationBlocks.map((block, index) => renderConversationBlock(block, index, { compositeChild: true }))}
+              </div>
+            ) : (
+              visibleConversationBlocks.map((block, index) => renderConversationBlock(block, index))
+            )}
             {showFailureFallback && failureFallbackText ? (
               <MessageBlockRenderer
                 key={`${props.message.id}-failure-fallback`}
@@ -1594,7 +1612,7 @@ function MessageRow(props: {
       data-failed={props.message.status === "error" || undefined}
       data-selected={props.selected || undefined}
       data-group-continuation={!props.showHeader || undefined}
-      className={`group/message [position:relative] [display:grid] ${props.selectionMode ? "[grid-template-columns:22px_34px_minmax(0,_1fr)]" : "[grid-template-columns:34px_minmax(0,_1fr)]"} [gap:8px] [align-items:start] [border-radius:18px] [transition:background-color_0.2s_ease,_box-shadow_0.2s_ease] ${props.isLastInGroup ? "[margin-bottom:18px]" : "[margin-bottom:4px]"} ${props.selectionMode && !isRemoved ? "[cursor:pointer]" : ""} [&_[data-slot=message-avatar]]:[user-select:none] [&[data-selected=true]]:[background:#eaf2ff66] [&[data-flash=true]]:[background:#fef3c7] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-whisper=true]:not([data-failed=true])_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#d0d3d6] [&[data-whisper=true][data-failed=true]_[data-slot=message-block]:not([data-link-only])]:[border:1px_dashed_#f59e0b] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[border-radius:8px] [&[data-whisper=true][data-role=assistant]_[data-slot=message-block]:not([data-link-only])]:[background:#f8f9fb] [&[data-role=user][data-whisper=true]_[data-slot=message-block]:not([data-link-only])]:[background:#eef6ff] ${messageRoleContentClassName}`}
+      className={`group/message [position:relative] [display:grid] ${props.selectionMode ? "[grid-template-columns:22px_34px_minmax(0,_1fr)]" : "[grid-template-columns:34px_minmax(0,_1fr)]"} [gap:8px] [align-items:start] [border-radius:18px] [transition:background-color_0.2s_ease,_box-shadow_0.2s_ease] ${props.isLastInGroup ? "[margin-bottom:18px]" : "[margin-bottom:4px]"} ${props.selectionMode && !isRemoved ? "[cursor:pointer]" : ""} [&_[data-slot=message-avatar]]:[user-select:none] [&[data-selected=true]]:[background:#eaf2ff66] [&[data-flash=true]]:[background:#fef3c7] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-whisper=true]:not([data-failed=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[border:1px_dashed_#d0d3d6] [&[data-whisper=true][data-failed=true]_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[border:1px_dashed_#f59e0b] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[border-radius:8px] [&[data-whisper=true][data-role=assistant]_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[background:#f8f9fb] [&[data-role=user][data-whisper=true]_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[background:#eef6ff] ${messageRoleContentClassName}`}
       onClickCapture={(event) => {
         if (!props.selectionMode || isRemoved) return;
         event.preventDefault();
@@ -2979,7 +2997,7 @@ function RuntimeEventGroup(props: { blocks: MessageBlock[]; artifacts: Artifact[
 
 const MESSAGE_ACTION_BAR_GAP_PX = 4;
 const MESSAGE_ACTION_ANCHOR_SELECTOR = "[data-message-action-anchor]";
-const MESSAGE_BUBBLE_ANCHOR_SELECTOR = '[data-slot="message-block"], [data-slot="artifact-block"][data-artifact-id]';
+const MESSAGE_BUBBLE_ANCHOR_SELECTOR = '[data-slot="message-composite-block"], [data-slot="message-block"], [data-slot="artifact-block"][data-artifact-id]';
 const MESSAGE_CONTEXT_ARTIFACT_SELECTOR = '[data-slot="artifact-block"][data-artifact-id]';
 
 type MessageBubbleAnchor = { top: number; left: number; width: number; height: number };
@@ -2998,7 +3016,7 @@ function resolveDefaultMessageActionAnchor(body: HTMLElement): HTMLElement | nul
     const candidate = anchors.item(index);
     if (!(candidate instanceof HTMLElement)) continue;
     if (candidate.parentElement?.closest(MESSAGE_BUBBLE_ANCHOR_SELECTOR)) continue;
-    if (candidate.dataset.slot === "message-block") {
+    if (candidate.dataset.slot === "message-composite-block" || candidate.dataset.slot === "message-block") {
       return candidate;
     }
   }
@@ -3281,6 +3299,7 @@ export function MessageBlockRenderer(props: {
   triggerUserMentions?: Message["mentions"];
   onOpenAgentProfile?: (participant: Participant) => void;
   runtimeProfiles?: RuntimeProfile[];
+  compositeChild?: boolean;
 }) {
   const blockShell = (content: ReactNode) => content;
 
@@ -3375,7 +3394,8 @@ export function MessageBlockRenderer(props: {
       data-slot="message-block"
       data-block-id={props.block.id}
       data-link-only={isLinkOnly || undefined}
-      className={`message-prose [box-sizing:border-box] [width:fit-content] [min-width:0] [max-width:100%] [overflow-wrap:break-word] [word-break:normal] [white-space:pre-wrap] [border:0] [color:var(--text)] ${isLinkOnly ? "[display:grid] [gap:6px] [padding:0] [background:transparent] [border-radius:0]" : hasWhisperFooter ? "[display:flex] [flex-direction:column] [gap:4px] [padding:10px_12px] [border-radius:8px]" : "[padding:10px_13px] [border-radius:4px_6px_6px_4px]"} ${props.block.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${props.block.status === "error" && !hasWhisperFooter ? "[border:1px_solid_#fecaca] [color:var(--danger)] [background:#fef2f2]" : ""}`}
+      data-composite-child={props.compositeChild || undefined}
+      className={`message-prose [box-sizing:border-box] [width:fit-content] [min-width:0] [max-width:100%] [overflow-wrap:break-word] [word-break:normal] [white-space:pre-wrap] [border:0] [color:var(--text)] ${props.compositeChild ? "[padding:0] [background:transparent] [border-radius:0]" : isLinkOnly ? "[display:grid] [gap:6px] [padding:0] [background:transparent] [border-radius:0]" : hasWhisperFooter ? "[display:flex] [flex-direction:column] [gap:4px] [padding:10px_12px] [border-radius:8px]" : "[padding:10px_13px] [border-radius:4px_6px_6px_4px]"} ${props.block.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${props.block.status === "error" && !hasWhisperFooter ? "[border:1px_solid_#fecaca] [color:var(--danger)] [background:#fef2f2]" : ""}`}
     >
       {props.quotedMessage ? (
         <ReferencedMessagePreview

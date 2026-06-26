@@ -147,6 +147,7 @@ export function ComposerMentionPalette(props: ComposerMentionPaletteProps) {
   return (
     <div
       ref={props.menuRef}
+      data-agent-chat-composer-palette
       className={`mentionMenu [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:18px] [background:var(--panel)] [box-shadow:0_14px_42px_rgb(0_0_0_/_12%)] ${fileSelectMode ? "[display:grid] [grid-template-rows:minmax(0,_1fr)_auto]" : ""}`}
       style={props.menuStyle}
     >

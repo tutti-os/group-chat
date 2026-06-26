@@ -97,12 +97,16 @@ function ExecutingRunsPanel(props: {
         aria-expanded={expanded}
         onClick={() => setExpanded((current) => !current)}
       >
-        <div className={"[display:inline-flex] [min-width:0] [flex:1_1_auto] [align-items:center] [gap:6px] [color:#1e3a8a] [font-size:12px] [font-weight:650]"}>
-          <LoaderCircle size={14} className={"[flex:0_0_auto] animate-spin"} />
-          <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>
-            {t("taskBar.executingCount", { count: props.agentRuns.length })}
-          </span>
-        </div>
+        {!expanded ? (
+          <div className={"[display:inline-flex] [min-width:0] [flex:1_1_auto] [align-items:center] [gap:6px] [color:#1e3a8a] [font-size:12px] [font-weight:650]"}>
+            <LoaderCircle size={14} className={"[flex:0_0_auto] animate-spin"} />
+            <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>
+              {t("taskBar.executingCount", { count: props.agentRuns.length })}
+            </span>
+          </div>
+        ) : (
+          <span className={"[flex:1_1_auto]"} aria-hidden="true" />
+        )}
         <span className={"[display:grid] [flex:0_0_auto] [width:22px] [height:22px] [place-items:center] [border-radius:6px] [color:#475569] [background:#ffffff99]"}>
           {expanded ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
         </span>
