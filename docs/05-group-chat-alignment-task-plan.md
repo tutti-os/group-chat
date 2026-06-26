@@ -102,7 +102,7 @@ Group Chat 把附件作为 content blocks 注入，并在 agent prompt 中渲染
   - room title/description 会同步到 1:1 conversation 的 title/group system prompt，保持房间头部、侧边栏和 agent workspace 上下文一致。
   - Chat Header 提供 Room 编辑入口，保存后广播 `room.updated`。
 - 已完成：ConversationSidebar 房间搜索。
-  - 按 conversation title、room title、room description 和 last message 本地过滤。
+  - 按侧边栏展示的 conversation title 本地过滤。
   - 无匹配时展示空状态，不影响 server durable store。
 - 已完成：Team 页面提供 New local agent 快捷入口，默认绑定第一个 local-agent runtime，降低添加 Codex/Claude 本地 agent 的操作成本。
 - 已完成：添加房间成员时可直接配置关键属性。

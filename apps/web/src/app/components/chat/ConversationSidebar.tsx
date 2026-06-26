@@ -51,17 +51,14 @@ export function ConversationSidebar(props: {
     }),
     [latestPreviewMessageByConversationId, locale, props.conversations, roomsById],
   );
-  const visibleConversationEntries = useMemo(
-    () => conversationEntries
-      .filter(({ conversation, room, preview }) => {
-      if (!normalizedQuery) return true;
-      return [conversation.title, conversation.lastMessage, preview.sender, preview.content, room.title, room.description]
-        .filter(Boolean)
-        .some((value) => value!.toLowerCase().includes(normalizedQuery));
+  const visibleConversationEntries = useMemo(() => {
+    return conversationEntries
+      .filter(({ conversation }) => {
+        if (!normalizedQuery) return true;
+        return conversation.title.toLowerCase().includes(normalizedQuery);
       })
-      .sort((left, right) => sortConversations(left.conversation, right.conversation)),
-    [conversationEntries, normalizedQuery],
-  );
+      .sort((left, right) => sortConversations(left.conversation, right.conversation));
+  }, [conversationEntries, normalizedQuery]);
 
   const contextConversation = contextMenu
     ? conversationsById.get(contextMenu.conversationId) ?? null
