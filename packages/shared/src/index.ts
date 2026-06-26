@@ -962,6 +962,32 @@ function participantDisplayNameCharUnits(char: string) {
     : 1;
 }
 
+const TUTTI_AGENT_PARTICIPANT_PREFIX = "tutti-agent:";
+
+export function normalizeTuttiAgentProvider(provider: string | null | undefined) {
+  const normalized = provider?.trim().toLowerCase() ?? "";
+  if (normalized === "claude-code") return "claude";
+  if (normalized === "claude" || normalized === "codex") return normalized;
+  return normalized.replace(/[^a-z0-9_.-]/g, "");
+}
+
+export function tuttiAgentParticipantId(provider: string) {
+  const normalized = normalizeTuttiAgentProvider(provider);
+  return normalized ? `${TUTTI_AGENT_PARTICIPANT_PREFIX}${normalized}` : "";
+}
+
+export function parseTuttiAgentParticipantId(participantId: string | null | undefined) {
+  const trimmed = participantId?.trim() ?? "";
+  if (!trimmed.startsWith(TUTTI_AGENT_PARTICIPANT_PREFIX)) return "";
+  return normalizeTuttiAgentProvider(trimmed.slice(TUTTI_AGENT_PARTICIPANT_PREFIX.length));
+}
+
+export function defaultTuttiAgentParticipantName(provider: string) {
+  if (provider === "codex") return "Codex CLI";
+  if (provider === "claude") return "Claude Code";
+  return provider || "Agent";
+}
+
 export {
   enrichAssistantContentWithWorkspaceResourceLinks,
   resolveTriggerUserMentions,

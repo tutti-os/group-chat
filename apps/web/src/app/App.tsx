@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { Bot, Loader2 } from "lucide-react";
-import { enrichAgentRuns, isLocalUserMessage, resolveAgentRunVisibility, type AgentRun,
+import { defaultTuttiAgentParticipantName, enrichAgentRuns, isLocalUserMessage, parseTuttiAgentParticipantId, resolveAgentRunVisibility, type AgentRun,
   type ChatSnapshot,
   type Conversation,
   type ConversationMessagesPage,
@@ -157,6 +157,12 @@ interface TimelinePageWindow {
   messageIds: string[];
   nextCursor: string | null;
   hasMore: boolean;
+}
+
+/** Virtual Tutti agent participants (id like "tutti-agent:codex") are never persisted to state.participants, so derive their label from the id instead of falling back to a generic name. */
+function tuttiAgentParticipantDisplayName(participantId: string | null | undefined) {
+  const provider = parseTuttiAgentParticipantId(participantId);
+  return provider ? defaultTuttiAgentParticipantName(provider) : null;
 }
 
 export function App() {
@@ -756,7 +762,9 @@ export function App() {
   const agentRunTasks: AgentRunTaskItem[] = useMemo(() => {
     const runTasks = currentActiveRuns.map((run) => {
       const visibility = resolveAgentRunVisibility(run, currentMessages);
-      const participantName = currentParticipantsById.get(run.participantId ?? "")?.displayName ?? t("common.agent");
+      const participantName = currentParticipantsById.get(run.participantId ?? "")?.displayName
+        ?? tuttiAgentParticipantDisplayName(run.participantId)
+        ?? t("common.agent");
       return {
         id: run.id,
         type: "agent-run" as const,
