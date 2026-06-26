@@ -20,6 +20,7 @@ export function AgentManageCard(props: {
   const resolvedAvatar = resolveAgentAvatar({
     avatar: displayAvatar,
     icon: identity?.icon,
+    participantId: participant.id,
     runtimeProfile,
   });
   const selectedRuntime = runtimeProfile;

@@ -422,6 +422,7 @@ function MentionParticipantAvatar(props: {
   const resolvedAvatar = resolveAgentAvatarFromContext({
     avatar: props.participant.avatar,
     icon: identity?.icon,
+    participantId: props.participant.id,
     runtimeProfileId: props.participant.runtimeProfileId,
     identity,
     runtimeProfiles: [...props.runtimeProfiles],

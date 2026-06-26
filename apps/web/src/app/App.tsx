@@ -86,7 +86,8 @@ import {
   readCachedAvailableAgentLauncherAppIds,
   sameStringSet,
 } from "./agent-launcher-availability.js";
-import { formatMessageBodyForAgentForward } from "./reference-mentions.js";
+import { formatMessageBodyForAgentForward, formatReferenceMentionMarkdown } from "./reference-mentions.js";
+import { enrichMessageContentForCopy } from "./composer-paste-content.js";
 import { collectImageFileArtifactsForMessages } from "./message-artifacts.js";
 import { defaultIdentityNameForRuntime, listCanonicalRuntimeProfiles, localAgentStatus } from "./runtime.js";
 import { localAgentMentionSubtitle } from "./local-agent-mention-options.js";
@@ -795,16 +796,24 @@ export function App() {
       }));
     return [...optimisticTasks, ...runTasks];
   }, [currentActiveRuns, currentConversation, currentConversationAgentRuns, currentMessages, currentParticipantsById, pendingReplyTargets]);
+  const findAgentRunByPendingKey = useCallback((pendingKey: string) => {
+    const matchesPendingKey = (run: AgentRun) =>
+      Boolean(
+        run.triggerMessageId
+        && run.participantId
+        && pendingAgentReplyKey(run.triggerMessageId, run.participantId) === pendingKey,
+      );
+    return currentActiveRuns.find(matchesPendingKey)
+      ?? currentConversationAgentRuns.find(matchesPendingKey)
+      ?? state.activeRuns.find(matchesPendingKey)
+      ?? state.agentRuns.find(matchesPendingKey)
+      ?? null;
+  }, [currentActiveRuns, currentConversationAgentRuns, state.activeRuns, state.agentRuns]);
   const openPendingAgentRunKey = openAgentRunId && isPendingAgentRunId(openAgentRunId)
     ? openAgentRunId.slice("pending:".length)
     : null;
   const openPendingAgentRun = openPendingAgentRunKey
-    ? currentConversationAgentRuns.find(
-        (run) =>
-          run.triggerMessageId
-          && run.participantId
-          && pendingAgentReplyKey(run.triggerMessageId, run.participantId) === openPendingAgentRunKey,
-      ) ?? null
+    ? findAgentRunByPendingKey(openPendingAgentRunKey)
     : null;
   const resolvedOpenAgentRunId = openPendingAgentRun?.id ?? openAgentRunId;
   const openAgentRun = resolvedOpenAgentRunId
@@ -826,34 +835,26 @@ export function App() {
     : null;
   const openAgentRunPanel = useCallback((runId: string) => {
     const pendingKey = isPendingAgentRunId(runId) ? runId.slice("pending:".length) : null;
-    const resolvedRun = pendingKey
-      ? state.activeRuns.find(
-          (item) =>
-            item.triggerMessageId
-            && item.participantId
-            && pendingAgentReplyKey(item.triggerMessageId, item.participantId) === pendingKey,
-        ) ?? null
-      : null;
-    const run = resolvedRun ?? state.activeRuns.find((item) => item.id === runId);
+    const resolvedRun = pendingKey ? findAgentRunByPendingKey(pendingKey) : null;
+    const run = resolvedRun
+      ?? currentActiveRuns.find((item) => item.id === runId)
+      ?? currentConversationAgentRuns.find((item) => item.id === runId)
+      ?? state.activeRuns.find((item) => item.id === runId)
+      ?? state.agentRuns.find((item) => item.id === runId);
     if (run) setOpenAgentRunSnapshot(run);
     setOpenAgentRunId(run?.id ?? runId);
     setOpenThinkingMessageId(null);
     setFilesPanelOpen(false);
     setOpenBackgroundTaskId(null);
-  }, [state.activeRuns]);
+  }, [currentActiveRuns, currentConversationAgentRuns, findAgentRunByPendingKey, state.activeRuns, state.agentRuns]);
   useEffect(() => {
     if (!openAgentRunId || !isPendingAgentRunId(openAgentRunId)) return;
     const pendingKey = openAgentRunId.slice("pending:".length);
-    const run = state.activeRuns.find(
-      (item) =>
-        item.triggerMessageId
-        && item.participantId
-        && pendingAgentReplyKey(item.triggerMessageId, item.participantId) === pendingKey,
-    );
+    const run = findAgentRunByPendingKey(pendingKey);
     if (!run) return;
     setOpenAgentRunSnapshot(run);
     setOpenAgentRunId(run.id);
-  }, [openAgentRunId, state.activeRuns]);
+  }, [findAgentRunByPendingKey, openAgentRunId]);
   const openMessageThinking = useCallback((message: Message) => {
     setOpenThinkingMessageId(message.id);
     setOpenAgentRunId(null);
@@ -1442,7 +1443,7 @@ export function App() {
         .map((message) => ({
           messageId: message.id,
           sender: messageSenderLabel(message, state.participants, state.identities, userProfile.displayName),
-          content: message.content.trim() || attachmentLabel(),
+          content: formatMessageForComposerQuote(message, state.messageBlocks, state.artifacts),
           mentions: message.mentions,
         }));
       if (quotes.length === 1) {
@@ -1559,9 +1560,10 @@ export function App() {
 
   useEffect(() => {
     if (!openAgentRunId) return;
-    const run = state.activeRuns.find((item) => item.id === openAgentRunId);
+    const run = state.activeRuns.find((item) => item.id === openAgentRunId)
+      ?? state.agentRuns.find((item) => item.id === openAgentRunId);
     if (run) setOpenAgentRunSnapshot(run);
-  }, [openAgentRunId, state.activeRuns]);
+  }, [openAgentRunId, state.activeRuns, state.agentRuns]);
 
   useEffect(() => {
     if (!profileMenuOpen) return;
@@ -2182,6 +2184,44 @@ function formatMessagesForComposer(messages: Message[], mode: "quote" | "summary
   if (mode === "send-to-app") return t("app.sendToAppPrompt", { content });
   if (mode === "send-to-agent") return t("app.sendToAgentPrompt", { content });
   return `${lines.join("\n")}\n\n`;
+}
+
+function formatMessageForComposerQuote(
+  message: Message,
+  blocks: AppState["messageBlocks"],
+  artifacts: AppState["artifacts"],
+) {
+  const messageBlocks = blocks
+    .filter((block) => block.messageId === message.id && isComposerQuoteBlock(block))
+    .sort(compareMessageBlocksForComposer);
+  const parts = messageBlocks
+    .map((block) => formatMessageBlockForComposerQuote(block, message, artifacts))
+    .filter(Boolean);
+  if (parts.length) return parts.join("\n").trim() || attachmentLabel();
+  return enrichMessageContentForCopy(message.content.trim() || attachmentLabel(), message.mentions ?? []).trim() || attachmentLabel();
+}
+
+function isComposerQuoteBlock(block: MessageBlock) {
+  return block.type === "main_text" || block.type === "image" || block.type === "file";
+}
+
+function compareMessageBlocksForComposer(left: MessageBlock, right: MessageBlock) {
+  if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder;
+  return left.createdAt.localeCompare(right.createdAt);
+}
+
+function formatMessageBlockForComposerQuote(
+  block: MessageBlock,
+  message: Message,
+  artifacts: AppState["artifacts"],
+) {
+  if (block.type === "main_text") {
+    return enrichMessageContentForCopy(block.content.trim(), message.mentions ?? []).trim();
+  }
+  const artifactId = typeof block.metadata?.artifactId === "string" ? block.metadata.artifactId : "";
+  const artifact = artifactId ? artifacts.find((item) => item.id === artifactId) ?? null : null;
+  if (!artifact) return block.content.trim();
+  return formatReferenceMentionMarkdown("file", artifact.id, artifact.filename);
 }
 
 function formatMessagesForAgentForward(

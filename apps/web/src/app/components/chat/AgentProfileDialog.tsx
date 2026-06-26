@@ -113,6 +113,7 @@ export function AgentProfileDialog(props: {
   const headerAvatar = resolveAgentAvatar({
     avatar: displayAvatar,
     icon: activeIdentity?.icon,
+    participantId: participant?.id,
     runtimeProfile: selectedRuntime,
   });
   const removed = !isAddMode && participant?.status === "removed";

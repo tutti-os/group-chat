@@ -1052,20 +1052,26 @@ export function MessageTimeline(props: {
 
 function EmptyTimelineState(props: { participantsCount: number; onOpenMembers: (options?: { startAdding?: boolean }) => void }) {
   const noAgents = props.participantsCount === 0;
+  const title = (noAgents ? t("timeline.emptyNoAgentsTitle") : t("timeline.emptyStartTitle")).trim();
+  const hint = (noAgents ? t("timeline.emptyNoAgentsHint") : t("timeline.emptyStartHint")).trim();
+  const suggestions = [
+    t("timeline.suggestionAnalyze"),
+    t("timeline.suggestionProductPlan"),
+    t("timeline.suggestionDiscussAll"),
+  ].map((item) => item.trim()).filter(Boolean);
+
   return (
     <div className={"[display:grid] [min-height:100%] [place-items:center] [padding:28px] [text-align:center]"}>
       <div className={"[display:grid] [max-width:460px] [gap:14px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:28px] [background:#ffffff99] [&_h3]:[margin:0] [&_h3]:[color:var(--text)] [&_h3]:[font-size:18px] [&_h3]:[font-weight:700] [&_p]:[margin:0] [&_p]:[color:var(--muted)] [&_p]:[font-size:13px] [&_p]:[line-height:1.6]"}>
-        <h3>{noAgents ? t("timeline.emptyNoAgentsTitle") : t("timeline.emptyStartTitle")}</h3>
-        <p>
-          {noAgents
-            ? t("timeline.emptyNoAgentsHint")
-            : t("timeline.emptyStartHint")}
-        </p>
-        <div className={"[display:flex] [flex-wrap:wrap] [justify-content:center] [gap:8px] [&_span]:[border:1px_solid_var(--border)] [&_span]:[border-radius:999px] [&_span]:[padding:5px_10px] [&_span]:[color:var(--tag-agent-text)] [&_span]:[background:#ffffff] [&_span]:[font-size:12px]"}>
-          <span>{t("timeline.suggestionAnalyze")}</span>
-          <span>{t("timeline.suggestionProductPlan")}</span>
-          <span>{t("timeline.suggestionDiscussAll")}</span>
-        </div>
+        {title ? <h3>{title}</h3> : null}
+        {hint ? <p>{hint}</p> : null}
+        {suggestions.length > 0 ? (
+          <div className={"[display:flex] [flex-wrap:wrap] [justify-content:center] [gap:8px] [&_span]:[border:1px_solid_var(--border)] [&_span]:[border-radius:999px] [&_span]:[padding:5px_10px] [&_span]:[color:var(--tag-agent-text)] [&_span]:[background:#ffffff] [&_span]:[font-size:12px]"}>
+            {suggestions.map((suggestion) => (
+              <span key={suggestion}>{suggestion}</span>
+            ))}
+          </div>
+        ) : null}
         <button
           type="button"
           className={"[justify-self:center] [height:36px] [border:0] [border-radius:6px] [padding:0_14px] [color:#ffffff] [background:var(--primary)] [font-size:13px] [font-weight:650] [&:hover]:[background:var(--accent)]"}
@@ -1254,6 +1260,18 @@ function stripLeadingMentionsFromContent(content: string, mentions: Message["men
     }
   }
   return result;
+}
+
+function stripLeadingGeneratedReplyLine(content: string): string {
+  const normalized = content.replace(/\r\n?/g, "\n");
+  const lines = normalized.split("\n");
+  if (!/^(?:回复|Reply)\s+[^:：]+[:：]/i.test(lines[0]?.trim() ?? "")) return content;
+
+  const bodyStartIndex = lines.findIndex((line, index) => index > 0 && line.trim() === "");
+  if (bodyStartIndex !== -1) {
+    return lines.slice(bodyStartIndex + 1).join("\n").trimStart();
+  }
+  return lines.slice(1).join("\n").trimStart();
 }
 
 function WhisperMessageFooter(props: { label: string }) {
@@ -1615,6 +1633,7 @@ function MessageRow(props: {
       className={`group/message [position:relative] [display:grid] ${props.selectionMode ? "[grid-template-columns:22px_34px_minmax(0,_1fr)]" : "[grid-template-columns:34px_minmax(0,_1fr)]"} [gap:8px] [align-items:start] [border-radius:18px] [transition:background-color_0.2s_ease,_box-shadow_0.2s_ease] ${props.isLastInGroup ? "[margin-bottom:18px]" : "[margin-bottom:4px]"} ${props.selectionMode && !isRemoved ? "[cursor:pointer]" : ""} [&_[data-slot=message-avatar]]:[user-select:none] [&[data-selected=true]]:[background:#eaf2ff66] [&[data-flash=true]]:[background:#fef3c7] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-whisper=true]:not([data-failed=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[border:1px_dashed_#d0d3d6] [&[data-whisper=true][data-failed=true]_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[border:1px_dashed_#f59e0b] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[border-radius:8px] [&[data-whisper=true][data-role=assistant]_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[background:#f8f9fb] [&[data-role=user][data-whisper=true]_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[background:#eef6ff] ${messageRoleContentClassName}`}
       onClickCapture={(event) => {
         if (!props.selectionMode || isRemoved) return;
+        if (event.target instanceof Element && event.target.closest('[data-slot="message-select"]')) return;
         event.preventDefault();
         event.stopPropagation();
         props.onToggleSelected();
@@ -1626,8 +1645,8 @@ function MessageRow(props: {
         className={"[user-select:none] [display:flex] [height:34px] [align-items:center] [justify-content:center]"}
       >
         {!isRemoved ? (
-          <label className={"[display:grid] [width:16px] [height:16px] [place-items:center] [cursor:pointer]"}>
-            <input className={"[width:16px] [height:16px] [accent-color:var(--primary)]"} type="checkbox" checked={props.selected} onChange={props.onToggleSelected} aria-label={t("messageActions.selectMessage")} />
+          <label className={"[display:grid] [width:22px] [height:34px] [place-items:center] [cursor:pointer]"}>
+            <input className={"[width:16px] [height:16px] [accent-color:var(--primary)] [cursor:pointer]"} type="checkbox" checked={props.selected} onChange={props.onToggleSelected} aria-label={t("messageActions.selectMessage")} />
           </label>
         ) : null}
       </div>
@@ -2379,6 +2398,7 @@ function SummaryAgentPicker(props: {
             const resolvedAvatar = resolveAgentAvatarFromContext({
               avatar: participant.avatar,
               icon: identity?.icon,
+              participantId: participant.id,
               runtimeProfileId: participant.runtimeProfileId,
               identity,
               runtimeProfiles: props.runtimeProfiles,
@@ -2918,6 +2938,7 @@ export function MessageSenderAvatar(props: {
   const resolvedAvatar = resolveAgentAvatarFromContext({
     avatar: props.participant?.avatar,
     icon: props.identity?.icon,
+    participantId: props.participant?.id ?? props.message.senderParticipantId,
     runtimeProfileId: props.participant?.runtimeProfileId,
     identity: props.identity,
     runtimeProfiles: props.runtimeProfiles,
@@ -3348,7 +3369,9 @@ export function MessageBlockRenderer(props: {
   }
   const content = normalizeMarkdownContent(props.block.content || " ");
   const quotedContent = extractLeadingReplyQuote(content);
-  const rawBodyContent = quotedContent?.body ?? content;
+  const rawBodyContent = props.quotedMessage
+    ? stripLeadingGeneratedReplyLine(quotedContent?.body ?? content)
+    : quotedContent?.body ?? content;
   const bodyContent = props.whisperMentionsToStrip?.length
     ? stripLeadingMentionsFromContent(rawBodyContent, props.whisperMentionsToStrip)
     : rawBodyContent;

@@ -122,7 +122,7 @@ export function AgentRunPanel(props: {
             {props.running ? (
               <>
                 <LoaderCircle size={22} className={"animate-spin"} />
-                <p className={"[margin:0]"}>{t("runPanel.waiting")}</p>
+                <p className={"[margin:0]"}>{props.run.status === "accepted" ? t("runPanel.waiting") : t("runPanel.running")}</p>
               </>
             ) : (
               <>

@@ -1473,6 +1473,7 @@ export class ChatService {
       if (event.type === "text_delta") {
         if (deferAssistantTextToThinking) {
           deferredAssistantText += event.text;
+          appendThinking(event.text);
           return;
         }
         emitToken(event.text);
@@ -1647,6 +1648,9 @@ export class ChatService {
     });
     const finalContent = linkRunFileArtifactPathsInContent(enrichedReply.content, runFileArtifacts);
     const finalBlock = this.repo.updateMessageBlock(visibleReply.block.id, { content: finalContent, status: "success" });
+    if (deferAssistantTextToThinking) {
+      thinkingState.content = extractLocalAgentThinking(deferredAssistantText, finalVisibleOutput);
+    }
     appendThinking("", true);
     const finalMessage = this.repo.updateMessage(visibleReply.message.id, {
       content: finalContent,
@@ -2223,6 +2227,19 @@ function extractLocalAgentFinalReply(raw: string) {
 
   const sentences = splitChineseSentences(text);
   if (sentences.length > 1) return sentences.slice(-2).join("");
+  return text;
+}
+
+function extractLocalAgentThinking(raw: string, finalReply: string) {
+  const text = raw.trim();
+  const finalText = finalReply.trim();
+  if (!text || !finalText) return text;
+  if (text === finalText) return "";
+
+  const finalIndex = text.lastIndexOf(finalText);
+  if (finalIndex > 0) {
+    return text.slice(0, finalIndex).trim();
+  }
   return text;
 }
 

@@ -1,4 +1,4 @@
-import type { Identity, RuntimeProfile } from "@group-chat/shared";
+import { parseTuttiAgentParticipantId, type Identity, type RuntimeProfile } from "@group-chat/shared";
 import { hasCustomRoomAvatar } from "./room-avatar.js";
 
 export interface RuntimeProviderAvatarStyle {
@@ -39,21 +39,28 @@ export function getRuntimeProviderAvatarStyle(provider: string | null | undefine
 export function resolveAgentAvatar(input: {
   icon?: string | null;
   avatar?: string | null;
+  participantId?: string | null;
   runtimeProfile?: Pick<RuntimeProfile, "provider" | "kind"> | null;
 }): {
   avatar: string | null;
   provider: string | null;
 } {
+  const builtInProvider = parseTuttiAgentParticipantId(input.participantId);
+  if (builtInProvider) {
+    return { avatar: null, provider: builtInProvider };
+  }
+
   const custom = input.avatar ?? input.icon;
   if (hasCustomRoomAvatar(custom)) {
     return { avatar: custom!.trim(), provider: null };
   }
-  return { avatar: null, provider: input.runtimeProfile?.provider ?? null };
+  return { avatar: null, provider: null };
 }
 
 export function resolveAgentAvatarFromContext(input: {
   icon?: string | null;
   avatar?: string | null;
+  participantId?: string | null;
   runtimeProfileId?: string | null;
   identity?: Pick<Identity, "icon" | "defaultRuntimeProfileId"> | null;
   runtimeProfiles: RuntimeProfile[];
@@ -68,6 +75,7 @@ export function resolveAgentAvatarFromContext(input: {
   return resolveAgentAvatar({
     icon: input.icon ?? input.identity?.icon,
     avatar: input.avatar,
+    participantId: input.participantId,
     runtimeProfile,
   });
 }

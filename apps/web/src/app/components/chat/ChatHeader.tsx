@@ -47,6 +47,9 @@ export function ChatHeader(props: {
   const { t } = useTranslation();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const roomDescription = props.room.description.trim();
+  const defaultDescription = t("chatHeader.defaultDescription").trim();
+  const headerDescription = roomDescription || defaultDescription;
 
   useEffect(() => {
     setSettingsOpen(false);
@@ -102,7 +105,7 @@ export function ChatHeader(props: {
               <span>{props.agentCount}</span>
             </button>
           </HoverTooltip>
-          <p>{props.room.description || t("chatHeader.defaultDescription")}</p>
+          {headerDescription ? <p>{headerDescription}</p> : null}
         </div>
         <div className={"[display:flex] [align-items:center] [gap:6px] [overflow:visible] max-[760px]:[width:100%] max-[760px]:[overflow-x:auto] max-[760px]:[overflow-y:visible]"}>
           <HoverTooltip label={t("chatHeader.searchMessages")}>
