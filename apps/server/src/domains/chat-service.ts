@@ -27,6 +27,8 @@ import {
   type UploadArtifactRequest,
   type ReplyMode,
   type RuntimeProfile,
+  resolveMentionTargetReferenceLabel,
+  resolveMentionTargetReferenceScope,
   resolveMentionSpeakingOrder,
   sanitizeMentionTargetForAgentContext,
   stripAssistantSkillDetails,
@@ -40,6 +42,13 @@ import { sha256ForFile } from "./artifact-content-hash.js";
 import { AgentToolTokenStore } from "./agent-tool-tokens.js";
 import { AgentWorkspaceService } from "./agent-workspace.js";
 import { ChatRepository } from "./chat-repository.js";
+import {
+  createVirtualTuttiAgentParticipant,
+  defaultTuttiAgentParticipantName,
+  localAgentProviderFromLauncherAppId,
+  normalizeTuttiAgentName,
+  parseTuttiAgentParticipantId,
+} from "./tutti-agent-participant.js";
 import {
   extractLocalFilePathsFromContent,
   inferMimeTypeForPath,
@@ -432,7 +441,7 @@ export class ChatService {
       role: "user",
       senderName: normalizeUserSenderName(input.senderName),
       content,
-      mentions: this.normalizeMentions(conversationId, input.mentions ?? []),
+      mentions: this.normalizeMentions(conversation, input.mentions ?? []),
       visibility: input.visibility === "whisper" ? "whisper" : "public",
       status: "success",
       parentMessageId: input.parentMessageId ?? null,
@@ -495,7 +504,7 @@ export class ChatService {
       });
     }
 
-    const mentions = input.mentions ?? [];
+    const mentions = message.mentions;
     const targets = this.resolveTargets(conversation, mentions, content);
     this.materializeParticipants(conversation, targets);
     const directWorkspaceAppIntent = message.visibility === "public"
@@ -816,12 +825,21 @@ export class ChatService {
     };
   }
 
-  private normalizeMentions(conversationId: string, mentions: NonNullable<SendMessageRequest["mentions"]>) {
-    const participants = this.repo.listParticipants(conversationId);
+  private normalizeMentions(conversation: Conversation, mentions: NonNullable<SendMessageRequest["mentions"]>) {
+    const participants = this.repo.listParticipants(conversation.id);
     const byId = new Map(participants.map((participant) => [participant.id, participant]));
     return mentions
       .map((mention) => {
         if (mention.mentionType === "reference") {
+          const localAgentParticipant = this.resolveLocalAgentMentionParticipant(conversation, mention);
+          if (localAgentParticipant) {
+            byId.set(localAgentParticipant.id, localAgentParticipant);
+            return {
+              participantId: localAgentParticipant.id,
+              displayNameSnapshot: localAgentParticipant.displayName,
+              mentionType: "participant" as const,
+            };
+          }
           return sanitizeMentionTargetForAgentContext({
             participantId: mention.participantId,
             displayNameSnapshot: mention.displayNameSnapshot,
@@ -848,6 +866,76 @@ export class ChatService {
         };
       })
       .filter((mention): mention is NonNullable<typeof mention> => mention !== null);
+  }
+
+  private resolveLocalAgentMentionParticipant(
+    conversation: Conversation,
+    mention: NonNullable<SendMessageRequest["mentions"]>[number],
+  ) {
+    if (mention.mentionType !== "reference") return null;
+    const scope = resolveMentionTargetReferenceScope(mention);
+    if (scope?.groupChatLocalAgentMention !== "true") return null;
+
+    const provider =
+      scope.groupChatRuntimeProvider?.trim()
+      || localAgentProviderFromLauncherAppId(mention.referenceEntityId)
+      || (mention.referenceProviderId === "agent-session" ? scope.provider?.trim() : "");
+    if (!provider) return null;
+
+    const runtimeProfileId = scope.groupChatRuntimeProfileId?.trim() || `local-agent:${provider}`;
+    const runtimeProfile = this.repo.getRuntimeProfile(runtimeProfileId);
+    if (runtimeProfile?.kind !== "local-agent" || runtimeProfile.provider !== provider) return null;
+
+    const participants = this.repo.listParticipants(conversation.id);
+    const scopedParticipantId = scope.groupChatParticipantId?.trim();
+    if (scopedParticipantId) {
+      const participant = participants.find((item) =>
+        item.id === scopedParticipantId
+        && item.kind === "ai"
+        && item.status !== "removed"
+        && item.runtimeProfileId === runtimeProfile.id
+      );
+      if (participant) return participant;
+    }
+
+    const requestedName =
+      scope.groupChatParticipantLabel?.trim()
+      || resolveMentionTargetReferenceLabel(mention)
+      || defaultTuttiAgentParticipantName(provider);
+    const normalizedRequestedName = normalizeTuttiAgentName(requestedName);
+    const existing = participants.find((participant) =>
+      participant.kind === "ai"
+      && participant.status !== "removed"
+      && participant.runtimeProfileId === runtimeProfile.id
+      && normalizeTuttiAgentName(participant.displayName) === normalizedRequestedName
+    );
+    if (existing) return existing;
+
+    return createVirtualTuttiAgentParticipant(conversation, runtimeProfile, requestedName);
+  }
+
+  private resolveVirtualTuttiAgentParticipant(
+    conversation: Conversation,
+    participantId: string | null | undefined,
+    displayName?: string | null,
+  ) {
+    const provider = parseTuttiAgentParticipantId(participantId);
+    if (!provider) return null;
+    const runtimeProfile = this.repo.getRuntimeProfile(`local-agent:${provider}`);
+    if (runtimeProfile?.kind !== "local-agent") return null;
+    return createVirtualTuttiAgentParticipant(
+      conversation,
+      runtimeProfile,
+      displayName?.trim() || defaultTuttiAgentParticipantName(provider),
+    );
+  }
+
+  private resolveEffectiveParticipant(
+    conversation: Conversation,
+    participant: Participant,
+  ) {
+    return this.repo.getParticipant(participant.id)
+      ?? this.resolveVirtualTuttiAgentParticipant(conversation, participant.id, participant.displayName);
   }
 
   private materializeExistingWorkspaces() {
@@ -1025,7 +1113,16 @@ export class ChatService {
       .filter((participant) => participant.kind === "ai" && participant.status === "active");
     if (mentions.some((mention) => mention.mentionType === "all")) return [];
     const mentionedIds = new Set(mentions.map((mention) => mention.participantId));
-    if (mentionedIds.size > 0) return activeAi.filter((participant) => mentionedIds.has(participant.id));
+    if (mentionedIds.size > 0) {
+      const targets = activeAi.filter((participant) => mentionedIds.has(participant.id));
+      for (const mention of mentions) {
+        const virtualParticipant = this.resolveVirtualTuttiAgentParticipant(conversation, mention.participantId, mention.displayNameSnapshot);
+        if (virtualParticipant && !targets.some((participant) => participant.id === virtualParticipant.id)) {
+          targets.push(virtualParticipant);
+        }
+      }
+      return targets;
+    }
     if (conversation.replyPolicy.mode === "mentioned" || conversation.replyPolicy.mode === "selected") return [];
     return activeAi.filter((participant) => shouldAutoReply(participant, userText));
   }
@@ -1127,7 +1224,9 @@ export class ChatService {
     try {
       let nextMessage: Message | null = userMessage;
       while (nextMessage) {
-        const currentParticipant = this.repo.getParticipant(participant.id);
+        const conversation = this.repo.getConversation(conversationId);
+        if (!conversation) break;
+        const currentParticipant = this.resolveEffectiveParticipant(conversation, participant);
         if (!currentParticipant || currentParticipant.status !== "active") {
           this.repo.deletePendingRepliesForParticipant(participant.id);
           break;
@@ -1183,10 +1282,10 @@ export class ChatService {
   ): AgentRun | null {
     const latestUserMessage = this.repo.getMessage(userMessage.id);
     if (!latestUserMessage || latestUserMessage.status === "recalled") return null;
-    const currentParticipant = this.repo.getParticipant(participant.id);
-    if (!currentParticipant || currentParticipant.status !== "active") return null;
     const conversation = this.repo.getConversation(conversationId);
     if (!conversation) return null;
+    const currentParticipant = this.resolveEffectiveParticipant(conversation, participant);
+    if (!currentParticipant || currentParticipant.status !== "active") return null;
     const runtimeProfile = currentParticipant.runtimeProfileId ? this.repo.getRuntimeProfile(currentParticipant.runtimeProfileId) : null;
     const identity = currentParticipant.identityId ? this.repo.getIdentity(currentParticipant.identityId) : null;
     const attachments = this.repo.listArtifactsForMessage(userMessage.id);
@@ -1242,15 +1341,15 @@ export class ChatService {
   ): Promise<Message | null> {
     const latestUserMessage = this.repo.getMessage(userMessage.id);
     if (!latestUserMessage || latestUserMessage.status === "recalled") return null;
-    const currentParticipant = this.repo.getParticipant(participant.id);
+    const conversation = this.repo.getConversation(conversationId);
+    if (!conversation) return null;
+    const currentParticipant = this.resolveEffectiveParticipant(conversation, participant);
     if (!currentParticipant || currentParticipant.status !== "active") {
       if (preacceptedRun && ["accepted", "running"].includes(preacceptedRun.status)) {
         await this.cancelRun(preacceptedRun.id, "Participant removed from room");
       }
       return null;
     }
-    const conversation = this.repo.getConversation(conversationId);
-    if (!conversation) return null;
     const runtimeProfile = currentParticipant.runtimeProfileId ? this.repo.getRuntimeProfile(currentParticipant.runtimeProfileId) : null;
     const identity = currentParticipant.identityId ? this.repo.getIdentity(currentParticipant.identityId) : null;
     const attachments = this.repo.listArtifactsForMessage(userMessage.id);

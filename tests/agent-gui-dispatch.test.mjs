@@ -93,3 +93,39 @@ test("resolveAgentGuiDispatchFromMentions ignores room custom agent participant 
   const dispatch = resolveAgentGuiDispatchFromMentions(content, mentions);
   assert.equal(dispatch, null);
 });
+
+test("resolveAgentGuiDispatchFromMentions ignores composer local Tutti agent mentions", async () => {
+  const { resolveAgentGuiDispatchFromMentions } = await loadDispatchModule();
+  const content = "[Codex CLI](mention://workspace-app/agent-codex?workspaceId=ws-1) 今天星期几";
+  const mentions = [
+    {
+      mentionType: "reference",
+      participantId: "tutti-at:workspace-app:agent-codex",
+      referenceProviderId: "workspace-app",
+      referenceEntityId: "agent-codex",
+      displayNameSnapshot: "Codex CLI",
+      referenceScope: {
+        workspaceId: "ws-1",
+        groupChatLocalAgentMention: "true",
+        groupChatRuntimeProvider: "codex",
+        groupChatRuntimeProfileId: "local-agent:codex",
+      },
+      referenceInsert: {
+        kind: "mention",
+        mention: {
+          entityId: "agent-codex",
+          label: "Codex CLI",
+          scope: {
+            workspaceId: "ws-1",
+            groupChatLocalAgentMention: "true",
+            groupChatRuntimeProvider: "codex",
+            groupChatRuntimeProfileId: "local-agent:codex",
+          },
+        },
+      },
+    },
+  ];
+
+  const dispatch = resolveAgentGuiDispatchFromMentions(content, mentions, { workspaceId: "ws-1" });
+  assert.equal(dispatch, null);
+});

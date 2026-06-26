@@ -1,4 +1,4 @@
-import type { MentionTarget } from "@group-chat/shared";
+import { resolveMentionTargetReferenceScope, type MentionTarget } from "@group-chat/shared";
 import {
   buildAgentGuiDraftPrompt,
   type AgentGuiDraftPromptContext,
@@ -27,6 +27,7 @@ export function resolveAgentGuiDispatchFromMentions(
   for (const mention of mentions) {
     if (mention.mentionType !== "reference") continue;
     if (mention.referenceProviderId !== "workspace-app") continue;
+    if (resolveMentionTargetReferenceScope(mention)?.groupChatLocalAgentMention === "true") continue;
     const provider = resolveAgentGuiProviderFromAppId(mention.referenceEntityId);
     if (!provider) continue;
     const prompt = buildAgentGuiDraftPrompt(stripQuotePrefix(content), mentions, context);

@@ -35,10 +35,10 @@ const runtimeProfile = {
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
 
-function providerStatus(available) {
+function providerStatus(available, displayName = "Codex") {
   return {
     provider: "codex",
-    displayName: "Codex",
+    displayName,
     available,
     authState: available ? "ok" : "missing",
     executablePath: available ? "/usr/local/bin/codex" : "",
@@ -80,4 +80,77 @@ test("lists Tutti agents using the same availability fallbacks as the forward me
     new Set(),
   );
   assert.deepEqual(unavailableOptions, []);
+});
+
+test("local Tutti agent launcher references retain the matching room participant", async () => {
+  const { buildLocalAgentLauncherReference, buildLocalAgentMentionOptions } = await loadModule();
+  const participant = {
+    id: "participant-codex",
+    conversationId: "conversation-1",
+    kind: "ai",
+    displayName: "Codex CLI",
+    avatar: null,
+    runtimeProfileId: "local-agent:codex",
+    identityId: null,
+    roomInstructions: "",
+    status: "active",
+    listenMode: "passive",
+    sortOrder: 0,
+    reasoningEffort: null,
+    speedMode: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+
+  const options = buildLocalAgentMentionOptions(
+    [runtimeProfile],
+    [providerStatus(true, "Codex CLI")],
+    [participant],
+    [],
+    "",
+    new Set(),
+  );
+
+  assert.equal(options[0]?.participant?.id, "participant-codex");
+  const reference = buildLocalAgentLauncherReference(options[0]);
+  assert.equal(reference.providerId, "workspace-app");
+  assert.equal(reference.itemId, "agent-codex");
+  assert.equal(reference.insert.mention.scope.groupChatParticipantId, "participant-codex");
+  assert.equal(reference.insert.mention.scope.groupChatParticipantLabel, "Codex CLI");
+});
+
+test("local Tutti agent launcher does not bind custom personas that share the runtime", async () => {
+  const { buildLocalAgentLauncherReference, buildLocalAgentMentionOptions } = await loadModule();
+  const productParticipant = {
+    id: "product-agent",
+    conversationId: "conversation-1",
+    kind: "ai",
+    displayName: "产品",
+    avatar: null,
+    runtimeProfileId: "local-agent:codex",
+    identityId: "identity-product",
+    roomInstructions: "",
+    status: "active",
+    listenMode: "passive",
+    sortOrder: 0,
+    reasoningEffort: null,
+    speedMode: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+
+  const options = buildLocalAgentMentionOptions(
+    [runtimeProfile],
+    [providerStatus(true, "Codex CLI")],
+    [productParticipant],
+    [],
+    "",
+    new Set(),
+  );
+
+  assert.equal(options[0]?.participant, null);
+  const reference = buildLocalAgentLauncherReference(options[0]);
+  assert.equal(reference.insert.mention.scope.groupChatLocalAgentMention, "true");
+  assert.equal(reference.insert.mention.scope.groupChatRuntimeProvider, "codex");
+  assert.equal(reference.insert.mention.scope.groupChatParticipantId, undefined);
 });

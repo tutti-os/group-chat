@@ -4,6 +4,11 @@ import { participantWorkspaceRoot } from "../local/paths.js";
 import { EventHub } from "../ws/event-hub.js";
 import { AgentToolTokenStore, type AgentToolCredential } from "./agent-tool-tokens.js";
 import { ChatRepository } from "./chat-repository.js";
+import {
+  createVirtualTuttiAgentParticipant,
+  defaultTuttiAgentParticipantName,
+  parseTuttiAgentParticipantId,
+} from "./tutti-agent-participant.js";
 
 export class AgentToolGateway {
   constructor(
@@ -14,10 +19,10 @@ export class AgentToolGateway {
 
   getContext(participantId: string, credential: AgentToolCredential) {
     const grant = this.tokens.authorize(participantId, credential);
-    const participant = this.repo.getParticipant(participantId);
-    if (!participant || participant.status === "removed") throw new Error("Participant not found");
-    const conversation = this.repo.getConversation(participant.conversationId);
+    const conversation = this.repo.getConversation(grant.conversationId);
     if (!conversation) throw new Error("Conversation not found");
+    const participant = this.resolveToolParticipant(participantId, conversation.id);
+    if (!participant || participant.status === "removed") throw new Error("Participant not found");
     if (conversation.id !== grant.conversationId) throw new Error("Agent tool token does not match conversation");
     const room = this.repo.getRoom(conversation.roomId);
     if (!room) throw new Error("Room not found");
@@ -52,6 +57,21 @@ export class AgentToolGateway {
         expiresAt: grant.expiresAt,
       },
     };
+  }
+
+  private resolveToolParticipant(participantId: string, conversationId: string) {
+    const participant = this.repo.getParticipant(participantId);
+    if (participant) return participant;
+    const provider = parseTuttiAgentParticipantId(participantId);
+    if (!provider) return null;
+    const runtimeProfile = this.repo.getRuntimeProfile(`local-agent:${provider}`);
+    const conversation = this.repo.getConversation(conversationId);
+    if (!conversation || runtimeProfile?.kind !== "local-agent") return null;
+    return createVirtualTuttiAgentParticipant(
+      conversation,
+      runtimeProfile,
+      defaultTuttiAgentParticipantName(provider),
+    );
   }
 
   getArtifact(participantId: string, artifactId: string, credential: AgentToolCredential) {

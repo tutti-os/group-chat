@@ -545,7 +545,13 @@ export function Composer(props: {
     const ids = new Set<string>();
     let hasAll = false;
     for (const chip of editor.querySelectorAll("[data-mention-chip='true']")) {
-      const mentionId = (chip as HTMLElement).dataset.mentionId;
+      const element = chip as HTMLElement;
+      const participantId = element.dataset.mentionParticipantId?.trim();
+      if (participantId) {
+        ids.add(participantId);
+        continue;
+      }
+      const mentionId = element.dataset.mentionId;
       if (!mentionId) continue;
       if (mentionId === "all") {
         hasAll = true;
@@ -946,6 +952,9 @@ export function Composer(props: {
   };
 
   const openFileReferenceFromChip = useCallback((element: HTMLElement) => {
+    if (element.dataset.mentionParticipantId?.trim()) {
+      return;
+    }
     const parsedMention = parseTuttiAtMentionKey(element.dataset.mentionId ?? "");
     const entityId = parsedMention?.itemId ?? "";
     const guiProvider = parsedMention?.providerId === "workspace-app"
@@ -2796,6 +2805,17 @@ function collectMentionTargetsFromEditor(editor: HTMLDivElement | null, particip
       continue;
     }
     const parsedReference = parseTuttiAtMentionKey(mentionId);
+    const participantId = element.dataset.mentionParticipantId?.trim();
+    if (participantId) {
+      const participant = byId.get(participantId);
+      if (!participant) continue;
+      mentions.push({
+        participantId: participant.id,
+        displayNameSnapshot: participant.displayName,
+        mentionType: "participant",
+      });
+      continue;
+    }
     if (parsedReference || element.dataset.mentionKind === "reference") {
       const label = element.dataset.mentionLabel?.trim() || element.textContent?.replace(/^@/, "").trim() || parsedReference?.itemId || "reference";
       let referenceInsert: MentionTarget["referenceInsert"];
@@ -2907,6 +2927,14 @@ function createAgentLauncherLinkIcon(runtimeProvider: string) {
   return createTuttiReferenceIconElement("agent-session");
 }
 
+function localAgentParticipantMeta(reference: TuttiAtQueryResult) {
+  if (reference.insert.kind !== "mention") return null;
+  const participantId = reference.insert.mention.scope?.groupChatParticipantId?.trim();
+  if (!participantId) return null;
+  const label = reference.insert.mention.scope?.groupChatParticipantLabel?.trim() || reference.label;
+  return { participantId, label };
+}
+
 function appendStyledReferenceChipContent(chip: HTMLAnchorElement, label: string, reference: TuttiAtQueryResult) {
   chip.className = REFERENCE_MENTION_CHIP_CLASS;
   chip.style.color = "var(--accent)";
@@ -2959,6 +2987,11 @@ function createMentionChip(label: string, mentionId: string, reference?: TuttiAt
     chip.dataset.mentionReferenceEntityId = reference.itemId;
     chip.dataset.mentionReferenceInsert = JSON.stringify(reference.insert);
     chip.dataset.mentionLinkHref = referenceLinkHref(reference);
+    const localAgentParticipant = localAgentParticipantMeta(reference);
+    if (localAgentParticipant) {
+      chip.dataset.mentionParticipantId = localAgentParticipant.participantId;
+      chip.dataset.mentionParticipantLabel = localAgentParticipant.label;
+    }
     const iconUrl = resolveMentionThumbnailUrl(reference.thumbnailUrl);
     if (iconUrl) {
       chip.dataset.mentionIconUrl = iconUrl;
@@ -3099,10 +3132,15 @@ function nodeTextValue(node: Node) {
 }
 
 function serializeMentionChip(node: HTMLElement) {
+  const label = node.dataset.mentionLabel?.trim() || node.textContent?.replace(/^@/, "").trim() || "";
+  const participantId = node.dataset.mentionParticipantId?.trim();
+  if (participantId) {
+    const participantLabel = node.dataset.mentionParticipantLabel?.trim() || label;
+    return formatParticipantMentionMarkdown(participantId, participantLabel);
+  }
   if (node.dataset.mentionDisplayMode === "reference-link") {
     return serializeReferenceMentionChip(node);
   }
-  const label = node.dataset.mentionLabel?.trim() || node.textContent?.replace(/^@/, "").trim() || "";
   const mentionId = node.dataset.mentionId?.trim() || "";
   if (mentionId && mentionId !== "all" && node.dataset.mentionKind !== "reference") {
     return formatParticipantMentionMarkdown(mentionId, label);

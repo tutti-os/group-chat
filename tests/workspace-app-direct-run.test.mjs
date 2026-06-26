@@ -125,3 +125,45 @@ test("workspace app plus participant mention still direct-routes the app", async
     await rm(dirname(checkScript), { recursive: true, force: true });
   }
 });
+
+test("local Tutti agent launcher mentions are not treated as direct workspace app runs", async () => {
+  const checkScript = join(await mkdtemp(join(tmpdir(), "group-chat-direct-workspace-app-")), "check.ts");
+  await writeFile(
+    checkScript,
+    `
+      import assert from "node:assert/strict";
+
+      async function main() {
+        const { resolveDirectWorkspaceAppIntent } = await import(${JSON.stringify(moduleUrl)});
+        const intent = resolveDirectWorkspaceAppIntent("[Codex CLI](mention://workspace-app/agent-codex?workspaceId=ws-1) 今天星期几", [
+          {
+            mentionType: "reference",
+            participantId: "tutti-at:workspace-app:agent-codex",
+            displayNameSnapshot: "Codex CLI",
+            referenceProviderId: "workspace-app",
+            referenceEntityId: "agent-codex",
+            referenceScope: {
+              workspaceId: "ws-1",
+              groupChatLocalAgentMention: "true",
+              groupChatRuntimeProvider: "codex",
+              groupChatRuntimeProfileId: "local-agent:codex",
+            },
+          },
+        ]);
+        assert.equal(intent, null);
+      }
+      main().catch((error) => {
+        console.error(error);
+        process.exit(1);
+      });
+    `,
+  );
+
+  try {
+    await execFileAsync("pnpm", ["--filter", "@group-chat/server", "exec", "tsx", checkScript], {
+      cwd: new URL("..", import.meta.url),
+    });
+  } finally {
+    await rm(dirname(checkScript), { recursive: true, force: true });
+  }
+});

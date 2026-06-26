@@ -41,6 +41,7 @@ export function resolveDirectWorkspaceAppIntent(
     mention.mentionType === "reference"
     && mention.referenceProviderId === "workspace-app"
     && mention.referenceEntityId?.trim()
+    && resolveMentionTargetReferenceScope(mention)?.groupChatLocalAgentMention !== "true"
   );
   if (!appMention?.referenceEntityId) return null;
 

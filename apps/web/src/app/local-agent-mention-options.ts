@@ -26,8 +26,17 @@ export function localAgentMentionSubtitle(
 
 export function buildLocalAgentLauncherReference(option: LocalAgentMentionOption): TuttiAtQueryResult {
   const appId = localAgentLauncherAppId(option.runtimeProfile.provider);
+  const localAgentScope: Record<string, string> = {
+    groupChatLocalAgentMention: "true",
+    groupChatRuntimeProvider: option.runtimeProfile.provider,
+    groupChatRuntimeProfileId: option.runtimeProfile.id,
+  };
+  if (option.participant) {
+    localAgentScope.groupChatParticipantId = option.participant.id;
+    localAgentScope.groupChatParticipantLabel = option.participant.displayName;
+  }
   if (appId) {
-    const scope: Record<string, string> = {};
+    const scope: Record<string, string> = { ...localAgentScope };
     const workspaceId = readCachedTuttiWorkspaceId()?.trim();
     if (workspaceId) scope.workspaceId = workspaceId;
     return {
@@ -46,6 +55,8 @@ export function buildLocalAgentLauncherReference(option: LocalAgentMentionOption
     };
   }
 
+  const scope: Record<string, string> = { provider: option.runtimeProfile.provider, ...localAgentScope };
+
   return {
     providerId: "agent-session",
     itemId: option.runtimeProfile.id,
@@ -56,7 +67,7 @@ export function buildLocalAgentLauncherReference(option: LocalAgentMentionOption
       mention: {
         entityId: option.runtimeProfile.id,
         label: option.label,
-        scope: { provider: option.runtimeProfile.provider },
+        scope,
       },
     },
   };
@@ -67,8 +78,10 @@ export function findParticipantForLocalAgentProfile(
   identities: Identity[],
   runtimeProfiles: RuntimeProfile[],
   profile: RuntimeProfile,
+  displayNameCandidates: readonly string[] = [],
 ): Participant | null {
   const activeAgents = participants.filter((participant) => participant.kind === "ai" && participant.status !== "removed");
+  const candidateNames = new Set(displayNameCandidates.map(normalizeLocalAgentDisplayName).filter(Boolean));
   for (const participant of activeAgents) {
     const runtimeProfileId =
       participant.runtimeProfileId
@@ -77,11 +90,19 @@ export function findParticipantForLocalAgentProfile(
     const runtime = runtimeProfileId
       ? runtimeProfiles.find((item) => item.id === runtimeProfileId) ?? null
       : null;
-    if (runtime?.kind === "local-agent" && runtime.provider === profile.provider) {
+    if (
+      runtime?.kind === "local-agent"
+      && runtime.provider === profile.provider
+      && candidateNames.has(normalizeLocalAgentDisplayName(participant.displayName))
+    ) {
       return participant;
     }
   }
   return null;
+}
+
+function normalizeLocalAgentDisplayName(value: string | null | undefined) {
+  return value?.replace(/^@+/, "").trim().toLowerCase() ?? "";
 }
 
 export function buildLocalAgentMentionOptions(
@@ -110,10 +131,15 @@ export function buildLocalAgentMentionOptions(
     if (!launcherAppId && !status?.available) continue;
 
     const label = status?.displayName?.trim() || defaultIdentityNameForRuntime(profile, localAgentProviders);
-    const participant = findParticipantForLocalAgentProfile(participants, identities, runtimeProfiles, profile);
     const subtitle = status
       ? localAgentMentionSubtitle(profile, status, localAgentProviders)
       : profile.displayName || profile.provider;
+    const participant = findParticipantForLocalAgentProfile(participants, identities, runtimeProfiles, profile, [
+      label,
+      status?.displayName ?? "",
+      defaultIdentityNameForRuntime(profile, localAgentProviders),
+      profile.displayName,
+    ]);
 
     const haystack = [
       label,
