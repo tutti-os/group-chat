@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "tutti.app.manifest.v1",
+  "appId": "group-chat",
+  "version": "0.1.17",
+  "name": "Group Chat",
+  "description": "Get work done with your agents in group chat.",
+  "icon": {
+    "type": "asset",
+    "src": "icon.svg"
+  },
+  "runtime": {
+    "bootstrap": "bootstrap.sh",
+    "healthcheckPath": "/api/health"
+  },
+  "references": {
+    "listEndpoint": "/tutti/references/list",
+    "searchEndpoint": "/tutti/references/search"
+  },
+  "window": {
+    "minimizeBehavior": "keep-mounted",
+    "minWidth": 960,
+    "minHeight": 640
+  },
+  "author": {
+    "name": "Tutti"
+  },
+  "tags": [
+    "local-first",
+    "agent",
+    "chat",
+    "team",
+    "local-debug"
+  ]
+}
