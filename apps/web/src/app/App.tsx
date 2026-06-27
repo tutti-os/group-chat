@@ -778,7 +778,7 @@ export function App() {
     });
     if (!currentConversation) return runTasks;
     const settledKeys = new Set(
-      currentConversationAgentRuns
+      [...currentConversationAgentRuns, ...currentActiveRuns]
         .filter((run) => run.triggerMessageId && run.participantId)
         .map((run) => pendingAgentReplyKey(run.triggerMessageId!, run.participantId!)),
     );
@@ -1942,7 +1942,7 @@ export function App() {
                     tasks={currentBackgroundTasks}
                     agentRuns={agentRunTasks}
                     openTaskId={openBackgroundTaskId}
-                    openAgentRunId={openAgentRunId}
+                    openAgentRunId={resolvedOpenAgentRunId}
                     onOpenTask={(taskId) => void openSummaryLink(taskId)}
                     onDismissTask={dismissBackgroundTask}
                     onDismissAgentRun={dismissAgentRunTask}
