@@ -1,4 +1,5 @@
 import type { Artifact, Message, Participant, PrivateTaskSnapshot, Identity } from "@group-chat/shared";
+import { copyArtifactImageToSystemClipboard } from "../api/client.js";
 import type { BackgroundTask } from "./background-tasks.js";
 import { truncateMiddle } from "./formatting.js";
 import { loadUserProfile, resolveDefaultDisplayName, resolveProfileDisplayName } from "./user-profile.js";
@@ -364,7 +365,7 @@ export function readArtifactClipboardFromDataTransfer(dataTransfer: DataTransfer
   }
 
   const fromStash = readRecentStashedArtifactClipboard();
-  if (fromStash && shouldPreferRecentStashOverClipboard(dataTransfer)) {
+  if (fromStash && shouldPreferRecentStashOverClipboard(dataTransfer, fromStash)) {
     return { ...fromStash, preferOverClipboardFiles: true };
   }
 
@@ -383,10 +384,18 @@ export function readRecentArtifactClipboardStashForPaste(): ArtifactClipboardRea
   return stash ? { ...stash, preferOverClipboardFiles: true } : null;
 }
 
-function shouldPreferRecentStashOverClipboard(dataTransfer: DataTransfer) {
+function shouldPreferRecentStashOverClipboard(dataTransfer: DataTransfer, stash: ArtifactClipboardPayload) {
   const plainText = dataTransfer.getData("text/plain");
+  if (plainText.includes(ARTIFACT_ONLY_CLIPBOARD_PLAIN)) return true;
+  const htmlText = dataTransfer.getData("text/html");
+  const clipboardFiles = Array.from(dataTransfer.files);
+  const onlyClipboardImages = clipboardFiles.length > 0 && clipboardFiles.every((file) => file.type.startsWith("image/"));
+  if (onlyClipboardImages && stash.artifactIds.length > 0) return true;
+  if (!plainText.trim() && !htmlText.trim()) {
+    return clipboardFiles.length === 0 || onlyClipboardImages;
+  }
   if (plainText.trim() && !isArtifactOnlyClipboardPlainText(plainText)) return false;
-  return plainText.includes(ARTIFACT_ONLY_CLIPBOARD_PLAIN);
+  return false;
 }
 
 function resolveFreshArtifactClipboardPayload(payload: ArtifactClipboardPayload): ArtifactClipboardPayload {
@@ -462,9 +471,39 @@ function parseArtifactClipboardFromHtml(html: string): ArtifactClipboardPayload 
 export type MessageClipboardInput = {
   text: string;
   artifactIds: string[];
+  artifacts?: Pick<Artifact, "id" | "filename" | "mimeType" | "publicUrl" | "localPath">[];
+  externalImageDataUrl?: string | null;
   includeText?: boolean;
   parts?: ArtifactClipboardPayload["parts"];
 };
+
+function resolveClipboardArtifactUrl(artifact: Pick<Artifact, "publicUrl" | "localPath">) {
+  if (artifact.publicUrl) {
+    if (artifact.publicUrl.startsWith("http://") || artifact.publicUrl.startsWith("https://")) {
+      return artifact.publicUrl;
+    }
+    if (typeof window !== "undefined") return `${window.location.origin}${artifact.publicUrl}`;
+    return artifact.publicUrl;
+  }
+  return artifact.localPath;
+}
+
+function orderedClipboardArtifacts(input: MessageClipboardInput, artifactIds: string[]) {
+  const artifactsById = new Map((input.artifacts ?? []).map((artifact) => [artifact.id, artifact]));
+  const ordered = artifactIds
+    .map((artifactId) => artifactsById.get(artifactId) ?? null)
+    .filter((artifact): artifact is NonNullable<typeof artifact> => Boolean(artifact));
+  if (ordered.length) return ordered;
+  return input.artifacts ?? [];
+}
+
+function resolveExternalClipboardImage(input: MessageClipboardInput, artifactIds: string[]) {
+  const dataUrl = input.externalImageDataUrl?.trim();
+  if (!dataUrl?.startsWith("data:image/")) return null;
+  const imageArtifacts = orderedClipboardArtifacts(input, artifactIds)
+    .filter((artifact) => artifact.mimeType.startsWith("image/"));
+  return imageArtifacts.length === 1 ? { artifact: imageArtifacts[0]!, dataUrl } : null;
+}
 
 function buildMessageClipboardData(input: MessageClipboardInput) {
   const artifactIds = [...new Set(input.artifactIds.map((item) => item.trim()).filter(Boolean))];
@@ -479,11 +518,15 @@ function buildMessageClipboardData(input: MessageClipboardInput) {
 
   const plainText = includeText ? input.text : ARTIFACT_ONLY_CLIPBOARD_PLAIN;
   const payload = clipboardPayload ? JSON.stringify(clipboardPayload) : "";
-  const htmlText = clipboardPayload
+  const internalHtmlText = clipboardPayload
     ? `<span data-group-chat-copy-payload="${escapeHtmlAttribute(payload)}"></span>${includeText && input.text ? `<span data-group-chat-copy-text>${escapeClipboardHtmlText(input.text)}</span>` : ""}${artifactIds.map((artifactId) =>
         `<span data-artifact-id="${escapeHtmlAttribute(artifactId)}" data-group-chat-copy-token="${escapeHtmlAttribute(clipboardPayload.copyToken ?? "")}">${ARTIFACT_ONLY_CLIPBOARD_PLAIN}</span>`,
       ).join("")}`
     : "";
+  const externalImage = resolveExternalClipboardImage(input, artifactIds);
+  const htmlText = externalImage && internalHtmlText
+    ? appendExternalClipboardImageHtml(internalHtmlText, externalImage)
+    : internalHtmlText;
   return { htmlText, payload, plainText };
 }
 
@@ -495,20 +538,139 @@ export function copyMessagesToClipboardEvent(event: globalThis.ClipboardEvent, i
   if (data.htmlText) event.clipboardData?.setData("text/html", data.htmlText);
 }
 
+function clipboardItemSupports(type: string) {
+  const clipboardItemCtor = typeof ClipboardItem !== "undefined"
+    ? ClipboardItem as unknown as { supports?: (mimeType: string) => boolean }
+    : null;
+  return typeof clipboardItemCtor?.supports === "function"
+    ? clipboardItemCtor.supports(type)
+    : type === "image/png";
+}
+
+async function convertImageBlobToPngBlob(blob: Blob) {
+  if (blob.type === "image/png") return blob;
+  if (typeof createImageBitmap !== "function" || typeof document === "undefined") return null;
+  try {
+    const bitmap = await createImageBitmap(blob);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+    context.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    return await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob((pngBlob) => resolve(pngBlob), "image/png");
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function blobToDataUrl(blob: Blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const chunks: string[] = [];
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    chunks.push(String.fromCharCode(...bytes.subarray(index, index + chunkSize)));
+  }
+  return `data:${blob.type || "application/octet-stream"};base64,${btoa(chunks.join(""))}`;
+}
+
+function appendExternalClipboardImageHtml(
+  htmlText: string,
+  image: { artifact: Pick<Artifact, "filename">; dataUrl: string },
+) {
+  const safeSrc = escapeHtmlAttribute(image.dataUrl);
+  const safeName = escapeHtmlAttribute(image.artifact.filename);
+  return `${htmlText}<img data-group-chat-external-image="true" src="${safeSrc}" alt="${safeName}" />`;
+}
+
+async function tryCopySingleImageArtifactToNativeClipboard(
+  artifacts: NonNullable<MessageClipboardInput["artifacts"]>,
+  artifactIds: string[],
+  text?: string,
+) {
+  const imageArtifacts = orderedClipboardArtifacts({ text: "", artifactIds, artifacts }, artifactIds)
+    .filter((artifact) => artifact.mimeType.startsWith("image/"));
+  if (imageArtifacts.length !== 1) return false;
+  try {
+    await copyArtifactImageToSystemClipboard(imageArtifacts[0]!.id, text?.trim() ? { text } : undefined);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function hasIncludedClipboardText(input: MessageClipboardInput) {
+  return (input.includeText ?? true) && input.text.trim() && !isArtifactOnlyClipboardPlainText(input.text);
+}
+
+async function buildClipboardImageData(
+  artifacts: NonNullable<MessageClipboardInput["artifacts"]>,
+  artifactIds: string[],
+) {
+  const imageArtifacts = orderedClipboardArtifacts({ text: "", artifactIds, artifacts }, artifactIds)
+    .filter((artifact) => artifact.mimeType.startsWith("image/"));
+  if (imageArtifacts.length !== 1 || !clipboardItemSupports("image/png")) return null;
+  const imageArtifact = imageArtifacts[0]!;
+  const url = resolveClipboardArtifactUrl(imageArtifact);
+  if (!url) return null;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    if (!blob.type.startsWith("image/")) return null;
+    const pngBlob = await convertImageBlobToPngBlob(blob);
+    if (!pngBlob) return null;
+    return {
+      artifact: imageArtifact,
+      blob: pngBlob,
+      dataUrl: await blobToDataUrl(pngBlob),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function copyMessagesToClipboard(input: MessageClipboardInput) {
   const { htmlText, payload, plainText } = buildMessageClipboardData(input);
+  const artifactIds = [...new Set(input.artifactIds.map((item) => item.trim()).filter(Boolean))];
+  const hasText = Boolean(hasIncludedClipboardText(input));
   try {
     if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+      if (await tryCopySingleImageArtifactToNativeClipboard(input.artifacts ?? [], artifactIds, hasText ? plainText : undefined)) {
+        return;
+      }
+      const imageData = await buildClipboardImageData(input.artifacts ?? [], artifactIds);
+      const richHtmlText = imageData && htmlText
+        ? appendExternalClipboardImageHtml(htmlText, imageData)
+        : htmlText;
       const items: Record<string, Blob> = {
         "text/plain": new Blob([plainText], { type: "text/plain" }),
       };
-      if (payload) {
+      if (payload && !imageData) {
         items[ARTIFACT_CLIPBOARD_MIME] = new Blob([payload], { type: ARTIFACT_CLIPBOARD_MIME });
       }
-      if (htmlText) {
-        items["text/html"] = new Blob([htmlText], { type: "text/html" });
+      if (richHtmlText) {
+        items["text/html"] = new Blob([richHtmlText], { type: "text/html" });
       }
-      await navigator.clipboard.write([new ClipboardItem(items)]);
+      const richItems = imageData
+        ? hasText
+          ? { ...items, "image/png": imageData.blob }
+          : { "image/png": imageData.blob }
+        : items;
+      try {
+        await navigator.clipboard.write([new ClipboardItem(richItems)]);
+      } catch (error) {
+        if (!imageData) throw error;
+        const internalItems: Record<string, Blob> = {
+          "text/plain": new Blob([plainText], { type: "text/plain" }),
+        };
+        if (payload) internalItems[ARTIFACT_CLIPBOARD_MIME] = new Blob([payload], { type: ARTIFACT_CLIPBOARD_MIME });
+        if (htmlText) internalItems["text/html"] = new Blob([htmlText], { type: "text/html" });
+        await navigator.clipboard.write([new ClipboardItem(internalItems)]);
+      }
       return;
     }
   } catch {

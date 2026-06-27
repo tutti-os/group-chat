@@ -58,7 +58,7 @@ export function AgentThinkingPanel(props: {
   return (
     <aside
       ref={panelRef}
-      className={"[position:absolute] [top:56px] [right:0] [bottom:0] [z-index:37] [display:grid] [width:min(400px,_calc(100vw_-_24px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border)] [background:var(--panel)] [box-shadow:-18px_0_40px_rgb(0_0_0_/_8%)]"}
+      className={"[position:absolute] [top:56px] [right:0] [bottom:0] [z-index:37] [display:grid] [width:min(630px,_calc(100vw_-_24px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border)] [background:var(--panel)] [box-shadow:-18px_0_40px_rgb(0_0_0_/_8%)]"}
       aria-label={t("thinkingPanel.aria")}
     >
       <header className={"[display:grid] [grid-template-columns:minmax(0,_1fr)_auto] [align-items:center] [gap:8px] [border-bottom:1px_solid_var(--border)] [padding:14px] [background:#ffffff]"}>
@@ -106,7 +106,7 @@ export function AgentThinkingPanel(props: {
           return (
             <section
               key={section.id}
-              className={`[display:grid] [gap:8px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:10px_12px] [background:#f8fafc] [font-size:12px] ${section.streaming ? "[border-color:var(--accent-hover)]" : ""}`}
+              className={`[display:grid] [min-width:0] [overflow:hidden] [gap:8px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:10px_12px] [background:#f8fafc] [font-size:12px] ${section.streaming ? "[border-color:var(--accent-hover)]" : ""}`}
             >
               <div className={"[display:flex] [align-items:center] [gap:6px] [color:var(--muted)] [font-size:12px] [font-weight:700]"}>
                 <BrainCircuit size={15} />
@@ -118,8 +118,11 @@ export function AgentThinkingPanel(props: {
                       : t("thinkingPanel.reasoningBlock")}
                 </span>
               </div>
-              <div className={"message-prose [overflow:auto] [color:#404040] [font-size:12px] [line-height:1.6]"}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{section.content || " "}</ReactMarkdown>
+              <div
+                className={"message-prose [overflow:auto] [color:#404040] [font-size:12px] [line-height:1.6] [scrollbar-gutter:stable]"}
+                style={{ maxHeight: "min(420px, 42vh)" }}
+              >
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{formatThinkingMarkdown(section.content)}</ReactMarkdown>
               </div>
             </section>
           );
@@ -132,7 +135,7 @@ export function AgentThinkingPanel(props: {
 function ToolSummarySection(props: { count: number; status: AgentRunEvent["status"]; stats: ToolSummaryStats; events: Array<{ event: AgentRunEvent; displayStatus: AgentRunEvent["status"] }> }) {
   const { t } = useTranslation();
   return (
-    <details className={`group [display:grid] [min-width:0] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:14px] [background:#ffffff] [color:var(--muted)] [font-size:12px] ${props.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${props.status === "error" ? "[border-color:#dc26262e] [background:#fef2f2]" : ""}`}>
+    <details open className={`group [display:grid] [min-width:0] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:14px] [background:#ffffff] [color:var(--muted)] [font-size:12px] ${props.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${props.status === "error" ? "[border-color:#dc26262e] [background:#fef2f2]" : ""}`}>
       <summary className={"[display:flex] [min-width:0] [align-items:center] [gap:8px] [padding:10px_12px] [font-weight:700] [cursor:pointer] [list-style:none] [&::-webkit-details-marker]:[display:none]"}>
         <Wrench size={15} className={"[flex:0_0_auto]"} />
         <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{t("thinkingPanel.toolCallsSummary", { count: props.count })}</span>
@@ -141,7 +144,7 @@ function ToolSummarySection(props: { count: number; status: AgentRunEvent["statu
       </summary>
       <div
         className={"[display:grid] [gap:8px] [overflow-y:auto] [overscroll-contain] [border-top:1px_solid_var(--border)] [padding:8px] [scrollbar-gutter:stable]"}
-        style={{ maxHeight: "min(460px, calc(100vh - 260px))" }}
+        style={{ maxHeight: "min(560px, calc(100vh - 260px))" }}
         onWheel={(event) => {
           const element = event.currentTarget;
           if (element.scrollHeight <= element.clientHeight) return;
@@ -165,9 +168,109 @@ function formatToolSummaryStatus(status: AgentRunEvent["status"], stats: ToolSum
   return formatRunEventStatus({ status: "success", type: "tool_result" } as AgentRunEvent);
 }
 
+const THINKING_PARAGRAPH_MAX_CHARS = 118;
+
+function formatThinkingMarkdown(content: string) {
+  const trimmed = content.trim();
+  if (!trimmed) return " ";
+  return splitMarkdownFences(trimmed)
+    .map((part) => part.fenced ? part.text.trim() : formatThinkingTextPart(part.text))
+    .filter(Boolean)
+    .join("\n\n")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
+function splitMarkdownFences(content: string) {
+  const parts: Array<{ fenced: boolean; text: string }> = [];
+  const fencePattern = /(^|\n)(```[\s\S]*?```|~~~[\s\S]*?~~~)(?=\n|$)/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = fencePattern.exec(content))) {
+    const fenceStart = match.index + (match[1] ?? "").length;
+    if (fenceStart > cursor) parts.push({ fenced: false, text: content.slice(cursor, fenceStart) });
+    parts.push({ fenced: true, text: match[2] ?? "" });
+    cursor = fencePattern.lastIndex;
+  }
+  if (cursor < content.length) parts.push({ fenced: false, text: content.slice(cursor) });
+  return parts;
+}
+
+function formatThinkingTextPart(text: string) {
+  return text
+    .split(/\n{2,}/)
+    .map(formatThinkingBlock)
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function formatThinkingBlock(block: string) {
+  const chunks: string[] = [];
+  let buffer: string[] = [];
+  const flushBuffer = () => {
+    const paragraphText = buffer.join(" ").replace(/[ \t]+/g, " ").trim();
+    if (paragraphText) chunks.push(...buildThinkingParagraphs(paragraphText));
+    buffer = [];
+  };
+
+  for (const line of block.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushBuffer();
+      continue;
+    }
+    if (isMarkdownStructureLine(trimmed)) {
+      flushBuffer();
+      chunks.push(line.trimEnd());
+      continue;
+    }
+    buffer.push(trimmed);
+  }
+  flushBuffer();
+
+  return chunks.join("\n\n");
+}
+
+function isMarkdownStructureLine(line: string) {
+  return /^(#{1,6}\s|[-*+]\s|\d+\.\s|>\s|`{3,}|~~~|\|)/.test(line);
+}
+
+function buildThinkingParagraphs(text: string) {
+  const parts = text
+    .replace(/([。！？!?；;])\s+/g, "$1\n")
+    .replace(/([：:])\s+(?=`)/g, "$1\n")
+    .split(/\n+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const paragraphs: string[] = [];
+  let current = "";
+
+  const pushCurrent = () => {
+    if (!current) return;
+    paragraphs.push(current);
+    current = "";
+  };
+
+  for (const part of parts) {
+    if (!current) {
+      current = part;
+    } else if (current.length + part.length > THINKING_PARAGRAPH_MAX_CHARS || /[：:]$/.test(current)) {
+      pushCurrent();
+      current = part;
+    } else {
+      current = `${current} ${part}`;
+    }
+    if (current.length >= THINKING_PARAGRAPH_MAX_CHARS) pushCurrent();
+  }
+  pushCurrent();
+
+  return paragraphs;
+}
+
 function RunEventSection(props: { event: AgentRunEvent; compact?: boolean; displayStatus?: AgentRunEvent["status"] }) {
+  const { t } = useTranslation();
   const displayStatus = props.displayStatus ?? props.event.status;
   const toolName = typeof props.event.metadata?.toolName === "string" ? props.event.metadata.toolName : null;
+  const details = runEventDetailEntries(props.event, t);
   const icon =
     props.event.type === "tool_call" ? (
       <Wrench size={15} />
@@ -192,8 +295,52 @@ function RunEventSection(props: { event: AgentRunEvent; compact?: boolean; displ
           {props.event.content}
         </pre>
       ) : null}
+      {details.length ? (
+        <div className={"[display:grid] [gap:7px]"}>
+          {details.map((detail) => (
+            <div key={detail.key} className={"[display:grid] [gap:4px]"}>
+              <span className={"[color:var(--muted)] [font-size:11px] [font-weight:750]"}>{detail.label}</span>
+              <pre className={`${props.compact ? "[max-height:220px] [font-size:11px]" : "[max-height:360px] [font-size:12px]"} [margin:0] [overflow:auto] [border-radius:10px] [border:1px_solid_var(--border)] [padding:10px] [white-space:pre-wrap] [color:#262626] [background:#ffffff] [line-height:1.5] [scrollbar-gutter:stable]`}>
+                {detail.value}
+              </pre>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
+}
+
+function runEventDetailEntries(event: AgentRunEvent, t: (key: string, values?: TranslateParams) => string) {
+  const metadata = event.metadata ?? {};
+  const entries: Array<{ key: string; label: string; value: string }> = [];
+  const push = (key: string, label: string, value: unknown) => {
+    const formatted = formatRunEventMetadataValue(value);
+    if (!formatted) return;
+    entries.push({ key, label, value: formatted });
+  };
+
+  if (event.type === "tool_call") {
+    push("input", t("thinkingPanel.toolInput"), metadata.input);
+  } else if (event.type === "tool_result") {
+    push("summary", t("thinkingPanel.toolSummary"), metadata.summary);
+    push("output", t("thinkingPanel.toolOutput"), metadata.output);
+    push("error", t("thinkingPanel.toolError"), metadata.error);
+  } else if (event.type === "file_write") {
+    push("path", t("runPanel.writeFile"), metadata.path);
+  }
+
+  return entries;
+}
+
+function formatRunEventMetadataValue(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string") return value.trim();
+  try {
+    return JSON.stringify(value, null, 2).trim();
+  } catch {
+    return String(value).trim();
+  }
 }
 
 function formatRunEventDisplayStatus(event: AgentRunEvent, status: AgentRunEvent["status"]) {

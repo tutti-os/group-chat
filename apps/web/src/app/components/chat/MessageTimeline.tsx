@@ -35,7 +35,7 @@ import {
   messageSenderLabel,
   summaryLinkLabel,
 } from "../../chat-links.js";
-import { collectImageFileArtifactsForMessages } from "../../message-artifacts.js";
+import { collectImageFileArtifactsForMessages, resolveArtifactsByIds } from "../../message-artifacts.js";
 import { hasTimelineMessages, isTimelineMessageRemoved } from "../../message-timeline-state.js";
 import { enrichContentWithParticipantMentions, enrichContentWithReferenceMentions } from "../../reference-mentions.js";
 import { MessageReferenceContent } from "./MessageReferenceContent.js";
@@ -143,6 +143,27 @@ function selectedArtifactIdsFromTimelineRange(range: Range, container: HTMLEleme
     if (artifactId) artifactIds.add(artifactId);
   }
   return [...artifactIds];
+}
+
+function selectedImageDataUrlFromTimelineRange(range: Range, container: HTMLElement, artifactIds: string[]) {
+  if (artifactIds.length !== 1) return null;
+  const artifactId = artifactIds[0]!;
+  const artifactElement = [...container.querySelectorAll<HTMLElement>('[data-slot="artifact-block"][data-artifact-id]')]
+    .find((element) => element.dataset.artifactId === artifactId) ?? null;
+  if (!artifactElement || !selectionIntersectsNode(range, artifactElement)) return null;
+  const image = artifactElement.querySelector<HTMLImageElement>("img[data-artifact-id]");
+  if (!image?.complete || !image.naturalWidth || !image.naturalHeight) return null;
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+    context.drawImage(image, 0, 0, image.naturalWidth, image.naturalHeight);
+    return canvas.toDataURL("image/png");
+  } catch {
+    return null;
+  }
 }
 
 type OrderedClipboardPart =
@@ -571,13 +592,19 @@ export function MessageTimeline(props: {
 
     if (scope.kind === "artifact") {
       const artifact = props.artifacts.find((item) => item.id === scope.artifactId);
-      if (!artifact || (artifact.messageId && !visibleMessageIds.has(artifact.messageId))) {
+      const artifactInVisibleMessages = props.blocks.some((block) =>
+        visibleMessageIds.has(block.messageId)
+        && (block.type === "image" || block.type === "file")
+        && block.metadata?.artifactId === scope.artifactId,
+      );
+      if (!artifact || !artifactInVisibleMessages) {
         showCopyTip(position);
         return;
       }
       await copyMessagesToClipboard({
         text: "",
         artifactIds: [artifact.id],
+        artifacts: [artifact],
         includeText: false,
       });
       showCopyTip(position);
@@ -595,7 +622,19 @@ export function MessageTimeline(props: {
         await copyMessagesToClipboard({
           text: "",
           artifactIds: [messageArtifacts[0]!.id],
+          artifacts: [messageArtifacts[0]!],
           includeText: false,
+        });
+        showCopyTip(position);
+        return;
+      }
+      if (messageArtifacts.length > 0) {
+        await copyMessagesToClipboard({
+          text: blockText,
+          artifactIds: messageArtifacts.map((artifact) => artifact.id),
+          artifacts: messageArtifacts,
+          includeText: true,
+          parts: orderedPartsForMessages(visibleMessages, props.blocks),
         });
         showCopyTip(position);
         return;
@@ -617,6 +656,7 @@ export function MessageTimeline(props: {
       await copyMessagesToClipboard({
         text: "",
         artifactIds: [artifacts[0]!.id],
+        artifacts: [artifacts[0]!],
         includeText: false,
       });
       showCopyTip(position);
@@ -625,6 +665,7 @@ export function MessageTimeline(props: {
     await copyMessagesToClipboard({
       text,
       artifactIds: artifacts.map((artifact) => artifact.id),
+      artifacts,
       includeText: true,
       parts: orderedPartsForMessages(visibleMessages, props.blocks),
     });
@@ -642,15 +683,25 @@ export function MessageTimeline(props: {
 
     const selectedText = selectedTextFromTimelineRange(range, container);
     const artifactIds = selectedArtifactIdsFromTimelineRange(range, container);
+    const artifacts = resolveArtifactsByIds(artifactIds, props.artifacts);
+    const externalImageDataUrl = selectedImageDataUrlFromTimelineRange(range, container, artifactIds);
     const parts = selectedOrderedPartsFromTimelineRange(range, container, props.blocks, props.allMessages);
     if (!selectedText && artifactIds.length === 0) return;
 
-    copyMessagesToClipboardEvent(event, {
+    const input = {
       text: selectedText,
       artifactIds,
+      artifacts,
+      externalImageDataUrl,
       includeText: Boolean(selectedText),
       parts,
-    });
+    };
+    copyMessagesToClipboardEvent(event, input);
+    if (artifacts.filter((artifact) => artifact.mimeType.startsWith("image/")).length === 1) {
+      void copyMessagesToClipboard(input).catch(() => {
+        // The synchronous copy event above already populated the internal clipboard data.
+      });
+    }
   };
 
   useEffect(() => {

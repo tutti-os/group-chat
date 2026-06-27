@@ -460,6 +460,20 @@ server.post<{ Params: { artifactId: string } }>("/api/artifacts/:artifactId/open
   }
 });
 
+server.post<{ Body: { text?: string }; Params: { artifactId: string } }>("/api/artifacts/:artifactId/copy-image", async (request, reply) => {
+  const artifact = repo.getArtifact(request.params.artifactId);
+  if (!artifact) return reply.code(404).send({ error: "Artifact not found" });
+  if (!artifact.mimeType.startsWith("image/")) return reply.code(400).send({ error: "Artifact is not an image" });
+  if (!existsSync(artifact.localPath)) return reply.code(404).send({ error: "Artifact file not found" });
+  try {
+    await copyImagePathToSystemClipboard(artifact.localPath, request.body?.text);
+    return { ok: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to copy artifact image";
+    return reply.code(500).send({ error: message });
+  }
+});
+
 server.get("/api/ws", { websocket: true }, (socket) => {
   const dispose = events.addClient(socket);
   const hello: WsServerMessage = { type: "hello", lastSeq: events.lastSeq() };
@@ -603,4 +617,51 @@ function openPathWithSystemApp(path: string) {
   });
   child.on("error", () => undefined);
   child.unref();
+}
+
+function copyImagePathToSystemClipboard(path: string, text?: string) {
+  if (process.platform !== "darwin") {
+    return Promise.reject(new Error("Native image clipboard is only supported on macOS"));
+  }
+  const trimmedText = text?.trim() ? text : "";
+  const script = trimmedText
+    ? [
+        "-e",
+        "on run argv",
+        "-e",
+        "set the clipboard to {Unicode text:(item 2 of argv), «class PNGf»:(read (POSIX file (item 1 of argv)) as «class PNGf»)}",
+        "-e",
+        "end run",
+        "--",
+        path,
+        trimmedText,
+      ]
+    : [
+        "-e",
+        "on run argv",
+        "-e",
+        "set the clipboard to (read (POSIX file (item 1 of argv)) as «class PNGf»)",
+        "-e",
+        "end run",
+        "--",
+        path,
+      ];
+  return new Promise<void>((resolvePromise, rejectPromise) => {
+    const child = spawn("osascript", script, {
+      stdio: ["ignore", "ignore", "pipe"],
+      windowsHide: true,
+    });
+    let stderr = "";
+    child.stderr?.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on("error", rejectPromise);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolvePromise();
+        return;
+      }
+      rejectPromise(new Error(stderr.trim() || `osascript exited with ${code ?? "unknown status"}`));
+    });
+  });
 }

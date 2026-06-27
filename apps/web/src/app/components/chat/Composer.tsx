@@ -738,6 +738,7 @@ export function Composer(props: {
   };
 
   const suppressEditorSyncRef = useRef(false);
+  const composerCompositionActiveRef = useRef(false);
 
   const syncEditorText = (reopenMentionMenu = false) => {
     if (suppressEditorSyncRef.current) return;
@@ -757,6 +758,29 @@ export function Composer(props: {
     resizeComposerEditor(editor);
     recordComposerHistorySnapshot();
   };
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const handleCompositionStart = () => {
+      composerCompositionActiveRef.current = true;
+    };
+    const handleCompositionEnd = () => {
+      composerCompositionActiveRef.current = false;
+      normalizeUploadCaretAnchorText(editor);
+    };
+    const handleInput = () => {
+      if (!composerCompositionActiveRef.current) normalizeUploadCaretAnchorText(editor);
+    };
+    editor.addEventListener("compositionstart", handleCompositionStart);
+    editor.addEventListener("compositionend", handleCompositionEnd);
+    editor.addEventListener("input", handleInput);
+    return () => {
+      editor.removeEventListener("compositionstart", handleCompositionStart);
+      editor.removeEventListener("compositionend", handleCompositionEnd);
+      editor.removeEventListener("input", handleInput);
+    };
+  }, [props.conversationId]);
 
   useLayoutEffect(() => {
     resizeComposerEditor(editorRef.current);
@@ -2061,6 +2085,16 @@ export function Composer(props: {
                     return current.filter((item) => itemIds.has(item.id));
                   });
                 }
+                if (composerCompositionActiveRef.current) return;
+                normalizeUploadCaretAnchorText(editor);
+                syncEditorText(true);
+              }}
+              onCompositionStart={() => {
+                composerCompositionActiveRef.current = true;
+              }}
+              onCompositionEnd={() => {
+                composerCompositionActiveRef.current = false;
+                normalizeUploadCaretAnchorText(editorRef.current);
                 syncEditorText(true);
               }}
               onMouseDown={(event) => {
@@ -2151,6 +2185,9 @@ export function Composer(props: {
                   && !event.metaKey
                   && !event.ctrlKey
                   && !event.altKey
+                  && !event.nativeEvent.isComposing
+                  && !composerCompositionActiveRef.current
+                  && !isImeCompositionStarterKey(event.key)
                   && insertTextAfterUploadCaretAnchor(editorRef.current, event.key)
                 ) {
                   event.preventDefault();
@@ -3594,6 +3631,45 @@ function insertTextAfterUploadCaretAnchor(editor: HTMLDivElement | null, text: s
   anchor.after(textNode);
   const range = document.createRange();
   range.setStart(textNode, text.length);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return true;
+}
+
+function isImeCompositionStarterKey(key: string) {
+  return /^[a-z]$/i.test(key);
+}
+
+function normalizeUploadCaretAnchorText(editor: HTMLDivElement | null) {
+  const selection = window.getSelection();
+  if (!editor || !selection?.rangeCount) return false;
+  const selectionRange = selection.getRangeAt(0);
+  const startElement = selectionRange.startContainer instanceof Element
+    ? selectionRange.startContainer
+    : selectionRange.startContainer.parentElement;
+  const anchor = startElement?.closest<HTMLElement>("[data-upload-caret-anchor]");
+  if (!anchor || !editor.contains(anchor)) return false;
+  const content = (anchor.textContent ?? "").replaceAll("\u200b", "");
+  if (!content) return false;
+
+  let nextNode = anchor.nextSibling;
+  while (nextNode instanceof Text && /^[a-z]+$/i.test(nextNode.textContent ?? "")) {
+    const nodeToRemove = nextNode;
+    nextNode = nextNode.nextSibling;
+    nodeToRemove.remove();
+  }
+  anchor.textContent = "\u200b";
+  const textNode = document.createTextNode(content);
+  anchor.after(textNode);
+  let trailingNode = textNode.nextSibling;
+  while (trailingNode instanceof Text && /^[a-z]+$/i.test(trailingNode.textContent ?? "")) {
+    const nodeToRemove = trailingNode;
+    trailingNode = trailingNode.nextSibling;
+    nodeToRemove.remove();
+  }
+  const range = document.createRange();
+  range.setStart(textNode, content.length);
   range.collapse(true);
   selection.removeAllRanges();
   selection.addRange(range);

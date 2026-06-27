@@ -377,6 +377,7 @@
 }
 
 [data-agent-chat-composer-palette] .rich-text-at-mention-palette-footer {
+  display: none;
   min-height: 28px;
 }
 

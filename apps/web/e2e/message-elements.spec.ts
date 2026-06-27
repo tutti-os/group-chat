@@ -214,6 +214,52 @@ test("copies and pastes composer images as attachments", async ({ context, page 
   await expect(composer.locator("[data-upload-item-id]")).toHaveCount(1);
 });
 
+test("does not leak pinyin letters when composing Chinese after a pasted image", async ({ page }) => {
+  await page.goto("/");
+  const composer = page.getByRole("textbox", { name: /消息输入框|Message input/ });
+  await composer.locator("xpath=ancestor::footer").locator('input[type="file"]').setInputFiles({
+    name: "ime-after-image.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
+  });
+  await expect(composer.locator("[data-upload-item-id]")).toHaveCount(1);
+  await composer.locator("[data-upload-caret-anchor]").evaluate((anchor) => {
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+
+  const textAfterComposition = await composer.evaluate((editor) => {
+    const anchor = editor.querySelector<HTMLElement>("[data-upload-caret-anchor]");
+    if (!anchor) throw new Error("upload caret anchor missing");
+    editor.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+    editor.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "d" }));
+    anchor.textContent = "\u200b的";
+    const textNode = anchor.firstChild;
+    if (!textNode) throw new Error("anchor text node missing");
+    const range = document.createRange();
+    range.setStart(textNode, anchor.textContent.length);
+    range.collapse(true);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    editor.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "的" }));
+    editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertCompositionText", data: "的" }));
+    const clone = editor.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll("[data-upload-item-id]").forEach((node) => node.remove());
+    return {
+      html: editor.innerHTML,
+      text: (clone.textContent ?? "").replaceAll("\u200b", "").trim(),
+    };
+  });
+
+  expect(textAfterComposition.html).not.toContain(">d<");
+  expect(textAfterComposition.text, textAfterComposition.html).toBe("的");
+});
+
 test("restores message actions after dismissing the agent menu outside", async ({ page, request }) => {
   const roomBundle = await (await request.post("/api/rooms", { data: { title: "Agent Menu Hover Room" } })).json();
   await request.post(`/api/conversations/${roomBundle.conversation.id}/messages`, {
@@ -364,6 +410,42 @@ test("pastes the same copied message image more than once", async ({ context, pa
     editor.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData }));
   }, imageBase64);
   await expect(page.getByRole("button", { name: "Preview external.png" })).toBeVisible();
+});
+
+test("copies an image resent from group files through its message image action", async ({ context, page, request }) => {
+  const roomBundle = await (await request.post("/api/rooms", { data: { title: "Resent Group File Copy Room" } })).json();
+  const imageBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+  const uploaded = await (await request.post(`/api/conversations/${roomBundle.conversation.id}/artifacts`, {
+    data: { filename: "resent-group-file.png", mimeType: "image/png", dataBase64: imageBase64 },
+  })).json();
+  await request.post(`/api/conversations/${roomBundle.conversation.id}/messages`, {
+    data: { content: "", artifactIds: [uploaded.artifact.id], mentions: [] },
+  });
+  await request.post(`/api/conversations/${roomBundle.conversation.id}/messages`, {
+    data: { content: "", artifactIds: [uploaded.artifact.id], mentions: [] },
+  });
+
+  await page.goto("/");
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(page.url()).origin });
+  await page.getByRole("button", { name: /Resent Group File Copy Room/ }).click();
+
+  const resentMessage = page.getByRole("article").filter({ has: page.getByRole("button", { name: "resent-group-file.png" }) }).last();
+  const resentImage = resentMessage.locator('[data-slot="artifact-block"][data-artifact-id]').last();
+  const artifactId = await resentImage.getAttribute("data-artifact-id");
+  expect(artifactId).toBe(uploaded.artifact.id);
+  await resentImage.hover();
+  const nativeCopy = page.waitForResponse((response) =>
+    response.request().method() === "POST"
+    && response.url().endsWith(`/api/artifacts/${uploaded.artifact.id}/copy-image`),
+  );
+  await resentMessage.getByRole("button", { name: /^(复制|Copy)$/ }).click();
+  expect((await nativeCopy).ok()).toBe(true);
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem("group-chat:artifact-ids"))).toContain(uploaded.artifact.id);
+
+  const composer = page.getByRole("textbox", { name: /消息输入框|Message input/ });
+  await composer.click();
+  await page.keyboard.press("Meta+V");
+  await expect(composer.getByRole("button", { name: "Preview resent-group-file.png" })).toBeVisible();
 });
 
 test("selects an image attachment when dragging left from composer text", async ({ page }) => {

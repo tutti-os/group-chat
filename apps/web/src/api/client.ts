@@ -266,6 +266,13 @@ export async function openArtifactInSystem(artifactId: string) {
   });
 }
 
+export async function copyArtifactImageToSystemClipboard(artifactId: string, body?: { text?: string }) {
+  return fetchJson<{ ok: true }>(`/api/artifacts/${artifactId}/copy-image`, {
+    method: "POST",
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
 export async function listAppReferences(body: AppReferenceListRequest): Promise<AppReferenceListResponse> {
   return fetchJson<AppReferenceListResponse>("/tutti/references/list", {
     method: "POST",
