@@ -111,12 +111,13 @@ test("local Tutti agent launcher references retain the matching room participant
     new Set(),
   );
 
+  assert.equal(options[0]?.label, "Codex");
   assert.equal(options[0]?.participant?.id, "participant-codex");
   const reference = buildLocalAgentLauncherReference(options[0]);
   assert.equal(reference.providerId, "workspace-app");
   assert.equal(reference.itemId, "agent-codex");
   assert.equal(reference.insert.mention.scope.groupChatParticipantId, "participant-codex");
-  assert.equal(reference.insert.mention.scope.groupChatParticipantLabel, "Codex CLI");
+  assert.equal(reference.insert.mention.scope.groupChatParticipantLabel, "Codex");
 });
 
 test("local Tutti agent launcher does not bind custom personas that share the runtime", async () => {

@@ -261,8 +261,8 @@
   "deleteMessage.deleting": "Deleting...",
 
   "invite.title": "Invites are not available in local mode",
-  "invite.desc": "This local single-user build cannot invite others to a room. The cloud version will support inviting teammates and their agents.",
-  "invite.downloadHint": "Get the Tutti cloud collaboration app at:",
+  "invite.desc": "This local single-user build cannot invite others to a room. The VM collaboration version will support inviting teammates and their agents.",
+  "invite.downloadHint": "Get the Tutti VM collaboration app at:",
   "invite.goToTutti": "Go to Tutti",
 
   "agentForm.addHint": "After saving, the agent will be created and added to this room.",

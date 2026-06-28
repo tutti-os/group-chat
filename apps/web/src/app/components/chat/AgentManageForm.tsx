@@ -445,14 +445,18 @@ function AgentSelect(props: {
     if (!button) return;
     const rect = button.getBoundingClientRect();
     const viewportPadding = 8;
+    const longestLabelLength = Math.max(
+      ...props.options.map((option) => [...option.label].length),
+      [...(selected?.label ?? "")].length,
+    );
     const estimatedContentWidth = Math.max(
-      132,
+      rect.width,
       Math.min(
-        rect.width,
-        Math.max(...props.options.map((option) => option.label.length), selected?.label.length ?? 0) * 14 + 52,
+        360,
+        longestLabelLength * 10 + 58,
       ),
     );
-    const width = Math.min(estimatedContentWidth, Math.max(132, window.innerWidth - viewportPadding * 2));
+    const width = Math.min(estimatedContentWidth, Math.max(rect.width, window.innerWidth - viewportPadding * 2));
     const left = Math.min(
       Math.max(viewportPadding, rect.left),
       Math.max(viewportPadding, window.innerWidth - width - viewportPadding),
@@ -519,7 +523,7 @@ function AgentSelect(props: {
           ref={menuRef}
           role="listbox"
           aria-label={props.ariaLabel}
-          className={"[position:fixed] [z-index:10000] [display:grid] [max-height:220px] [overflow:auto] [border:1px_solid_#2f2f2f] [border-radius:10px] [padding:4px] [color:#f7f7f7] [background:#4f4f4f] [font-size:13px] [font-weight:600] [line-height:1.2] [box-shadow:0_14px_34px_rgb(0_0_0_/_20%)]"}
+          className={"[position:fixed] [z-index:10000] [display:grid] [max-height:220px] [overflow:auto] [border:1px_solid_#2f2f2f] [border-radius:10px] [padding:4px] [color:#f7f7f7] [background:#4f4f4f] [font-size:12px] [font-weight:600] [line-height:1.2] [box-shadow:0_14px_34px_rgb(0_0_0_/_20%)]"}
           style={{ top: position.top, left: position.left, width: position.width }}
         >
           {props.options.map((option) => {
@@ -540,7 +544,7 @@ function AgentSelect(props: {
                 <span className={"[width:16px] [color:#ffffff]"}>
                   {active ? "✓" : ""}
                 </span>
-                <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>
+                <span className={"[min-width:0] [white-space:nowrap]"}>
                   {option.label}
                 </span>
               </button>

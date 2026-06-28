@@ -701,7 +701,7 @@ export function App() {
         const target: AgentForwardTarget = {
           provider,
           runtimeProvider: profile.provider,
-          label: status?.displayName?.trim() || defaultIdentityNameForRuntime(profile, localAgentProviders),
+          label: defaultIdentityNameForRuntime(profile, localAgentProviders),
           subtitle: status
             ? localAgentMentionSubtitle(profile, status, localAgentProviders)
             : defaultIdentityNameForRuntime(profile, localAgentProviders),

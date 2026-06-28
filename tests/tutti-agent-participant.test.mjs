@@ -51,10 +51,10 @@ test("virtual Tutti agent participants use stable non-clone ids", async () => {
   assert.equal(tuttiAgentParticipantId("codex"), "tutti-agent:codex");
   assert.equal(parseTuttiAgentParticipantId("tutti-agent:codex"), "codex");
 
-  const participant = createVirtualTuttiAgentParticipant(conversation, runtimeProfile, "Codex CLI");
+  const participant = createVirtualTuttiAgentParticipant(conversation, runtimeProfile);
   assert.equal(participant.id, "tutti-agent:codex");
   assert.equal(participant.conversationId, "conversation-1");
-  assert.equal(participant.displayName, "Codex CLI");
+  assert.equal(participant.displayName, "Codex");
   assert.equal(participant.runtimeProfileId, "local-agent:codex");
   assert.equal(participant.identityId, null);
   assert.equal(participant.status, "active");

@@ -96,14 +96,14 @@ test("resolveAgentGuiDispatchFromMentions ignores room custom agent participant 
 
 test("resolveAgentGuiDispatchFromMentions ignores composer local Tutti agent mentions", async () => {
   const { resolveAgentGuiDispatchFromMentions } = await loadDispatchModule();
-  const content = "[Codex CLI](mention://workspace-app/agent-codex?workspaceId=ws-1) 今天星期几";
+  const content = "[Codex](mention://workspace-app/agent-codex?workspaceId=ws-1) 今天星期几";
   const mentions = [
     {
       mentionType: "reference",
       participantId: "tutti-at:workspace-app:agent-codex",
       referenceProviderId: "workspace-app",
       referenceEntityId: "agent-codex",
-      displayNameSnapshot: "Codex CLI",
+      displayNameSnapshot: "Codex",
       referenceScope: {
         workspaceId: "ws-1",
         groupChatLocalAgentMention: "true",
@@ -114,7 +114,7 @@ test("resolveAgentGuiDispatchFromMentions ignores composer local Tutti agent men
         kind: "mention",
         mention: {
           entityId: "agent-codex",
-          label: "Codex CLI",
+          label: "Codex",
           scope: {
             workspaceId: "ws-1",
             groupChatLocalAgentMention: "true",

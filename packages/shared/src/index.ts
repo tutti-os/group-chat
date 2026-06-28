@@ -983,7 +983,7 @@ export function parseTuttiAgentParticipantId(participantId: string | null | unde
 }
 
 export function defaultTuttiAgentParticipantName(provider: string) {
-  if (provider === "codex") return "Codex CLI";
+  if (provider === "codex") return "Codex";
   if (provider === "claude") return "Claude Code";
   return provider || "Agent";
 }

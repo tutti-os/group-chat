@@ -496,7 +496,10 @@ function mergeTuttiAgentProviderStatuses(
   tuttiStatuses: TuttiAgentProviderStatus[] | null,
   kitStatuses: LocalAgentProviderStatus[],
 ): LocalAgentProviderStatus[] {
-  if (!tuttiStatuses) return kitStatuses;
+  if (!tuttiStatuses) return kitStatuses.map((status) => ({
+    ...status,
+    displayName: displayNameForLocalAgentProvider(status.provider, status.displayName),
+  }));
   const kitStatusByProvider = new Map(kitStatuses.map((status) => [status.provider, status]));
   const merged = new Map<string, LocalAgentProviderStatus>();
 
@@ -507,7 +510,7 @@ function mergeTuttiAgentProviderStatuses(
     const available = tuttiStatus.availability?.status === "ready";
     const status: LocalAgentProviderStatus = {
       provider,
-      displayName: kitStatus?.displayName ?? displayNameForTuttiAgentProvider(provider),
+      displayName: displayNameForLocalAgentProvider(provider, kitStatus?.displayName),
       available,
       authState: authStateFromTuttiAgentProvider(tuttiStatus.auth?.status),
       executablePath: tuttiStatus.cli?.binaryPath ?? tuttiStatus.adapter?.binaryPath ?? kitStatus?.executablePath ?? "",
@@ -682,8 +685,13 @@ function normalizeTuttiAgentProvider(provider: string) {
 
 function displayNameForTuttiAgentProvider(provider: string) {
   if (provider === "claude") return "Claude Code";
-  if (provider === "codex") return "Codex CLI";
+  if (provider === "codex") return "Codex";
   return provider;
+}
+
+function displayNameForLocalAgentProvider(provider: string, detectedDisplayName?: string | null) {
+  if (provider === "codex") return "Codex";
+  return detectedDisplayName?.trim() || displayNameForTuttiAgentProvider(provider);
 }
 
 function authStateFromTuttiAgentProvider(status: string | null | undefined): LocalAgentProviderStatus["authState"] {

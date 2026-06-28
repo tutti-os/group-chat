@@ -21,7 +21,7 @@ export function localAgentMentionSubtitle(
 ): string {
   const version = status.version?.trim();
   if (version && version !== "not-installed") return version;
-  return status.displayName?.trim() || defaultIdentityNameForRuntime(profile, localAgentProviders) || profile.provider;
+  return defaultIdentityNameForRuntime(profile, localAgentProviders) || profile.provider;
 }
 
 export function buildLocalAgentLauncherReference(option: LocalAgentMentionOption): TuttiAtQueryResult {
@@ -33,7 +33,7 @@ export function buildLocalAgentLauncherReference(option: LocalAgentMentionOption
   };
   if (option.participant) {
     localAgentScope.groupChatParticipantId = option.participant.id;
-    localAgentScope.groupChatParticipantLabel = option.participant.displayName;
+    localAgentScope.groupChatParticipantLabel = option.label;
   }
   if (appId) {
     const scope: Record<string, string> = { ...localAgentScope };
@@ -130,7 +130,7 @@ export function buildLocalAgentMentionOptions(
     )) continue;
     if (!launcherAppId && !status?.available) continue;
 
-    const label = status?.displayName?.trim() || defaultIdentityNameForRuntime(profile, localAgentProviders);
+    const label = defaultIdentityNameForRuntime(profile, localAgentProviders);
     const subtitle = status
       ? localAgentMentionSubtitle(profile, status, localAgentProviders)
       : profile.displayName || profile.provider;

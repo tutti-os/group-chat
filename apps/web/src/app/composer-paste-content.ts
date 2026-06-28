@@ -310,7 +310,7 @@ function buildPlainAtMentionCandidates(context: ComposerPasteContext): PlainAtCa
     if (profile.kind !== "local-agent") continue;
     const status = localAgentStatus(profile, context.localAgentProviders);
     if (!status?.available) continue;
-    const label = status.displayName?.trim() || defaultIdentityNameForRuntime(profile, context.localAgentProviders);
+    const label = defaultIdentityNameForRuntime(profile, context.localAgentProviders);
     const reference = buildLocalAgentLauncherReference({
       kind: "local-agent",
       key: profile.id,

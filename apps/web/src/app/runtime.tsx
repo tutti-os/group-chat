@@ -269,7 +269,7 @@ export function LocalAgentProvidersPanel(props: {
           <div key={profile.provider} className={`[&_strong]:[display:block] [&_strong]:[min-width:0] [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:[display:block] [&_span]:[min-width:0] [&_span]:[overflow:hidden] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_small]:[display:block] [&_small]:[min-width:0] [&_small]:[overflow:hidden] [&_small]:[text-overflow:ellipsis] [&_small]:[white-space:nowrap] [&_small]:[color:var(--muted)] [&_small]:[font-size:12px] [&_small]:[font-size:11px] [display:grid] [grid-template-columns:22px_minmax(0,_1fr)] [gap:8px] [align-items:start] [border-radius:12px] [padding:9px] [color:var(--muted)] [background:transparent] [&_strong]:[color:var(--text)] [&_strong]:[font-size:12px] [&_span]:[margin-top:2px] [&_span]:[font-size:12px] [&_span]:[font-weight:650] ${status?.available ? "[color:#16a34a]" : "[color:var(--danger)]"}`}>
             <Terminal size={15} />
             <div>
-              <strong>{status?.displayName ?? profile.displayName}</strong>
+              <strong>{defaultIdentityNameForRuntime(profile, props.localAgentProviders)}</strong>
               <span>{providerStatusLine(profile, status)}</span>
               <small title={status?.executablePath || undefined}>{providerDetailLine(status)}</small>
             </div>
