@@ -25,7 +25,8 @@ test("createManifest returns the Tutti package manifest contract", () => {
     appId: "group-chat",
     version: "1.2.3",
     name: "Group Chat",
-    description: "Get work done with your agents in group chat.",
+    description:
+      "A group chat app built by the founder. We tried to stop it from launching but failed, so we'd be glad to get more bug reports from users. - The Tutti team",
     icon: {
       type: "asset",
       src: "icon.png",
@@ -135,6 +136,10 @@ test("root Tutti manifest is valid JSON", async () => {
   assert.equal(manifest.schemaVersion, "tutti.app.manifest.v1");
   assert.equal(manifest.appId, "group-chat");
   assert.equal(manifest.name, "Group Chat");
+  assert.equal(
+    manifest.description,
+    "A group chat app built by the founder. We tried to stop it from launching but failed, so we'd be glad to get more bug reports from users. - The Tutti team"
+  );
   assert.equal(manifest.cli.manifest, "tutti.cli.json");
   assert.equal(manifest.references.listEndpoint, "/tutti/references/list");
   assert.equal(manifest.references.searchEndpoint, "/tutti/references/search");

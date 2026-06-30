@@ -3,7 +3,7 @@
   "appId": "group-chat",
   "version": "0.1.17",
   "name": "Group Chat",
-  "description": "Get work done with your agents in group chat.",
+  "description": "A group chat app built by the founder. We tried to stop it from launching but failed, so we'd be glad to get more bug reports from users. - The Tutti team",
   "icon": {
     "type": "asset",
     "src": "icon.png"

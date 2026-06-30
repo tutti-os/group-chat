@@ -27,7 +27,7 @@ const MANIFEST_LOCALIZATIONS = {
     file: "locales/zh-CN/manifest.json",
     metadata: {
       name: "群聊",
-      description: "在群里跟你的 Agents 一起干活",
+      description: "founder做的群聊应用，我们尝试过阻止上线但失败了，所以很高兴用户能多多反馈bug - tutti全体成员",
       tags: ["本地优先", "Agent", "群聊", "团队"],
     },
   },
@@ -39,7 +39,8 @@ export function createManifest({ version }) {
     appId: APP_ID,
     version,
     name: APP_NAME,
-    description: "Get work done with your agents in group chat.",
+    description:
+      "A group chat app built by the founder. We tried to stop it from launching but failed, so we'd be glad to get more bug reports from users. - The Tutti team",
     icon: {
       type: "asset",
       src: "icon.png",
