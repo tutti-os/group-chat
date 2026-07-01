@@ -58,7 +58,7 @@ export function AgentThinkingPanel(props: {
   return (
     <aside
       ref={panelRef}
-      className={"[position:absolute] [top:56px] [right:0] [bottom:0] [z-index:37] [display:grid] [width:min(630px,_calc(100vw_-_24px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border)] [background:var(--panel)] [box-shadow:-18px_0_40px_rgb(0_0_0_/_8%)]"}
+      className={"[position:absolute] [top:56px] [right:0] [bottom:0] [z-index:37] [display:grid] [width:min(630px,_calc(100vw_-_24px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border)] [background:#ffffff] [box-shadow:-18px_0_40px_rgb(0_0_0_/_8%)]"}
       aria-label={t("thinkingPanel.aria")}
     >
       <header className={"[display:grid] [grid-template-columns:minmax(0,_1fr)_auto] [align-items:center] [gap:8px] [border-bottom:1px_solid_var(--border)] [padding:14px] [background:#ffffff]"}>
@@ -87,7 +87,7 @@ export function AgentThinkingPanel(props: {
 
       <div
         ref={scrollRef}
-        className={"[min-height:0] [overflow-y:auto] [padding:14px] [display:grid] [align-content:start] [gap:10px]"}
+        className={"[min-height:0] [overflow-y:auto] [padding:14px] [display:grid] [align-content:start] [gap:10px] [background:#ffffff]"}
       >
         {displaySections.length === 0 ? (
           <div className={"[display:grid] [place-items:center] [gap:10px] [padding:40px_12px] [color:var(--muted)] [font-size:13px] [text-align:center]"}>
@@ -103,6 +103,7 @@ export function AgentThinkingPanel(props: {
           if (section.kind === "event") {
             return <RunEventSection key={section.id} event={section.event} />;
           }
+          const hasContent = section.content.trim().length > 0;
           return (
             <section
               key={section.id}
@@ -118,12 +119,19 @@ export function AgentThinkingPanel(props: {
                       : t("thinkingPanel.reasoningBlock")}
                 </span>
               </div>
-              <div
-                className={"message-prose [overflow:auto] [color:#404040] [font-size:12px] [line-height:1.6] [scrollbar-gutter:stable]"}
-                style={{ maxHeight: "min(420px, 42vh)" }}
-              >
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{formatThinkingMarkdown(section.content)}</ReactMarkdown>
-              </div>
+              {hasContent ? (
+                <div
+                  className={"message-prose [overflow:auto] [color:#404040] [font-size:12px] [line-height:1.7] [scrollbar-gutter:stable] [&_p]:[margin:0_0_10px] [&_p:last-child]:[margin-bottom:0]"}
+                  style={{ maxHeight: "min(420px, 42vh)" }}
+                >
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{formatThinkingMarkdown(section.content)}</ReactMarkdown>
+                </div>
+              ) : (
+                <div className={"[display:flex] [align-items:center] [gap:8px] [border-radius:10px] [padding:10px] [color:var(--muted)] [background:#ffffff] [font-size:12px] [line-height:18px]"}>
+                  <LoaderCircle size={14} className={section.streaming ? "animate-spin" : ""} />
+                  <span>{section.streaming ? t("thinkingPanel.thinkingInProgress") : t("thinkingPanel.emptyTitle")}</span>
+                </div>
+              )}
             </section>
           );
         })}
@@ -168,16 +176,23 @@ function formatToolSummaryStatus(status: AgentRunEvent["status"], stats: ToolSum
   return formatRunEventStatus({ status: "success", type: "tool_result" } as AgentRunEvent);
 }
 
-const THINKING_PARAGRAPH_MAX_CHARS = 118;
+const THINKING_PARAGRAPH_MAX_CHARS = 92;
 
-function formatThinkingMarkdown(content: string) {
+export function formatThinkingMarkdown(content: string) {
   const trimmed = content.trim();
   if (!trimmed) return " ";
   return splitMarkdownFences(trimmed)
-    .map((part) => part.fenced ? part.text.trim() : formatThinkingTextPart(part.text))
+    .map((part) => part.fenced ? formatFencedThinkingBlock(part.text) : formatThinkingTextPart(part.text))
     .filter(Boolean)
     .join("\n\n")
     .replace(/\n{3,}/g, "\n\n");
+}
+
+function formatFencedThinkingBlock(text: string) {
+  const trimmed = text.trim();
+  const match = trimmed.match(/^(```|~~~)[^\n]*\n([\s\S]*?)\n\1$/);
+  if (!match) return trimmed;
+  return match[2]?.trim() ? trimmed : "";
 }
 
 function splitMarkdownFences(content: string) {
@@ -235,35 +250,45 @@ function isMarkdownStructureLine(line: string) {
 }
 
 function buildThinkingParagraphs(text: string) {
-  const parts = text
-    .replace(/([。！？!?；;])\s+/g, "$1\n")
-    .replace(/([：:])\s+(?=`)/g, "$1\n")
+  return text
+    .replace(/([。！？!?；;])\s*/g, "$1\n")
+    .replace(/([：:])\s+/g, "$1\n")
+    .replace(/([，,])\s*(?=(?:然后|现在|接下来|目标|验证|工作区|当前|这里|看起来|因此|另外|同时|不过|但是|我会|我先))/g, "$1\n")
+    .replace(/\s+(?=(?:目标|验证|当前|现在|接下来|这里|看起来|因此|另外|同时|不过|但是|我会|我先)[：:])/g, "\n")
     .split(/\n+/)
     .map((part) => part.trim())
-    .filter(Boolean);
-  const paragraphs: string[] = [];
-  let current = "";
+    .filter(Boolean)
+    .flatMap(splitLongThinkingPart);
+}
 
+function splitLongThinkingPart(text: string) {
+  if (text.length <= THINKING_PARAGRAPH_MAX_CHARS) return [text];
+  const segments = text
+    .split(/(?<=[，,])\s*/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  if (segments.length <= 1) return [text];
+
+  const parts: string[] = [];
+  let current = "";
   const pushCurrent = () => {
     if (!current) return;
-    paragraphs.push(current);
+    parts.push(current);
     current = "";
   };
 
-  for (const part of parts) {
+  for (const segment of segments) {
     if (!current) {
-      current = part;
-    } else if (current.length + part.length > THINKING_PARAGRAPH_MAX_CHARS || /[：:]$/.test(current)) {
+      current = segment;
+    } else if (current.length + segment.length > THINKING_PARAGRAPH_MAX_CHARS) {
       pushCurrent();
-      current = part;
+      current = segment;
     } else {
-      current = `${current} ${part}`;
+      current = `${current}${segment}`;
     }
-    if (current.length >= THINKING_PARAGRAPH_MAX_CHARS) pushCurrent();
   }
   pushCurrent();
-
-  return paragraphs;
+  return parts;
 }
 
 function RunEventSection(props: { event: AgentRunEvent; compact?: boolean; displayStatus?: AgentRunEvent["status"] }) {

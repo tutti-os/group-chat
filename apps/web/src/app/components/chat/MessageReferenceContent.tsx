@@ -2,6 +2,7 @@ import type { Artifact, MentionTarget, Participant, RuntimeProfile } from "@grou
 import type { ReactNode } from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { normalizeLocalFileHref } from "../../tutti-bridge.js";
 import { contentHasReferenceMentions, findArtifactForFileReference, isFileReferenceProvider, parseReferenceMentionHref, splitContentByReferenceMentions } from "../../reference-mentions.js";
 import { ArtifactBlock } from "./MessageTimeline.js";
 import { ReferenceMentionLink, createReferenceMentionMarkdownComponents } from "./ReferenceMentionLink.js";
@@ -13,6 +14,9 @@ const INLINE_MARKDOWN_COMPONENTS = {
 function messageReferenceUrlTransform(value: string) {
   const trimmed = value.trim();
   if (trimmed.startsWith("group-chat://") || trimmed.startsWith("mention://")) {
+    return value;
+  }
+  if (trimmed.startsWith("file://") || normalizeLocalFileHref(trimmed)) {
     return value;
   }
   return defaultUrlTransform(value);

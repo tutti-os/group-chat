@@ -53,3 +53,59 @@ test("resolveReferenceMentionScope accepts legacy flat mention insert scopes", a
     { workspaceId: "legacy-ws" },
   );
 });
+
+test("buildTuttiOpenFileRequestForHref accepts absolute markdown file links", async () => {
+  const { buildTuttiOpenFileRequestForHref, localFileHrefToBrowserHref } = await loadTuttiBridgeModule();
+  const localPath = "/Users/test/workspace/music-app-homepage.html";
+
+  assert.deepEqual(
+    buildTuttiOpenFileRequestForHref(localPath, "music-app-homepage.html"),
+    {
+      path: localPath,
+      name: "music-app-homepage.html",
+      mode: "reveal",
+    },
+  );
+  assert.equal(localFileHrefToBrowserHref(localPath), "file:///Users/test/workspace/music-app-homepage.html");
+});
+
+test("buildTuttiOpenFileRequestForHref keeps relative file links workspace-relative", async () => {
+  const { buildTuttiOpenFileRequestForHref } = await loadTuttiBridgeModule();
+
+  assert.deepEqual(
+    buildTuttiOpenFileRequestForHref("exports/music-app-homepage.html", "music-app-homepage.html"),
+    {
+      path: "exports/music-app-homepage.html",
+      location: { type: "workspace-relative", path: "exports/music-app-homepage.html" },
+      name: "music-app-homepage.html",
+      mode: "reveal",
+    },
+  );
+});
+
+test("tryOpenFileInTutti reports async bridge failures", async () => {
+  const { tryOpenFileInTutti } = await loadTuttiBridgeModule();
+  const previousWindow = globalThis.window;
+  globalThis.window = {
+    tuttiExternal: {
+      files: {
+        async open() {
+          throw new Error("bridge rejected");
+        },
+      },
+    },
+  };
+
+  try {
+    assert.equal(
+      await tryOpenFileInTutti({ path: "/Users/test/workspace/music-app-homepage.html" }),
+      false,
+    );
+  } finally {
+    if (previousWindow === undefined) {
+      delete globalThis.window;
+    } else {
+      globalThis.window = previousWindow;
+    }
+  }
+});

@@ -4,7 +4,7 @@ import { Ear, Paperclip, Send, Square, X } from "lucide-react";
 import { makeAtPanelKeyDown } from "@tutti-os/ui-rich-text/at-panel";
 import type { AgentRun, Artifact, Conversation, Identity, LocalAgentProviderStatus, MentionTarget, Message, MessageBlock, Participant, Room, RuntimeProfile, TuttiAtProviderId } from "@group-chat/shared";
 import { resolveArtifactLinkedMessageId, sanitizeMentionTargetForAgentContext } from "@group-chat/shared";
-import { cancelRun, sendMessage, updateMessage, uploadArtifact } from "../../../api/client.js";
+import { sendMessage, updateMessage, uploadArtifact } from "../../../api/client.js";
 import { getArtifactCategory, revealArtifactInTuttiFileManager, resolveArtifactPublicUrl } from "../../artifact-actions.js";
 import { formatBytes, formatMessageTime } from "../../formatting.js";
 import {
@@ -120,7 +120,6 @@ export function Composer(props: {
   onSend: typeof sendMessage;
   onUpdateMessage: typeof updateMessage;
   onUpload: typeof uploadArtifact;
-  onCancelRun: typeof cancelRun;
   mentionRequest: { participantId: string; seq: number } | null;
   focusRequest: { seq: number } | null;
   summaryTasks: BackgroundTask[];
@@ -160,7 +159,6 @@ export function Composer(props: {
   const [selectedUploadItemIds, setSelectedUploadItemIds] = useState<Set<string>>(new Set());
   const [preview, setPreview] = useState<AttachmentPreview | null>(null);
   const [sending, setSending] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
   const editorRef = useRef<HTMLDivElement | null>(null);
   const attachmentDragSelectionRef = useRef<{ pointerId: number; startX: number } | null>(null);
   const suppressEditorClickClearRef = useRef(false);
@@ -528,16 +526,6 @@ export function Composer(props: {
       resetComposerHistory();
     } finally {
       setSending(false);
-    }
-  };
-
-  const cancelActiveRuns = async () => {
-    if (cancelling || props.activeRuns.length === 0) return;
-    setCancelling(true);
-    try {
-      await Promise.all(props.activeRuns.map((run) => props.onCancelRun(run.id)));
-    } finally {
-      setCancelling(false);
     }
   };
 
@@ -1998,8 +1986,7 @@ export function Composer(props: {
       ) : null}
       <div
         data-agent-chat-composer-box
-        data-stop={props.activeRuns.length > 0 || undefined}
-        className={"[display:grid] [grid-template-columns:40px_minmax(0,_1fr)_40px] [gap:8px] [align-items:end] [border:1px_solid_var(--border)] [border-radius:22px] [padding:8px] [background:#ffffff] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [&[data-stop=true]]:[grid-template-columns:40px_minmax(0,_1fr)_40px_40px] [&:focus-within]:[border-color:var(--border-strong)] [&:focus-within]:[box-shadow:0_0_0_3px_#00000008] max-[760px]:[grid-template-columns:34px_minmax(0,_1fr)_38px] max-[760px]:[&[data-stop=true]]:[grid-template-columns:34px_minmax(0,_1fr)_34px_38px]"}
+        className={"[display:grid] [grid-template-columns:40px_minmax(0,_1fr)_40px] [gap:8px] [align-items:end] [border:1px_solid_var(--border)] [border-radius:22px] [padding:8px] [background:#ffffff] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [&:focus-within]:[border-color:var(--border-strong)] [&:focus-within]:[box-shadow:0_0_0_3px_#00000008] max-[760px]:[grid-template-columns:34px_minmax(0,_1fr)_38px]"}
         onClick={(event) => {
           if (event.target === event.currentTarget) editorRef.current?.focus();
         }}
@@ -2273,17 +2260,6 @@ export function Composer(props: {
             </div>
           </div>
         </div>
-        {props.activeRuns.length > 0 ? (
-          <button
-            className={"[width:40px] [height:40px] [border:0] [border-radius:999px] [color:var(--danger)] [background:#dc262612] [&:disabled]:[color:var(--muted)] [&:disabled]:[background:#00000008] [&:disabled]:[opacity:0.55]"}
-            title={t("composer.stopResponses")}
-            aria-label={t("composer.stopResponses")}
-            onClick={cancelActiveRuns}
-            disabled={cancelling}
-          >
-            <Square size={16} />
-          </button>
-        ) : null}
         <button className={"[display:inline-grid] [place-items:center] [border:0] [width:40px] [height:40px] [border-radius:999px] [color:var(--primary-contrast)] [background:var(--primary)] [&:disabled]:[color:var(--muted)] [&:disabled]:[background:#00000008] max-[760px]:[width:38px] max-[760px]:[height:38px]"} aria-label={t("composer.sendMessage")} onClick={send} disabled={sending}>
           {sending ? <Square size={18} /> : <Send size={18} />}
         </button>
@@ -2867,6 +2843,10 @@ function collectMentionTargetsFromEditor(editor: HTMLDivElement | null, particip
       const referenceScope = {
         ...(referenceInsert?.kind === "mention" ? referenceInsert.mention.scope : {}),
       };
+      const iconUrl = element.dataset.mentionIconUrl?.trim();
+      if (iconUrl) {
+        referenceScope.iconUrl = iconUrl;
+      }
       mentions.push(sanitizeMentionTargetForAgentContext({
         participantId: mentionId,
         displayNameSnapshot: label,

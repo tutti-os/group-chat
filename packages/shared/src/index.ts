@@ -442,7 +442,13 @@ export function resolveMentionTargetReferenceScope(
     mention?: { scope?: Readonly<Record<string, string>> };
     scope?: Readonly<Record<string, string>>;
   };
-  return legacyInsert.mention?.scope ?? legacyInsert.scope ?? mention.referenceScope;
+  const insertScope = legacyInsert.mention?.scope ?? legacyInsert.scope;
+  if (!insertScope) return mention.referenceScope;
+  if (!mention.referenceScope) return insertScope;
+  return {
+    ...mention.referenceScope,
+    ...insertScope,
+  };
 }
 
 export function resolveMentionTargetReferenceLabel(

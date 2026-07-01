@@ -26,6 +26,7 @@ export function resolveMentionThumbnailUrl(url: string | null | undefined): stri
   if (
     trimmed.startsWith("http://")
     || trimmed.startsWith("https://")
+    || trimmed.startsWith("tutti://workspace-apps/")
     || trimmed.startsWith("tutti-asset://")
     || trimmed.startsWith("data:")
   ) {

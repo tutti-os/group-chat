@@ -1,5 +1,6 @@
 import type { Artifact, MentionTarget, Participant, RuntimeProfile } from "@group-chat/shared";
 import { isValidElement, type ReactNode } from "react";
+import { openLocalFileInSystem } from "../../../api/client.js";
 import { openAgentGuiProvider } from "../../agent-gui-dispatch.js";
 import {
   resolveAgentGuiProviderFromAppId,
@@ -14,8 +15,23 @@ import {
   parseReferenceMentionHref,
 } from "../../reference-mentions.js";
 import { openReferenceMentionTarget } from "../../reference-mention-open.js";
-import { buildTuttiMentionHref, isOpenableTuttiReferenceProvider } from "../../tutti-bridge.js";
+import { revealArtifactInTuttiFileManager } from "../../artifact-actions.js";
+import {
+  buildTuttiMentionHref,
+  buildTuttiOpenFileRequestForHref,
+  isOpenableTuttiReferenceProvider,
+  localFileHrefToBrowserHref,
+  normalizeLocalFileHref,
+  tryOpenFileInTutti,
+} from "../../tutti-bridge.js";
 import { AgentLauncherMentionChip, PARTICIPANT_MENTION_CLASS, ReferenceMentionChip } from "./reference-mention-chip.js";
+
+const PLAIN_LINK_CLASS = "[color:#2563eb] [text-decoration:underline]";
+const INLINE_CODE_LINK_CLASS = "[border:1px_solid_rgb(226_232_240)] [border-radius:5px] [padding:1px_4px] [color:#1d4ed8] [background:#f1f5f9] [font-family:ui-monospace,_SFMono-Regular,_Menlo,_Monaco,_Consolas,_monospace] [font-size:0.95em] [text-decoration:none] hover:[text-decoration:underline]";
+
+function joinClassName(...parts: Array<string | undefined>) {
+  return parts.filter(Boolean).join(" ");
+}
 
 function resolveMentionMeta(
   href: string,
@@ -63,6 +79,36 @@ function resolveParticipantMentionTarget(
   return participants?.find((item) => item.id === participantId) ?? null;
 }
 
+function normalizeFileLinkCandidate(value: string | undefined) {
+  return value?.replace(/\\/g, "/").trim().replace(/[?#].*$/, "") ?? "";
+}
+
+function findArtifactForLocalFileLink(
+  href: string,
+  label: string,
+  artifacts: Artifact[] | undefined,
+) {
+  const normalizedHref = normalizeFileLinkCandidate(normalizeLocalFileHref(href) ?? href);
+  const normalizedLabel = normalizeFileLinkCandidate(label);
+  if (!normalizedHref && !normalizedLabel) return null;
+  return artifacts?.find((artifact) => {
+    const localPath = normalizeFileLinkCandidate(artifact.localPath);
+    const publicUrl = normalizeFileLinkCandidate(artifact.publicUrl);
+    const filename = normalizeFileLinkCandidate(artifact.filename);
+    return [normalizedHref, normalizedLabel].some((candidate) =>
+      Boolean(
+        candidate
+        && (candidate === artifact.id
+          || candidate === filename
+          || localPath === candidate
+          || localPath.endsWith(`/${candidate}`)
+          || publicUrl === candidate
+          || publicUrl.endsWith(`/${candidate}`)),
+      )
+    );
+  }) ?? null;
+}
+
 function ParticipantMentionLink(props: {
   children?: ReactNode;
   participant: Participant;
@@ -99,6 +145,7 @@ function ParticipantMentionLink(props: {
 export function ReferenceMentionLink(props: {
   href?: string;
   children?: ReactNode;
+  className?: string;
   mentions?: Array<Pick<MentionTarget, "participantId" | "mentionType" | "referenceProviderId" | "referenceEntityId" | "referenceInsert" | "referenceScope">>;
   artifacts?: Artifact[];
   participants?: Participant[];
@@ -131,8 +178,37 @@ export function ReferenceMentionLink(props: {
     );
   }
   if (!isReferenceMentionHref(href)) {
+    const label = referenceLabel(props.children);
+    const linkedArtifact = findArtifactForLocalFileLink(href, label, props.artifacts);
+    const localFileRequest = buildTuttiOpenFileRequestForHref(href, label || undefined, "reveal");
+    const linkHref = linkedArtifact || localFileRequest ? localFileHrefToBrowserHref(href) : href;
+    const openLocalFile = linkedArtifact || localFileRequest
+      ? (event: React.MouseEvent<HTMLAnchorElement>) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (linkedArtifact) {
+            revealArtifactInTuttiFileManager(linkedArtifact);
+            return;
+          }
+          void (async () => {
+            if (!localFileRequest) return;
+            if (await tryOpenFileInTutti(localFileRequest)) return;
+            try {
+              await openLocalFileInSystem(localFileRequest.path);
+            } catch {
+              // The browser's file:// fallback is intentionally suppressed in Tutti WebViews.
+            }
+          })();
+        }
+      : undefined;
     return (
-      <a href={href} target="_blank" rel="noreferrer" className="[color:#2563eb] [text-decoration:underline]">
+      <a
+        href={linkHref}
+        target="_blank"
+        rel="noreferrer"
+        className={joinClassName(props.className ?? PLAIN_LINK_CLASS)}
+        onClick={openLocalFile}
+      >
         {props.children}
       </a>
     );
@@ -229,5 +305,17 @@ export function createReferenceMentionMarkdownComponents(options?: {
         {children}
       </ReferenceMentionLink>
     ),
+    code: ({ children, className }: { children?: ReactNode; className?: string }) => {
+      const label = referenceLabel(children);
+      const isBlock = Boolean(className) || label.includes("\n");
+      if (!isBlock && (normalizeLocalFileHref(label) || /^https?:\/\//i.test(label.trim()))) {
+        return (
+          <ReferenceMentionLink href={label} className={INLINE_CODE_LINK_CLASS}>
+            {children}
+          </ReferenceMentionLink>
+        );
+      }
+      return <code className={className}>{children}</code>;
+    },
   };
 }

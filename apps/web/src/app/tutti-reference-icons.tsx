@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { TuttiAtProviderId } from "@group-chat/shared";
+import { queryTuttiAtMentions, resolveMentionThumbnailUrl } from "./tutti-at-mentions.js";
 
 const PRODUCT_PATH = "M14 1.001a3.4 3.4 0 0 1 2.411.998l3.586 3.586.116.121A3.4 3.4 0 0 1 21 8v12a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V4a3 3 0 0 1 3-3zM8 16a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2zm0-4a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2zm0-4a1 1 0 0 0 0 2h2a1 1 0 1 0 0-2zm6.5-1.5a1 1 0 0 0 1 1h4l-5-5z";
 const DOC_PATH = "M14 1.001a3.4 3.4 0 0 1 2.411.998l3.586 3.586.116.121A3.4 3.4 0 0 1 21 8v12a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V4a3 3 0 0 1 3-3zm.5 5.499a1 1 0 0 0 1 1h4l-5-5z";
@@ -43,19 +44,46 @@ export function TuttiReferenceIcon(props: {
   iconUrl?: string | null;
   className?: string;
 }) {
-  const [failed, setFailed] = useState(false);
-  const iconUrl = props.providerId === "workspace-app" && !failed
-    ? workspaceAppIconUrl(props.appId, props.iconUrl)
+  const explicitIconUrl = props.iconUrl?.trim() || null;
+  const appId = props.appId?.trim() || null;
+  const [resolvedIconUrl, setResolvedIconUrl] = useState<string | null>(explicitIconUrl);
+  const [failedIconUrl, setFailedIconUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    setResolvedIconUrl(explicitIconUrl);
+    setFailedIconUrl(null);
+  }, [explicitIconUrl, appId]);
+
+  useEffect(() => {
+    if (props.providerId !== "workspace-app" || explicitIconUrl || !appId) return;
+    let cancelled = false;
+    void queryTuttiAtMentions({
+      keyword: appId,
+      maxResults: 20,
+      providers: ["workspace-app"],
+    }).then((items) => {
+      if (cancelled) return;
+      const match = items.find((item) => item.providerId === "workspace-app" && item.itemId === appId);
+      const thumbnailUrl = resolveMentionThumbnailUrl(match?.thumbnailUrl);
+      if (thumbnailUrl) setResolvedIconUrl(thumbnailUrl);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [appId, explicitIconUrl, props.providerId]);
+
+  const iconUrl = props.providerId === "workspace-app"
+    ? workspaceAppIconUrl(appId, resolvedIconUrl)
     : null;
 
-  if (iconUrl) {
+  if (iconUrl && iconUrl !== failedIconUrl) {
     return (
       <img
         src={iconUrl}
         alt=""
         className={props.className ?? "[width:14px] [height:14px] [border-radius:3px] [object-fit:cover]"}
         draggable={false}
-        onError={() => setFailed(true)}
+        onError={() => setFailedIconUrl(iconUrl)}
       />
     );
   }

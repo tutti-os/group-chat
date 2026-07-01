@@ -24,13 +24,21 @@ import { buildEffectiveRoleDescription } from "../domains/agent-instructions.js"
 import { participantWorkspaceRoot } from "../local/paths.js";
 import { enrichLocalAgentProviderStatus } from "./local-agent-config-catalog.js";
 import { acpPromptFromLocalAgentInput } from "./local-agent-acp.js";
-import { isRecoverableResumeError } from "./local-agent-resume-errors.js";
-import { buildLocalAgentInput, decodeLocalAgentStdout, localToolBaseUrl, stripGeneratedReplyQuoteMarkers } from "./local-agent-protocol.js";
+import { isContextWindowError, isRecoverableResumeError } from "./local-agent-resume-errors.js";
+import {
+  buildLocalAgentInput,
+  decodeLocalAgentStdout,
+  isWorkspaceAppOnlyTaskMessage,
+  localToolBaseUrl,
+  stripGeneratedReplyQuoteMarkers,
+} from "./local-agent-protocol.js";
 import type { RuntimeProvider, RuntimeReplyContext, RuntimeStreamEvent } from "./runtime-provider.js";
 import { RuntimeProviderUnsupportedError } from "./runtime-provider.js";
 import { buildLocalAgentProcessEnv } from "./local-agent-env.js";
 
 type GroupChatLocalAgentProviderPlugin = LocalAgentProviderPlugin<"local-agent", string>;
+const DEFAULT_KIT_HISTORY_LIMIT = 16;
+const COMPACT_KIT_HISTORY_LIMIT = 4;
 
 type TuttiAgentProviderStatus = {
   provider: string;
@@ -301,9 +309,12 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
           }
         : { mode: "fresh" as const };
       let canRetryFresh = resume.mode !== "fresh";
+      let canRetryCompactContext = provider === "codex";
+      let historyLimit = DEFAULT_KIT_HISTORY_LIMIT;
       let canRetryWithoutUserSkills = provider === "codex";
       let skillFallbackEnv: Record<string, string> | undefined;
       let emittedNonRetryableEvent = false;
+      let emittedContextRetryBlockingEvent = false;
       while (true) {
         try {
           for await (const event of this.localAgentRuntime.run({
@@ -316,7 +327,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
             cwd: workspaceRoot,
             prompt,
             systemPrompt: joinPromptParts(skillContext.recommendedSystemPrompt?.content, buildKitSystemPrompt(context)),
-            history: buildKitHistory(context),
+            history: buildKitHistory(context, historyLimit),
             model: stripLocalAgentProviderPrefix(context.runtimeProfile?.model ?? "default", provider),
             reasoning: context.participant.reasoningEffort ?? undefined,
             mcpServers: buildGroupChatMcpServers(context),
@@ -332,6 +343,13 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
             if (runtimeEvent) {
               if (runtimeEvent.type !== "status" && runtimeEvent.type !== "stderr") {
                 emittedNonRetryableEvent = true;
+              }
+              if (
+                runtimeEvent.type !== "status"
+                && runtimeEvent.type !== "stderr"
+                && runtimeEvent.type !== "thinking_delta"
+              ) {
+                emittedContextRetryBlockingEvent = true;
               }
               yield runtimeEvent;
             } else if (event.type === "error") {
@@ -367,6 +385,15 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
             canRetryFresh = false;
             continue;
           }
+          if (canRetryCompactContext && !emittedContextRetryBlockingEvent && isContextWindowError(error)) {
+            sessionStore.remove(context.conversation.id);
+            resume = { mode: "fresh" as const };
+            canRetryFresh = false;
+            canRetryCompactContext = false;
+            historyLimit = COMPACT_KIT_HISTORY_LIMIT;
+            yield { type: "thinking_delta" as const, text: `${CONTEXT_WINDOW_FRESH_RETRY_NOTICE}\n` };
+            continue;
+          }
           throw error;
         }
       }
@@ -377,6 +404,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
 }
 
 const SKILL_LOAD_FALLBACK_NOTICE = "检测到用户级 skill 元数据损坏，已临时隔离用户级 skills 并自动重试。";
+const CONTEXT_WINDOW_FRESH_RETRY_NOTICE = "检测到 Codex 上下文窗口已满，已自动开启新线程并减少历史上下文重试。";
 
 class LocalAgentCommandError extends Error {
   constructor(message: string, readonly emittedOutput: boolean) {
@@ -806,6 +834,7 @@ export function buildKitSystemPrompt(context: RuntimeReplyContext) {
   const rules = context.conversation.collaborationRules.trim();
   const roleDescription = buildEffectiveRoleDescription(context.participant, context.identity);
   const mentionAll = isMentionAllTrigger(context.userMessage.mentions);
+  const workspaceAppOnlyDispatch = isWorkspaceAppOnlyTaskMessage(context);
   return [
     "You are a local agent participant inside an IM group chat.",
     "Read AGENTS.md, IDENTITY.md, SOUL.md, MEMORY.md, and DISTILLED_CONTEXT.md in your workspace before relying on memory.",
@@ -824,6 +853,9 @@ export function buildKitSystemPrompt(context: RuntimeReplyContext) {
       : null,
     context.conversation.type === "group" && context.participant.listenMode === "passive"
       ? "In passive group listen mode, reply only when directly mentioned or explicitly assigned work; otherwise output [NO_REPLY]."
+      : null,
+    workspaceAppOnlyDispatch
+      ? "This run was triggered by a Tutti workspace app mention without an agent mention. Treat it as explicitly assigned work for you as the app dispatcher; do not output [NO_REPLY] merely because your participant name was not mentioned."
       : null,
     "Use the group-chat MCP tools for run-scoped room context, artifacts, sending side messages, and saving artifacts.",
     "When the message mentions both you and a Tutti workspace app reference, interpret it as: the user wants you to use that referenced app to complete the remaining request. Keep the workspace-app mention as structured context; do not turn the visible app label into a guessed shell command.",
@@ -872,11 +904,11 @@ function tuttiCliEnv(): Record<string, string> {
   return command ? { TUTTI_CLI: command, GROUP_CHAT_TUTTI_CLI: command } : {};
 }
 
-function buildKitHistory(context: RuntimeReplyContext): AgentRunMessage[] {
+function buildKitHistory(context: RuntimeReplyContext, limit = DEFAULT_KIT_HISTORY_LIMIT): AgentRunMessage[] {
   return context.recentMessages
     .filter((message) => message.id !== context.userMessage.id)
     .filter((message) => message.status === "success" && message.content.trim())
-    .slice(-16)
+    .slice(-limit)
     .map((message) => ({
       role: message.role === "assistant" ? "assistant" : message.role === "system" ? "system" : "user",
       content: formatHistoryMessage(message),
@@ -895,8 +927,84 @@ function stripLocalAgentProviderPrefix(model: string, provider: string) {
 
 function createGroupChatLocalAgentProviderPlugins(): GroupChatLocalAgentProviderPlugin[] {
   return createDefaultLocalAgentProviderPlugins().map((provider) =>
-    provider.id === "claude" ? withGroupChatClaudeStreamCompatibility(provider) : provider,
+    provider.id === "claude"
+      ? withGroupChatClaudeStreamCompatibility(provider)
+      : provider.id === "codex"
+        ? withGroupChatCodexStreamCompatibility(provider)
+        : provider,
   ) as GroupChatLocalAgentProviderPlugin[];
+}
+
+function withGroupChatCodexStreamCompatibility(
+  provider: GroupChatLocalAgentProviderPlugin,
+): GroupChatLocalAgentProviderPlugin {
+  const baseCreateAdapter = provider.createAdapter;
+  return {
+    ...provider,
+    createAdapter: baseCreateAdapter
+      ? () => {
+          const adapter = baseCreateAdapter();
+          return {
+            ...adapter,
+            parseEvents(stream) {
+              return normalizeCodexAgentEventsForGroupChat(adapter.parseEvents(stream));
+            },
+          };
+        }
+      : undefined,
+    async *run(params) {
+      yield* normalizeCodexAgentEventsForGroupChat(provider.run(params));
+    },
+  };
+}
+
+async function* normalizeCodexAgentEventsForGroupChat(stream: AsyncIterable<AgentEvent>): AsyncIterable<AgentEvent> {
+  for await (const event of stream) {
+    if ((event.type === "text_delta" || event.type === "thinking" || event.type === "thinking_delta") && event.text) {
+      yield* splitTaggedReasoningEvent(event);
+      continue;
+    }
+    yield event;
+  }
+}
+
+function* splitTaggedReasoningEvent(
+  event: Extract<AgentEvent, { type: "text_delta" | "thinking" | "thinking_delta" }>,
+): Generator<AgentEvent> {
+  const parts = splitTaggedReasoningText(event.text);
+  if (parts.length === 0) {
+    yield event;
+    return;
+  }
+  let emitted = false;
+  for (const part of parts) {
+    if (!part.text) continue;
+    emitted = true;
+    yield {
+      type: part.kind === "reasoning"
+        ? "thinking_delta"
+        : event.type === "thinking" ? "thinking_delta" : event.type,
+      text: part.text,
+    };
+  }
+  if (!emitted) yield event;
+}
+
+function splitTaggedReasoningText(text: string) {
+  if (!/<reasoning>[\s\S]*?<\/reasoning>/i.test(text)) return [];
+  const parts: Array<{ kind: "reasoning" | "text"; text: string }> = [];
+  let cursor = 0;
+  for (const match of text.matchAll(/<reasoning>([\s\S]*?)<\/reasoning>/gi)) {
+    const index = match.index ?? 0;
+    const before = text.slice(cursor, index);
+    if (before) parts.push({ kind: "text", text: before });
+    const reasoning = match[1]?.trim();
+    if (reasoning) parts.push({ kind: "reasoning", text: reasoning });
+    cursor = index + match[0].length;
+  }
+  const after = text.slice(cursor);
+  if (after) parts.push({ kind: "text", text: after });
+  return parts;
 }
 
 function withGroupChatClaudeStreamCompatibility(

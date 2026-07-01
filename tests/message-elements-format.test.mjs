@@ -74,6 +74,65 @@ test("file references remain structured when forwarding to Tutti Agent", async (
   assert.equal(formatMessageBodyForAgentForward(content), content);
 });
 
+test("workspace app mention chips keep their app icon url when serialized", async () => {
+  const { serializeReferenceMentionChip } = await bundleModule(
+    "src/app/reference-mentions.ts",
+    "reference-mentions-icon",
+  );
+  const markdown = serializeReferenceMentionChip({
+    dataset: {
+      mentionReferenceProvider: "workspace-app",
+      mentionId: "tutti-at:workspace-app:vibe-design",
+      mentionLabel: "产品原型设计",
+      mentionReferenceEntityId: "vibe-design",
+      mentionReferenceInsert: JSON.stringify({
+        kind: "mention",
+        mention: {
+          entityId: "vibe-design",
+          label: "产品原型设计",
+          scope: { workspaceId: "workspace-1" },
+        },
+      }),
+      mentionIconUrl: "/local-assets/app-icon",
+    },
+    textContent: "产品原型设计",
+  });
+
+  assert.equal(
+    markdown,
+    "[产品原型设计](mention://workspace-app/vibe-design?workspaceId=workspace-1&iconUrl=%2Flocal-assets%2Fapp-icon)",
+  );
+});
+
+test("reference mention preview collapse keeps long mention hrefs intact", async () => {
+  const {
+    collapseReferenceMentionsForPreview,
+    flattenReferenceMentionsToPlainText,
+  } = await bundleModule(
+    "src/app/reference-mentions.ts",
+    "reference-mentions-preview-collapse",
+  );
+  const href = `mention://workspace-app/vibe-design?workspaceId=workspace-1&iconUrl=${encodeURIComponent(`data:image/png;base64,${"A".repeat(1200)}`)}`;
+  const content = `[产品原型设计](${href})`;
+
+  assert.equal(flattenReferenceMentionsToPlainText(content), "产品原型设计");
+  assert.equal(collapseReferenceMentionsForPreview(content, 8), content);
+});
+
+test("reference mention preview collapse truncates text without breaking mention hrefs", async () => {
+  const { collapseReferenceMentionsForPreview } = await bundleModule(
+    "src/app/reference-mentions.ts",
+    "reference-mentions-preview-mixed-collapse",
+  );
+  const href = "mention://workspace-app/vibe-design?workspaceId=workspace-1&iconUrl=data%3Aimage%2Fpng%3Bbase64%2CAAAA";
+  const content = `请看 [产品原型设计](${href}) 后面的很长很长的说明文字`;
+
+  assert.equal(
+    collapseReferenceMentionsForPreview(content, 12),
+    `请看 [产品原型设计](${href}) 后面...`,
+  );
+});
+
 test("group files collapse repeated artifact aliases by content hash", async () => {
   const { filterGroupChatFiles } = await bundleModule(
     "src/app/artifact-actions.ts",
@@ -207,4 +266,111 @@ test("tool summaries count mixed successes and failures without marking the grou
   assert.equal(summary[0].count, 7);
   assert.equal(summary[0].status, "success");
   assert.deepEqual(summary[0].stats, { successCount: 6, failedCount: 1, runningCount: 0 });
+});
+
+test("completed message process does not keep stale streaming indicators", async () => {
+  const { collectMessageProcess, compactToolExecutionSections } = await bundleModule(
+    "src/app/agent-thinking.ts",
+    "agent-thinking-completed-process",
+  );
+  const message = {
+    id: "message-1",
+    conversationId: "conversation-1",
+    role: "assistant",
+    content: "done",
+    status: "success",
+    runId: "run-1",
+  };
+  const sections = collectMessageProcess(
+    message,
+    [{
+      id: "reasoning-1",
+      messageId: "message-1",
+      type: "reasoning",
+      content: "finished reasoning",
+      status: "streaming",
+      sortOrder: 0,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    }],
+    [runEvent("call-1", "tool_call", "streaming")],
+    [{
+      id: "run-1",
+      assistantMessageId: "message-1",
+      status: "completed",
+    }],
+  );
+  const summary = compactToolExecutionSections(sections);
+
+  assert.equal(sections[0].kind, "reasoning");
+  assert.equal(sections[0].streaming, false);
+  assert.equal(summary.at(-1).kind, "tool_summary");
+  assert.equal(summary.at(-1).status, "success");
+  assert.deepEqual(summary.at(-1).stats, { successCount: 1, failedCount: 0, runningCount: 0 });
+});
+
+test("inactive open process keeps tool calls without showing stale streaming", async () => {
+  const { collectMessageProcess, compactToolExecutionSections } = await bundleModule(
+    "src/app/agent-thinking.ts",
+    "agent-thinking-inactive-process",
+  );
+  const message = {
+    id: "message-1",
+    conversationId: "conversation-1",
+    role: "assistant",
+    content: "done",
+    status: "streaming",
+    runId: "run-1",
+  };
+  const sections = collectMessageProcess(
+    message,
+    [{
+      id: "reasoning-1",
+      messageId: "message-1",
+      type: "reasoning",
+      content: "finished reasoning",
+      status: "streaming",
+      sortOrder: 0,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    }],
+    [runEvent("call-1", "tool_call", "streaming", { toolName: "exec_command", input: { cmd: "pnpm test" } })],
+    [{
+      id: "run-1",
+      assistantMessageId: "message-1",
+      status: "running",
+    }],
+    { forceSettled: true },
+  );
+  const summary = compactToolExecutionSections(sections);
+
+  assert.equal(sections[0].kind, "reasoning");
+  assert.equal(sections[0].streaming, false);
+  assert.equal(summary.at(-1).kind, "tool_summary");
+  assert.equal(summary.at(-1).count, 1);
+  assert.equal(summary.at(-1).events[0].event.metadata.toolName, "exec_command");
+  assert.equal(summary.at(-1).events[0].displayStatus, "success");
+});
+
+test("thinking markdown formatter splits dense process text into paragraphs", async () => {
+  const { formatThinkingMarkdown } = await bundleModule(
+    "src/app/components/chat/AgentThinkingPanel.tsx",
+    "agent-thinking-panel-format",
+  );
+  const formatted = formatThinkingMarkdown(
+    "我会按代码修改来处理： 先读本地规则和相关 skill，然后定位 agent-chat 的消息渲染/mention chip 代码，确认要改的是链接点击还是顺手把应用 icon 一并修掉。 agent-codex 这里是提及我来改代码，不需要启动另一个 Codex 会话。 我先定位仓库和现有渲染实现，然后按现有模式小范围修复。",
+  );
+
+  const paragraphs = formatted.split(/\n{2,}/).filter(Boolean);
+  assert.ok(paragraphs.length >= 4, formatted);
+  assert.equal(paragraphs[0], "我会按代码修改来处理：");
+  assert.ok(paragraphs.some((paragraph) => paragraph.startsWith("然后定位 agent-chat")));
+});
+
+test("thinking markdown formatter removes empty fenced code blocks", async () => {
+  const { formatThinkingMarkdown } = await bundleModule(
+    "src/app/components/chat/AgentThinkingPanel.tsx",
+    "agent-thinking-panel-empty-fence",
+  );
+  const formatted = formatThinkingMarkdown("开始\n\n```\n\n```\n\n~~~json\n   \n~~~\n\n结束");
+
+  assert.equal(formatted, "开始\n\n结束");
 });

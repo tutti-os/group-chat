@@ -25,6 +25,35 @@ export interface TuttiWorkspaceReferenceOpenRequest {
   href: string;
 }
 
+const LOCAL_FILE_LINK_EXTENSIONS = new Set([
+  ".css",
+  ".csv",
+  ".gif",
+  ".htm",
+  ".html",
+  ".jpeg",
+  ".jpg",
+  ".js",
+  ".json",
+  ".jsx",
+  ".log",
+  ".md",
+  ".mjs",
+  ".mov",
+  ".mp4",
+  ".pdf",
+  ".png",
+  ".svg",
+  ".ts",
+  ".tsx",
+  ".txt",
+  ".webm",
+  ".webp",
+  ".xml",
+  ".yaml",
+  ".yml",
+]);
+
 export interface TuttiWorkspaceAppContext {
   get?(): Promise<{ workspaceId?: string; locale?: string; language?: string }>;
   subscribe?(listener: (context: { workspaceId?: string; locale?: string; language?: string } | null) => void): () => void;
@@ -152,10 +181,17 @@ export function tryOpenFileInTuttiSync(input: TuttiWorkspaceAppOpenFileRequest):
 export async function tryOpenFileInTutti(
   input: TuttiWorkspaceAppOpenFileRequest,
 ): Promise<boolean> {
-  if (tryOpenFileInTuttiSync(input)) {
-    return true;
+  const bridge = window.tuttiExternal;
+  if (!bridge?.files?.open) {
+    return false;
   }
-  return false;
+
+  try {
+    await bridge.files.open(input);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function tryOpenReferenceInTuttiSync(input: TuttiWorkspaceReferenceOpenRequest): boolean {
@@ -270,6 +306,102 @@ export async function tryOpenTuttiReferenceMention(
 
 export function normalizeFilePathForBridge(path: string): string {
   return path.replace(/\\/g, "/").trim();
+}
+
+function decodeUriSafe(value: string) {
+  try {
+    return decodeURI(value);
+  } catch {
+    return value;
+  }
+}
+
+function extensionOfPath(path: string) {
+  const cleanPath = path.split(/[?#]/, 1)[0] ?? path;
+  const filename = cleanPath.split("/").pop() ?? "";
+  const dotIndex = filename.lastIndexOf(".");
+  return dotIndex > 0 ? filename.slice(dotIndex).toLowerCase() : "";
+}
+
+function hasKnownLocalFileExtension(path: string) {
+  return LOCAL_FILE_LINK_EXTENSIONS.has(extensionOfPath(path));
+}
+
+export function normalizeLocalFileHref(href: string): string | null {
+  const trimmed = href.trim();
+  if (!trimmed) return null;
+
+  if (/^file:\/\//i.test(trimmed)) {
+    try {
+      const url = new URL(trimmed);
+      const path = normalizeFilePathForBridge(decodeURIComponent(url.pathname));
+      return path && hasKnownLocalFileExtension(path) ? path : null;
+    } catch {
+      return null;
+    }
+  }
+
+  const normalized = normalizeFilePathForBridge(decodeUriSafe(trimmed));
+  if (!normalized || normalized.startsWith("#") || normalized.startsWith("?")) return null;
+  if (/\s|[`<>"'|]/.test(normalized)) return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(normalized) && !/^[A-Za-z]:\//.test(normalized)) return null;
+  if (!hasKnownLocalFileExtension(normalized)) return null;
+
+  if (normalized.startsWith("/") || /^[A-Za-z]:\//.test(normalized)) {
+    return normalized;
+  }
+  if (
+    normalized.startsWith("./")
+    || normalized.startsWith("../")
+    || normalized.includes("/")
+    || /^[\w@.-]+\.[A-Za-z0-9]+$/.test(normalized)
+  ) {
+    return normalized;
+  }
+  return null;
+}
+
+export function localFileHrefToBrowserHref(href: string) {
+  const path = normalizeLocalFileHref(href);
+  if (!path) return href;
+  if (path.startsWith("/") || /^[A-Za-z]:\//.test(path)) {
+    const normalizedPath = /^[A-Za-z]:\//.test(path) ? `/${path}` : path;
+    return `file://${encodeURI(normalizedPath)}`;
+  }
+  return path;
+}
+
+export function buildTuttiOpenFileRequestForHref(
+  href: string,
+  label?: string,
+  mode: TuttiWorkspaceAppOpenFileRequest["mode"] = "reveal",
+): TuttiWorkspaceAppOpenFileRequest | null {
+  const path = normalizeLocalFileHref(href);
+  if (!path) return null;
+
+  const appDataPath = extractAppDataRelativePath(path);
+  const name = label?.trim() || path.split("/").pop() || path;
+  if (appDataPath) {
+    return {
+      path: appDataPath,
+      location: { type: "app-data-relative", path: appDataPath },
+      name,
+      mode,
+    };
+  }
+  if (path.startsWith("/") || /^[A-Za-z]:\//.test(path)) {
+    return {
+      path,
+      name,
+      mode,
+    };
+  }
+  return {
+    path,
+    location: { type: "workspace-relative", path },
+    name,
+    mode,
+  };
 }
 
 export function isWorkspaceAppDataAbsolutePath(localPath: string): boolean {

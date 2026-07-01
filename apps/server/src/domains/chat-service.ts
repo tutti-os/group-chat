@@ -56,7 +56,7 @@ import {
   shouldImportRunFileArtifactPath,
 } from "./run-file-artifacts.js";
 import { participantWorkspaceRoot, roomArtifactRoot } from "../local/paths.js";
-import { NO_REPLY_MARKER } from "../runtimes/local-agent-protocol.js";
+import { isWorkspaceAppOnlyTaskMessage, NO_REPLY_MARKER } from "../runtimes/local-agent-protocol.js";
 import { createRuntimeProviderRegistry } from "../runtimes/runtime-registry.js";
 import { RuntimeProviderUnsupportedError, type RuntimeReplyContext, type RuntimeStreamEvent } from "../runtimes/runtime-provider.js";
 import { EventHub } from "../ws/event-hub.js";
@@ -496,16 +496,17 @@ export class ChatService {
     }
 
     const mentions = message.mentions;
+    const workspaceAppOnlyDispatch = isWorkspaceAppOnlyTaskMessage({ userMessage: { content, mentions } });
     const targets = this.resolveTargets(conversation, mentions, content);
     this.materializeParticipants(conversation, targets);
     void this.generateReplies(conversation.roomId, conversationId, message, targets, {
       currentRound: 1,
       maxRounds: input.maxReplyRounds
         ? clampInteger(input.maxReplyRounds, 1, 8)
-        : maxReplyRoundsForTrigger(conversation, mentions),
+        : workspaceAppOnlyDispatch ? 1 : maxReplyRoundsForTrigger(conversation, mentions),
       order: resolveReplySpeakingOrder(conversation, mentions),
       seenParticipantIds: new Set(targets.map((participant) => participant.id)),
-      mentionScoped: isParticipantMentionScoped(message.mentions),
+      mentionScoped: workspaceAppOnlyDispatch || isParticipantMentionScoped(message.mentions),
     });
     return { message, blocks, artifacts, targets };
   }
@@ -647,13 +648,16 @@ export class ChatService {
         payload: { block: result.block },
       });
     }
+    const workspaceAppOnlyDispatch = isWorkspaceAppOnlyTaskMessage({
+      userMessage: { content: result.message.content, mentions: result.message.mentions },
+    });
     const targets = this.resolveTargets(conversation, result.message.mentions, result.message.content);
     void this.generateReplies(conversation.roomId, conversation.id, result.message, targets, {
       currentRound: 1,
-      maxRounds: maxReplyRoundsForTrigger(conversation, result.message.mentions),
+      maxRounds: workspaceAppOnlyDispatch ? 1 : maxReplyRoundsForTrigger(conversation, result.message.mentions),
       order: resolveReplySpeakingOrder(conversation, result.message.mentions),
       seenParticipantIds: new Set(targets.map((participant) => participant.id)),
-      mentionScoped: isParticipantMentionScoped(result.message.mentions),
+      mentionScoped: workspaceAppOnlyDispatch || isParticipantMentionScoped(result.message.mentions),
     });
     return {
       message: result.message,
@@ -1000,6 +1004,8 @@ export class ChatService {
       .listParticipants(conversation.id)
       .filter((participant) => participant.kind === "ai" && participant.status === "active");
     if (mentions.some((mention) => mention.mentionType === "all")) return [];
+    const workspaceAppOnlyTarget = this.resolveWorkspaceAppOnlyDispatchTarget(conversation, mentions, userText);
+    if (workspaceAppOnlyTarget) return [workspaceAppOnlyTarget];
     const mentionedIds = new Set(mentions.map((mention) => mention.participantId));
     if (mentionedIds.size > 0) {
       const targets = activeAi.filter((participant) => mentionedIds.has(participant.id));
@@ -1013,6 +1019,26 @@ export class ChatService {
     }
     if (conversation.replyPolicy.mode === "mentioned" || conversation.replyPolicy.mode === "selected") return [];
     return activeAi.filter((participant) => shouldAutoReply(participant, userText));
+  }
+
+  private resolveWorkspaceAppOnlyDispatchTarget(
+    conversation: Conversation,
+    mentions: NonNullable<SendMessageRequest["mentions"]>,
+    userText: string,
+  ) {
+    if (!isWorkspaceAppOnlyTaskMessage({ userMessage: { content: userText, mentions } })) return null;
+    const runtimeProfile =
+      this.repo.getRuntimeProfile("local-agent:codex")
+      ?? this.repo.getRuntimeProfile("local-agent:claude");
+    if (runtimeProfile?.kind !== "local-agent" || !runtimeProfile.enabled) return null;
+    const appMention = mentions.find((mention) =>
+      mention.mentionType === "reference"
+      && mention.referenceProviderId === "workspace-app"
+      && mention.referenceEntityId?.trim()
+    );
+    const displayName =
+      appMention ? resolveMentionTargetReferenceLabel(appMention) || appMention.displayNameSnapshot.trim() : "";
+    return createVirtualTuttiAgentParticipant(conversation, runtimeProfile, displayName || defaultTuttiAgentParticipantName(runtimeProfile.provider));
   }
 
   private async generateReplies(
@@ -1300,6 +1326,7 @@ export class ChatService {
       runEventId: null as string | null,
       reasoningBlockId: null as string | null,
       content: "",
+      hasExplicitThinking: false,
     };
     if (!preacceptedRun) {
       this.events.emit({
@@ -1473,13 +1500,16 @@ export class ChatService {
       if (event.type === "text_delta") {
         if (deferAssistantTextToThinking) {
           deferredAssistantText += event.text;
-          appendThinking(event.text);
+          if (!thinkingState.hasExplicitThinking) {
+            appendThinking(event.text);
+          }
           return;
         }
         emitToken(event.text);
         return;
       }
       if (event.type === "thinking_delta") {
+        thinkingState.hasExplicitThinking = true;
         appendThinking(event.text);
         return;
       }
@@ -1648,7 +1678,7 @@ export class ChatService {
     });
     const finalContent = linkRunFileArtifactPathsInContent(enrichedReply.content, runFileArtifacts);
     const finalBlock = this.repo.updateMessageBlock(visibleReply.block.id, { content: finalContent, status: "success" });
-    if (deferAssistantTextToThinking) {
+    if (deferAssistantTextToThinking && !thinkingState.hasExplicitThinking) {
       thinkingState.content = extractLocalAgentThinking(deferredAssistantText, finalVisibleOutput);
     }
     appendThinking("", true);

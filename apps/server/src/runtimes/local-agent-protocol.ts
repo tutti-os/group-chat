@@ -67,6 +67,8 @@ export interface LocalAgentInput {
 
 export type LocalAgentOutputEvent =
   | { type: "text_delta"; text: string }
+  | { type: "thinking_delta"; text: string }
+  | { type: "thinking"; text: string }
   | { type: "final_text"; text: string }
   | { type: "no_reply"; reason?: string }
   | { type: "error"; message: string };
@@ -116,7 +118,7 @@ export function buildLocalAgentInput(context: RuntimeReplyContext): LocalAgentIn
       noReplyMarker: NO_REPLY_MARKER,
       stdout: {
         text: "Plain stdout is treated as assistant text.",
-        jsonl: ["text_delta", "final_text", "no_reply", "error"],
+        jsonl: ["text_delta", "thinking_delta", "thinking", "final_text", "no_reply", "error"],
       },
     },
   };
@@ -145,10 +147,14 @@ export function resolveWorkspaceAppIntent(
   const addressed = context.userMessage.mentions.some((mention) =>
     mention.mentionType === "participant" && mention.participantId === context.participant.id,
   );
-  if (!addressed && !context.userMessage.mentions.some((mention) => mention.mentionType === "all")) return null;
+  const appOnlyDispatch = isWorkspaceAppOnlyTaskMessage(context, content);
+  if (!addressed && !context.userMessage.mentions.some((mention) => mention.mentionType === "all") && !appOnlyDispatch) return null;
 
   const requestText = stripLeadingIntentMentions(stripGeneratedReplyQuoteMarkers(content), context);
   const appLabels = workspaceApps.map((app) => `${app.label} (${app.appId})`).join(", ");
+  const openingInstruction = appOnlyDispatch
+    ? `The user selected workspace app(s): ${appLabels}, without mentioning a participant. This run was started by the app-only dispatch rule; treat it as an explicit assignment to complete the remaining request through the referenced workspace app(s).`
+    : `The user addressed ${context.participant.displayName} and referenced workspace app(s): ${appLabels}.`;
   return {
     addressedAgent: {
       participantId: context.participant.id,
@@ -157,7 +163,7 @@ export function resolveWorkspaceAppIntent(
     requestText,
     workspaceApps,
     instruction: [
-      `The user addressed ${context.participant.displayName} and referenced workspace app(s): ${appLabels}.`,
+      openingInstruction,
       `Interpret the remaining request as: ${requestText || "(empty request)"}.`,
       "Handle the referenced workspace app through the injected Tutti workspace-app skill or available Tutti CLI/app workflow. Do not assume the Group Chat host has already started or will start a separate direct app run.",
       "Do not treat the app label as a generic design keyword, Figma document, shell command, or MCP server name.",
@@ -168,11 +174,27 @@ export function resolveWorkspaceAppIntent(
   };
 }
 
+export function isWorkspaceAppOnlyTaskMessage(
+  context: { userMessage: Pick<RuntimeReplyContext["userMessage"], "content" | "mentions"> },
+  content = context.userMessage.content,
+) {
+  const mentions = context.userMessage.mentions;
+  if (!mentions.length) return false;
+  if (mentions.some((mention) => mention.mentionType === "participant" || mention.mentionType === "all")) return false;
+  if (mentions.some((mention) => mention.mentionType !== "reference" || mention.referenceProviderId !== "workspace-app")) return false;
+  if (!mentions.some((mention) => mention.referenceEntityId?.trim())) return false;
+  const requestText = stripLeadingIntentMentions(stripGeneratedReplyQuoteMarkers(content), context);
+  return Boolean(requestText.trim());
+}
+
 export function stripGeneratedReplyQuoteMarkers(content: string) {
   return content.replace(/^[ \t]*>\s?(?=(?:回复|Reply)\s+[^:：]+[:：])/gim, "");
 }
 
-function stripLeadingIntentMentions(content: string, context: RuntimeReplyContext) {
+function stripLeadingIntentMentions(
+  content: string,
+  context: { userMessage: Pick<RuntimeReplyContext["userMessage"], "mentions"> },
+) {
   let result = content.trim();
   const mentionLabels = context.userMessage.mentions
     .filter((mention) => mention.mentionType === "participant" || mention.referenceProviderId === "workspace-app")
@@ -223,10 +245,17 @@ export async function* decodeLocalAgentStdout(stream: AsyncIterable<string | Buf
   if (buffer) yield* decodeLocalAgentLine(buffer, false);
 }
 
-function* decodeLocalAgentLine(line: string, hadNewline: boolean): Generator<string> {
+function* decodeLocalAgentLine(
+  line: string,
+  hadNewline: boolean,
+): Generator<string | { type: "thinking_delta"; text: string }> {
   const event = parseLocalAgentOutputEvent(line);
   if (!event) {
     yield hadNewline ? `${line}\n` : line;
+    return;
+  }
+  if (event.type === "thinking_delta" || event.type === "thinking") {
+    yield { type: "thinking_delta", text: event.text };
     return;
   }
   if (event.type === "text_delta" || event.type === "final_text") {
@@ -246,6 +275,8 @@ function parseLocalAgentOutputEvent(line: string): LocalAgentOutputEvent | null 
   try {
     const parsed = JSON.parse(trimmed) as Partial<LocalAgentOutputEvent>;
     if (parsed.type === "text_delta" && typeof parsed.text === "string") return parsed as LocalAgentOutputEvent;
+    if (parsed.type === "thinking_delta" && typeof parsed.text === "string") return parsed as LocalAgentOutputEvent;
+    if (parsed.type === "thinking" && typeof parsed.text === "string") return parsed as LocalAgentOutputEvent;
     if (parsed.type === "final_text" && typeof parsed.text === "string") return parsed as LocalAgentOutputEvent;
     if (parsed.type === "no_reply") return { type: "no_reply", reason: typeof parsed.reason === "string" ? parsed.reason : undefined };
     if (parsed.type === "error" && typeof parsed.message === "string") return parsed as LocalAgentOutputEvent;

@@ -37,7 +37,7 @@ import {
 } from "../../chat-links.js";
 import { collectImageFileArtifactsForMessages, resolveArtifactsByIds } from "../../message-artifacts.js";
 import { hasTimelineMessages, isTimelineMessageRemoved } from "../../message-timeline-state.js";
-import { enrichContentWithParticipantMentions, enrichContentWithReferenceMentions } from "../../reference-mentions.js";
+import { collapseReferenceMentionsForPreview, enrichContentWithParticipantMentions, enrichContentWithReferenceMentions, flattenReferenceMentionsToPlainText } from "../../reference-mentions.js";
 import { MessageReferenceContent } from "./MessageReferenceContent.js";
 import { isMessageGroupBreak, MESSAGE_GROUP_IDLE_MS } from "../../message-group-breaks.js";
 import { attachmentLabel, t, translateAgentError, translateSystemNotice, useTranslation } from "../../i18n/index.js";
@@ -2381,21 +2381,17 @@ function BulkMessageToolbar(props: {
       role="toolbar"
       aria-label={t("messageActions.bulkToolbar")}
     >
-      <div className={"[display:flex] [width:100%] [min-width:0] [align-items:center] [gap:10px] [overflow-x:auto] [border:1px_solid_rgb(226_232_240_/_92%)] [border-radius:22px] [padding:8px_10px_8px_12px] [background:rgb(255_255_255_/_86%)] [box-shadow:0_18px_54px_rgb(15_23_42_/_13%),_inset_0_1px_0_rgb(255_255_255_/_92%)] max-[760px]:[gap:7px] max-[760px]:[border-radius:18px] max-[760px]:[padding:7px]"}>
-        <span className={"[display:inline-flex] [flex-shrink:0] [align-items:center] [gap:7px] [border:1px_solid_rgb(37_99_235_/_14%)] [border-radius:999px] [padding:7px_11px] [color:#1d4ed8] [background:#eff6ff] [font-size:13px] [font-weight:800] [letter-spacing:-0.01em] [white-space:nowrap]"}>
-          <CheckSquare size={15} strokeWidth={2.2} />
-          {t("messageActions.selectedCount", { count: props.count })}
-        </span>
-        <span className={"[display:flex] [flex-shrink:0] [align-items:center] [gap:6px] [border-left:1px_solid_rgb(226_232_240)] [padding-left:10px] max-[760px]:[padding-left:7px]"}>
+      <div className={"[display:flex] [width:100%] [min-width:0] [align-items:center] [gap:10px] [overflow-x:auto] [border:1px_solid_rgb(226_232_240_/_92%)] [border-radius:22px] [padding:8px_10px] [background:rgb(255_255_255_/_86%)] [box-shadow:0_18px_54px_rgb(15_23_42_/_13%),_inset_0_1px_0_rgb(255_255_255_/_92%)] max-[760px]:[gap:7px] max-[760px]:[border-radius:18px] max-[760px]:[padding:7px]"}>
+        <span className={"[display:flex] [flex-shrink:0] [align-items:center] [gap:7px]"}>
           <ToolbarButton icon={<Copy size={14} />} label={t("common.copy")} onClick={(event) => props.onCopy({ position: { x: event.clientX, y: event.clientY } })} />
           <ToolbarButton icon={<FileText size={14} />} label={t("messageActions.copyLink")} onClick={(event) => props.onCopyMessageLink({ x: event.clientX, y: event.clientY })} />
           <ToolbarButton icon={<Reply size={14} />} label={t("messageActions.quote")} onClick={props.onQuote} />
         </span>
-        <span className={"[display:flex] [flex-shrink:0] [align-items:center] [gap:6px] [border-left:1px_solid_rgb(226_232_240)] [padding-left:10px] max-[760px]:[padding-left:7px]"}>
+        <span className={"[display:flex] [flex-shrink:0] [align-items:center] [gap:7px] [border-left:1px_solid_rgb(226_232_240)] [padding-left:10px] max-[760px]:[padding-left:7px]"}>
           <ForwardToAgentToolbarItem targets={props.agentForwardTargets} onForward={props.onForwardToAgent} />
           <ToolbarButton icon={<BrainCircuit size={14} />} label={t("messageActions.summarize")} onClick={props.onSummarize} />
         </span>
-        <span className={"[display:flex] [flex-shrink:0] [align-items:center] [gap:6px] [border-left:1px_solid_rgb(226_232_240)] [padding-left:10px] max-[760px]:[padding-left:7px]"}>
+        <span className={"[display:flex] [flex-shrink:0] [align-items:center] [gap:7px] [border-left:1px_solid_rgb(226_232_240)] [padding-left:10px] max-[760px]:[padding-left:7px]"}>
           <ToolbarButton icon={<Trash2 size={14} />} label={t("common.delete")} danger onClick={props.onDelete} />
         </span>
         <div className={"[flex:1_0_10px]"} />
@@ -2953,11 +2949,11 @@ function ToolbarButton(props: {
   return (
     <button
       type="button"
-      className={`[display:inline-flex] [height:34px] [align-items:center] [gap:6px] [border:1px_solid_transparent] [border-radius:999px] [padding:0_12px] [font-size:12px] [font-weight:780] [letter-spacing:-0.01em] [white-space:nowrap] [transition:transform_0.12s_ease,_box-shadow_0.12s_ease,_background_0.12s_ease,_border-color_0.12s_ease] hover:[transform:translateY(-1px)] focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:2px] ${props.danger ? "[border-color:#fecdd3] [color:#be123c] [background:#fff1f2] hover:[background:#ffe4e6] hover:[box-shadow:0_8px_20px_rgb(190_18_60_/_14%)]" : "[color:#111827] [background:#eef2f6] hover:[border-color:#d5dde8] hover:[background:#f8fafc] hover:[box-shadow:0_8px_20px_rgb(15_23_42_/_10%)]"}`}
+      className={`[display:inline-flex] [min-width:82px] [height:68px] [flex-direction:column] [align-items:center] [justify-content:center] [gap:5px] [border:1px_solid_transparent] [border-radius:14px] [padding:7px_9px] [font-size:12px] [font-weight:720] [line-height:15px] [text-align:center] [transition:transform_0.12s_ease,_box-shadow_0.12s_ease,_background_0.12s_ease,_border-color_0.12s_ease] hover:[transform:translateY(-1px)] focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:2px] ${props.danger ? "[border-color:#fecdd3] [color:#be123c] [background:#fff1f2] hover:[background:#ffe4e6] hover:[box-shadow:0_8px_20px_rgb(190_18_60_/_14%)]" : "[color:#111827] [background:#f8fafc] hover:[border-color:#d5dde8] hover:[background:#ffffff] hover:[box-shadow:0_8px_20px_rgb(15_23_42_/_10%)]"}`}
       onClick={props.onClick}
     >
-      {props.icon ? <span className={"[display:grid] [place-items:center] [color:currentColor]"}>{props.icon}</span> : null}
-      {props.label}
+      {props.icon ? <span className={"[display:grid] [width:22px] [height:22px] [place-items:center] [color:currentColor]"}>{props.icon}</span> : null}
+      <span className={"[display:block] [max-width:112px] [white-space:normal] [word-break:keep-all]"}>{props.label}</span>
     </button>
   );
 }
@@ -3302,7 +3298,7 @@ function MessageBodyShell(props: {
     <div
       ref={bodyRef}
       data-slot="message-body"
-      className={"group/body [user-select:none] [position:relative] [min-width:0] [max-width:min(760px,_70%)] [overflow:visible] max-[1080px]:[max-width:min(720px,_86%)] max-[760px]:[max-width:88%]"}
+      className={"group/body [user-select:none] [position:relative] [min-width:0] [max-width:min(760px,_70%,_calc(100%_-_132px))] [overflow:visible] max-[1080px]:[max-width:min(720px,_calc(100%_-_132px))] max-[760px]:[max-width:calc(100%_-_120px)]"}
       onMouseEnter={() => {
         syncActionAnchorFromBody();
         props.onShowActions();
@@ -3782,11 +3778,12 @@ function CollapsibleMessageContent(props: {
   runtimeProfiles?: RuntimeProfile[];
 }) {
   const [expanded, setExpanded] = useState(false);
-  const needsCollapse = props.content.length > COLLAPSED_MESSAGE_CHAR_LIMIT;
+  const displayText = flattenReferenceMentionsToPlainText(props.content);
+  const needsCollapse = displayText.length > COLLAPSED_MESSAGE_CHAR_LIMIT;
   const visibleContent =
     !needsCollapse || expanded
       ? props.content
-      : `${props.content.slice(0, COLLAPSED_MESSAGE_CHAR_LIMIT)}...`;
+      : collapseReferenceMentionsForPreview(props.content, COLLAPSED_MESSAGE_CHAR_LIMIT);
 
   return (
     <div className={props.tightSpacing ? "[display:grid] [gap:4px]" : "[display:grid] [gap:6px]"}>

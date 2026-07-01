@@ -1,7 +1,7 @@
 import { createReadStream, createWriteStream, existsSync, readFileSync, statSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, extname, join, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
@@ -49,6 +49,34 @@ const webDist = process.env.GROUP_CHAT_WEB_DIST
 const port = Number(process.env.PORT ?? 8788);
 const host = process.env.HOST ?? "127.0.0.1";
 const maxUploadBytes = parsePositiveInteger(process.env.GROUP_CHAT_MAX_UPLOAD_BYTES) ?? 1024 * 1024 * 1024;
+const openableLocalFileExtensions = new Set([
+  ".css",
+  ".csv",
+  ".gif",
+  ".htm",
+  ".html",
+  ".jpeg",
+  ".jpg",
+  ".js",
+  ".json",
+  ".jsx",
+  ".log",
+  ".md",
+  ".mjs",
+  ".mov",
+  ".mp4",
+  ".pdf",
+  ".png",
+  ".svg",
+  ".ts",
+  ".tsx",
+  ".txt",
+  ".webm",
+  ".webp",
+  ".xml",
+  ".yaml",
+  ".yml",
+]);
 
 const server = Fastify({ logger: true, bodyLimit: 25 * 1024 * 1024 });
 const events = new EventHub();
@@ -460,6 +488,19 @@ server.post<{ Params: { artifactId: string } }>("/api/artifacts/:artifactId/open
   }
 });
 
+server.post<{ Body: { path?: string } }>("/api/local-files/open", async (request, reply) => {
+  const filePath = normalizeOpenableLocalFilePath(request.body?.path);
+  if (!filePath) return reply.code(400).send({ error: "Local file path is not allowed" });
+  if (!existsSync(filePath)) return reply.code(404).send({ error: "Local file not found" });
+  try {
+    openPathWithSystemApp(filePath);
+    return { ok: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to open local file";
+    return reply.code(500).send({ error: message });
+  }
+});
+
 server.post<{ Body: { text?: string }; Params: { artifactId: string } }>("/api/artifacts/:artifactId/copy-image", async (request, reply) => {
   const artifact = repo.getArtifact(request.params.artifactId);
   if (!artifact) return reply.code(404).send({ error: "Artifact not found" });
@@ -617,6 +658,22 @@ function openPathWithSystemApp(path: string) {
   });
   child.on("error", () => undefined);
   child.unref();
+}
+
+function normalizeOpenableLocalFilePath(path: string | undefined): string | null {
+  const trimmed = path?.trim();
+  if (!trimmed) return null;
+  const filePath = resolve(trimmed);
+  const normalized = filePath.split(sep).join("/");
+  if (!openableLocalFileExtensions.has(extname(normalized).toLowerCase())) return null;
+  if (
+    !/\/\.tutti(?:-dev)?\/apps\/installations\/[^/]+\/[^/]+\/data\//.test(normalized)
+    && !/\/\.tutti(?:-dev)?\/apps\/workspaces\/[^/]+\/[^/]+\/data\//.test(normalized)
+    && !/\/group-chat\/data\//.test(normalized)
+  ) {
+    return null;
+  }
+  return filePath;
 }
 
 function copyImagePathToSystemClipboard(path: string, text?: string) {

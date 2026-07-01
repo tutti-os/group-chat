@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { Bot, Loader2 } from "lucide-react";
-import { defaultTuttiAgentParticipantName, enrichAgentRuns, isLocalUserMessage, parseTuttiAgentParticipantId, resolveAgentRunVisibility, type AgentRun,
+import { defaultTuttiAgentParticipantName, isLocalUserMessage, parseTuttiAgentParticipantId, resolveAgentRunVisibility, type AgentRun,
   type ChatSnapshot,
   type Conversation,
   type ConversationMessagesPage,
@@ -69,11 +69,11 @@ import {
   saveConversationReadAt,
   type ConversationReadAtMap,
 } from "./conversation-read-state.js";
-import { applyEvent, applyRoomUpdate, emptyState, normalizeSnapshot, removeActiveRun, removeDeletedRoom, removeHiddenMessages, upsert, upsertIdentity, upsertMany, upsertMessage, upsertParticipant, type AppState } from "./state.js";
+import { applyEvent, applyRoomUpdate, emptyState, normalizeSnapshot, reconcileActiveRuns, removeActiveRun, removeDeletedRoom, removeHiddenMessages, upsert, upsertIdentity, upsertMany, upsertMessage, upsertParticipant, type AppState } from "./state.js";
 import { backgroundTaskFromSnapshot, createOptimisticBackgroundTask, createPendingAgentReplyTargets, enrichBackgroundTask, isBackgroundTaskVisibleInConversation, isPendingAgentRunId, loadDismissedBackgroundTaskIds, loadLocalTaskBarTaskIds, mergeBackgroundTask, pendingAgentReplyKey, removeLocalTaskBarTaskId, saveDismissedBackgroundTaskIds, addLocalTaskBarTaskId, type AgentRunTaskItem, type BackgroundTask, type PendingAgentReplyTarget } from "./background-tasks.js";
 import { formatSummaryLink, primaryMessageLinkId, resolveAgentProfileParticipant, resolveMessageAgentParticipant, resolveMessageSenderLabel, messageSenderLabel } from "./chat-links.js";
 import { attachmentLabel, subscribeI18n, t } from "./i18n/index.js";
-import { collectMessageProcess } from "./agent-thinking.js";
+import { collectMessageProcess, resolveMessageRunId } from "./agent-thinking.js";
 import { UNREAD_FEATURE_ENABLED } from "./feature-flags.js";
 import { initTuttiWorkspaceContextCache, resolveArtifactAgentDraftHref } from "./tutti-bridge.js";
 import { loadCachedSnapshot, saveCachedSnapshot } from "./bootstrap-cache.js";
@@ -271,7 +271,7 @@ export function App() {
         messages,
         messageBlocks: upsertMany(current.messageBlocks, page.messageBlocks),
         artifacts: upsertMany(current.artifacts, page.artifacts),
-        activeRuns: enrichAgentRuns(current.activeRuns, messages),
+        activeRuns: reconcileActiveRuns(current.activeRuns, current.agentRuns, messages),
       };
     });
   }, []);
@@ -871,12 +871,19 @@ export function App() {
   const openThinkingIdentity = openThinkingParticipant?.identityId
     ? state.identities.find((identity) => identity.id === openThinkingParticipant.identityId) ?? null
     : null;
+  const openThinkingRunId = openThinkingMessage
+    ? resolveMessageRunId(openThinkingMessage, state.agentRuns)
+    : null;
+  const openThinkingRunActive = openThinkingRunId
+    ? currentActiveRuns.some((run) => run.id === openThinkingRunId)
+    : false;
   const openThinkingSections = openThinkingMessage
     ? collectMessageProcess(
         openThinkingMessage,
         state.messageBlocks.filter((block) => block.messageId === openThinkingMessage.id),
         state.agentRunEvents,
         state.agentRuns,
+        { forceSettled: Boolean(openThinkingRunId && !openThinkingRunActive) },
       )
     : [];
   const openThinkingParticipantName = openThinkingMessage
@@ -1363,7 +1370,7 @@ export function App() {
         messages,
         messageBlocks: upsertMany(current.messageBlocks, result.blocks ?? []),
         artifacts: upsertMany(current.artifacts, result.artifacts ?? []),
-        activeRuns: enrichAgentRuns(current.activeRuns, messages),
+        activeRuns: reconcileActiveRuns(current.activeRuns, current.agentRuns, messages),
       };
     });
   }, []);
@@ -1394,7 +1401,7 @@ export function App() {
             result.blocks ?? [],
           ),
           artifacts: upsertMany(current.artifacts, result.artifacts ?? []),
-          activeRuns: enrichAgentRuns(current.activeRuns, messages),
+          activeRuns: reconcileActiveRuns(current.activeRuns, current.agentRuns, messages),
         };
       });
       registerPendingReplyTargets(result);
@@ -1966,7 +1973,6 @@ export function App() {
                         onSend={onSendMessage}
                         onUpdateMessage={onUpdateMessage}
                         onUpload={uploadArtifact}
-                        onCancelRun={cancelActiveRun}
                         onRefreshLocalAgentProviders={refreshLocalAgentProviders}
                         mentionRequest={mentionRequest}
                         focusRequest={focusComposerRequest}

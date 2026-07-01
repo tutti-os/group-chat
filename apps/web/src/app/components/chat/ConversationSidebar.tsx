@@ -6,6 +6,7 @@ import { t, useTranslation } from "../../i18n/index.js";
 import { RoomAvatar } from "../ui/RoomAvatar.js";
 import { UnreadBadge } from "../ui/UnreadBadge.js";
 import { buildLatestPreviewMessageIndex } from "../../conversation-preview-index.js";
+import { flattenReferenceMentionsToPlainText } from "../../reference-mentions.js";
 
 export function ConversationSidebar(props: {
   rooms: Room[];
@@ -212,10 +213,17 @@ function resolveConversationActivityAt(conversation: Conversation) {
 }
 
 function buildRecentMessagePreview(conversation: Conversation, room: Room, message: Message | null) {
+  const conversationLastMessage = formatConversationPreviewContent(conversation.lastMessage || "");
   if (!message) {
     return {
       sender: "",
-      content: stripGeneratedReplyQuoteMarkers(conversation.lastMessage || "") || room.description || t("sidebar.noMessagesYet"),
+      content: conversationLastMessage || room.description || t("sidebar.noMessagesYet"),
+    };
+  }
+  if (shouldPreferConversationLastMessage(conversation, message)) {
+    return {
+      sender: "",
+      content: conversationLastMessage || t("common.attachment"),
     };
   }
   if (message.status === "deleted") {
@@ -232,8 +240,8 @@ function buildRecentMessagePreview(conversation: Conversation, room: Room, messa
   }
   return {
     sender: messageSenderLabel(message),
-    content: stripGeneratedReplyQuoteMarkers(message.content).trim()
-      || stripGeneratedReplyQuoteMarkers(conversation.lastMessage || "")
+    content: formatConversationPreviewContent(message.content)
+      || conversationLastMessage
       || t("common.attachment"),
   };
 }
@@ -245,4 +253,17 @@ function messageSenderLabel(message: Message) {
 
 function stripGeneratedReplyQuoteMarkers(content: string) {
   return content.replace(/^[ \t]*>\s?(?=(?:回复|Reply)\s+[^:：]+[:：])/gim, "");
+}
+
+function formatConversationPreviewContent(content: string) {
+  return flattenReferenceMentionsToPlainText(stripGeneratedReplyQuoteMarkers(content)).trim();
+}
+
+function shouldPreferConversationLastMessage(conversation: Conversation, message: Message) {
+  if (!conversation.lastMessage || !conversation.lastMessageAt) return false;
+  const conversationLastMessageTime = Date.parse(conversation.lastMessageAt);
+  const messageTime = Date.parse(message.createdAt);
+  return Number.isFinite(conversationLastMessageTime)
+    && Number.isFinite(messageTime)
+    && conversationLastMessageTime > messageTime;
 }

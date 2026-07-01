@@ -16,10 +16,14 @@ async function loadModule() {
 }
 
 test("codex context window failures can recover by dropping provider resume state", async () => {
-  const { isRecoverableResumeError } = await loadModule();
+  const { isContextWindowError, isRecoverableResumeError } = await loadModule();
 
   assert.equal(
     isRecoverableResumeError("Codex ran out of room in the model's context window. Start a new thread or clear earlier history before retrying."),
+    true,
+  );
+  assert.equal(
+    isContextWindowError("Codex ran out of room in the model's context window. Start a new thread or clear earlier history before retrying."),
     true,
   );
   assert.equal(

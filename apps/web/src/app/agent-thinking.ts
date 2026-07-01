@@ -52,20 +52,26 @@ export function collectMessageProcess(
   blocks: MessageBlock[],
   agentRunEvents: AgentRunEvent[],
   agentRuns: AgentRun[],
+  options: { forceSettled?: boolean } = {},
 ): ProcessSection[] {
   const sections: ProcessSection[] = [];
+  const messageSettled = isMessageSettled(message);
+  const forcedSettled = options.forceSettled === true;
   const mergedReasoning = mergeReasoningBlocks(blocks.filter((block) => block.messageId === message.id));
   if (mergedReasoning) {
     sections.push({
       kind: "reasoning",
       id: mergedReasoning.id,
       content: mergedReasoning.content,
-      streaming: mergedReasoning.streaming,
+      streaming: !forcedSettled && !messageSettled && mergedReasoning.streaming,
     });
   }
 
   const runId = resolveMessageRunId(message, agentRuns);
   if (!runId) return sections;
+  const run = agentRuns.find((item) => item.id === runId) ?? null;
+  const runSettled = isRunSettled(run);
+  const settled = forcedSettled || messageSettled || runSettled;
 
   const runEvents = agentRunEvents
     .filter((event) => event.runId === runId)
@@ -95,16 +101,34 @@ export function collectMessageProcess(
     if (event.type === "thinking_delta") {
       if (!skipRunThinking) {
         thinkingBuffer += event.content;
-        thinkingStreaming = event.status === "streaming" || thinkingStreaming;
+        thinkingStreaming = !settled && (event.status === "streaming" || thinkingStreaming);
       }
       continue;
     }
     flushThinking();
-    sections.push({ kind: "event", id: event.id, event });
+    sections.push({ kind: "event", id: event.id, event: settleRunEvent(event, run, message, settled) });
   }
   flushThinking();
 
   return sections;
+}
+
+function isMessageSettled(message: Message) {
+  return message.status === "success" || message.status === "error" || message.status === "cancelled";
+}
+
+function isRunSettled(run: AgentRun | null) {
+  return run?.status === "completed" || run?.status === "failed" || run?.status === "cancelled";
+}
+
+function settleRunEvent(event: AgentRunEvent, run: AgentRun | null, message: Message, settled: boolean): AgentRunEvent {
+  if (event.status !== "pending" && event.status !== "streaming") return event;
+  if (!settled) return event;
+  const status =
+    run?.status === "failed" || run?.status === "cancelled" || message.status === "error" || message.status === "cancelled"
+      ? "error"
+      : "success";
+  return { ...event, status };
 }
 
 export function collectMessageThinking(

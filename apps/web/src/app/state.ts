@@ -11,7 +11,7 @@ export function normalizeSnapshot(snapshot: ChatSnapshot): AppState {
     ...snapshot,
     messages,
     ready: true,
-    activeRuns: enrichAgentRuns(snapshot.activeRuns, messages),
+    activeRuns: reconcileActiveRuns(snapshot.activeRuns, snapshot.agentRuns, messages),
   };
 }
 
@@ -91,7 +91,7 @@ export function applyEvent(state: AppState, event: StreamEvent): AppState {
       return {
         ...withSeq,
         messages,
-        activeRuns: enrichAgentRuns(activeRuns, messages),
+        activeRuns: reconcileActiveRuns(activeRuns, state.agentRuns, messages),
       };
     }
     case "message.hidden":
@@ -110,9 +110,10 @@ export function applyEvent(state: AppState, event: StreamEvent): AppState {
       return payload.run
         ? {
             ...withSeq,
-            activeRuns: upsert(
-              withSeq.activeRuns,
-              enrichAgentRun(payload.run as AgentRun, withSeq.messages),
+            activeRuns: reconcileActiveRuns(
+              upsert(withSeq.activeRuns, payload.run as AgentRun),
+              withSeq.agentRuns,
+              withSeq.messages,
             ),
             agentRuns: upsert(withSeq.agentRuns, payload.run as AgentRun),
           }
@@ -144,8 +145,9 @@ export function removeHiddenMessages(state: AppState, messageIds: string[]): App
     artifacts: state.artifacts.filter(
       (artifact) => !artifact.messageId || visibleMessageIds.has(artifact.messageId),
     ),
-    activeRuns: enrichAgentRuns(
+    activeRuns: reconcileActiveRuns(
       state.activeRuns.filter((run) => !run.assistantMessageId || visibleMessageIds.has(run.assistantMessageId)),
+      state.agentRuns,
       messages,
     ),
   };
@@ -171,6 +173,29 @@ export function upsert<T extends { id: string }>(items: T[], item: T | null | un
   const result = items.slice();
   result[existingIndex] = item;
   return result;
+}
+
+export function reconcileActiveRuns(activeRuns: AgentRun[], agentRuns: AgentRun[], messages: Message[]) {
+  const canonicalRuns = new Map(agentRuns.map((run) => [run.id, run]));
+  const messagesById = new Map(messages.map((message) => [message.id, message]));
+  return enrichAgentRuns(
+    activeRuns.filter((run) => {
+      const canonical = canonicalRuns.get(run.id);
+      if (canonical && isSettledAgentRun(canonical)) return false;
+      const assistantMessage = run.assistantMessageId ? messagesById.get(run.assistantMessageId) : null;
+      if (assistantMessage && isSettledMessage(assistantMessage)) return false;
+      return !isSettledAgentRun(run);
+    }),
+    messages,
+  );
+}
+
+function isSettledAgentRun(run: Pick<AgentRun, "status">) {
+  return run.status === "completed" || run.status === "failed" || run.status === "cancelled";
+}
+
+function isSettledMessage(message: Pick<Message, "status">) {
+  return message.status === "success" || message.status === "error" || message.status === "cancelled";
 }
 
 export function upsertMessage(messages: Message[], incoming: Message | null | undefined): Message[] {

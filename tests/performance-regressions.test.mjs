@@ -49,17 +49,17 @@ test("message updates preserve references for unchanged messages", async () => {
   assert.equal(result[1].content, "new");
 });
 
-test("preview index keeps the last eligible message for each conversation", async () => {
+test("preview index keeps the newest eligible message for each conversation", async () => {
   const { buildLatestPreviewMessageIndex } = await loadWebModule(
     "src/app/conversation-preview-index.ts",
     "conversation-preview-index",
   );
-  const first = message({ id: "first", content: "first" });
+  const first = message({ id: "first", content: "first", createdAt: "2026-01-01T00:00:00.000Z" });
   const ignored = message({ id: "ignored", role: "assistant", status: "cancelled", content: "" });
-  const latest = message({ id: "latest", content: "latest" });
+  const latest = message({ id: "latest", content: "latest", createdAt: "2026-01-01T00:01:00.000Z" });
   const other = message({ id: "other", conversationId: "conversation-2" });
 
-  const index = buildLatestPreviewMessageIndex([first, ignored, latest, other]);
+  const index = buildLatestPreviewMessageIndex([latest, ignored, first, other]);
 
   assert.equal(index.get("conversation-1"), latest);
   assert.equal(index.get("conversation-2"), other);

@@ -266,6 +266,13 @@ export async function openArtifactInSystem(artifactId: string) {
   });
 }
 
+export async function openLocalFileInSystem(path: string) {
+  return fetchJson<{ ok: true }>("/api/local-files/open", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
+}
+
 export async function copyArtifactImageToSystemClipboard(artifactId: string, body?: { text?: string }) {
   return fetchJson<{ ok: true }>(`/api/artifacts/${artifactId}/copy-image`, {
     method: "POST",

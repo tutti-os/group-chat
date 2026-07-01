@@ -195,6 +195,13 @@ export function serializeReferenceMentionChip(element: HTMLElement) {
       referenceInsert = undefined;
     }
   }
+  const iconUrl = element.dataset.mentionIconUrl?.trim();
+  if (iconUrl) {
+    referenceScope = {
+      ...(referenceScope ?? {}),
+      iconUrl,
+    };
+  }
 
   return formatReferenceMentionMarkdown(providerId, entityId, displayLabel, {
     referenceInsert,
@@ -219,6 +226,46 @@ export function flattenReferenceMentionsToPlainText(content: string) {
   return splitContentByReferenceMentions(content)
     .map((segment) => (segment.kind === "text" ? segment.text : segment.label))
     .join("");
+}
+
+export function collapseReferenceMentionsForPreview(content: string, maxChars: number, ellipsis = "...") {
+  if (maxChars <= 0) return ellipsis;
+  if (!contentHasReferenceMentions(content)) {
+    return content.length > maxChars ? `${content.slice(0, maxChars)}${ellipsis}` : content;
+  }
+
+  const segments = splitContentByReferenceMentions(content);
+  let visibleChars = 0;
+  let truncated = false;
+  const output: string[] = [];
+
+  for (const segment of segments) {
+    if (segment.kind === "reference") {
+      const referenceLength = segment.label.length;
+      if (output.length > 0 && visibleChars + referenceLength > maxChars) {
+        truncated = true;
+        break;
+      }
+      output.push(`[${escapeReferenceMentionLabel(segment.label)}](${segment.href})`);
+      visibleChars += referenceLength;
+      continue;
+    }
+
+    const remaining = maxChars - visibleChars;
+    if (remaining <= 0) {
+      if (segment.text.length > 0) truncated = true;
+      break;
+    }
+    if (segment.text.length > remaining) {
+      output.push(segment.text.slice(0, remaining));
+      truncated = true;
+      break;
+    }
+    output.push(segment.text);
+    visibleChars += segment.text.length;
+  }
+
+  return `${output.join("")}${truncated ? ellipsis : ""}`;
 }
 
 type AgentForwardMentionMeta = Pick<

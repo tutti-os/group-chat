@@ -100,7 +100,7 @@ test("restores workspace app icon scope from pasted mention links", async () => 
   assert.equal(target?.reference.itemId, "vibe-design");
   assert.equal(target?.reference.thumbnailUrl, "tutti://workspace-apps/vibe-design/icon.png");
   assert.equal(target?.reference.insert.kind, "mention");
-  assert.equal(target?.reference.insert.scope.iconUrl, "tutti://workspace-apps/vibe-design/icon.png");
+  assert.equal(target?.reference.insert.mention.scope.iconUrl, "tutti://workspace-apps/vibe-design/icon.png");
 });
 
 test("copies generated reply quotes without leaking markdown quote markers", async () => {
