@@ -2024,7 +2024,7 @@ export function Composer(props: {
         }}
       >
         <label
-          className={"[display:inline-grid] [place-items:center] [border:0] [width:28px] [height:28px] [border-radius:999px] [color:var(--text-tertiary)] [background:transparent] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)] [&_input]:[display:none]"}
+          className={"[display:inline-grid] [place-items:center] [border:0] [width:28px] [height:28px] [border-radius:999px] [color:var(--text-tertiary)] [background:transparent] [cursor:pointer] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)] [&_input]:[display:none]"}
           title={t("composer.attachFiles")}
           onMouseDown={() => {
             const editor = editorRef.current;
