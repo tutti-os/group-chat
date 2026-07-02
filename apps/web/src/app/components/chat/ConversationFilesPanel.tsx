@@ -199,7 +199,7 @@ export function ConversationFilesPanel(props: {
       </div>
 
       <div className={"[padding:12px_12px_0]"}>
-        <label className={"[display:flex] [height:38px] [align-items:center] [gap:8px] [border-radius:12px] [padding:0_12px] [color:var(--text-secondary)] [background:var(--transparency-block)] [&_input]:[width:100%] [&_input]:[min-width:0] [&_input]:[border:0] [&_input]:[color:var(--text-primary)] [&_input]:[background:transparent] [&_input]:[font-size:13px] [&_input]:[outline:none] [&_input::placeholder]:[color:var(--text-placeholder)]"}>
+        <label className={"[display:flex] [height:38px] [align-items:center] [gap:8px] [border-radius:8px] [padding:0_12px] [color:var(--text-secondary)] [background:var(--transparency-block)] [&_input]:[width:100%] [&_input]:[min-width:0] [&_input]:[border:0] [&_input]:[color:var(--text-primary)] [&_input]:[background:transparent] [&_input]:[font-size:13px] [&_input]:[outline:none] [&_input::placeholder]:[color:var(--text-placeholder)]"}>
           <Search size={15} />
           <input
             value={query}
@@ -234,7 +234,7 @@ export function ConversationFilesPanel(props: {
           return (
             <article
               key={artifact.id}
-              className={"[display:grid] [grid-template-columns:40px_minmax(0,_1fr)_auto] [align-items:center] [gap:8px] [border:1px_solid_var(--border-1)] [border-radius:12px] [padding:8px] [background:var(--white-stationary)] [transition:border-color_0.12s_ease,_background-color_0.12s_ease] hover:[border-color:var(--line-focus-window)] hover:[background:var(--background-panel)]"}
+              className={"[display:grid] [grid-template-columns:40px_minmax(0,_1fr)_auto] [align-items:center] [gap:8px] [border:1px_solid_var(--border-1)] [border-radius:8px] [padding:8px] [background:var(--white-stationary)] [transition:border-color_0.12s_ease,_background-color_0.12s_ease] hover:[border-color:var(--line-focus-window)] hover:[background:var(--background-panel)]"}
             >
               <button
                 type="button"
