@@ -1122,8 +1122,12 @@ function EmptyTimelineState(props: {
   return (
     <div className={"[display:grid] [min-height:100%] [place-items:center] [padding:28px] [text-align:center]"}>
       <div className={"[display:grid] [max-width:520px] [gap:14px] [&_h3]:[margin:0] [&_h3]:[color:var(--text-primary)] [&_h3]:[font-size:15px] [&_h3]:[font-weight:700] [&_p]:[margin:0] [&_p]:[color:var(--text-secondary)] [&_p]:[font-size:13px] [&_p]:[line-height:1.6]"}>
-        {title ? <h3>{title}</h3> : null}
-        {hint ? <p>{hint}</p> : null}
+        {title || hint ? (
+          <div className={"[display:grid] [gap:12px]"}>
+            {title ? <h3>{title}</h3> : null}
+            {hint ? <p>{hint}</p> : null}
+          </div>
+        ) : null}
         {suggestions.length > 0 ? (
           <div className={"[display:flex] [flex-wrap:wrap] [justify-content:center] [gap:8px]"}>
             {suggestions.map((suggestion) => (
