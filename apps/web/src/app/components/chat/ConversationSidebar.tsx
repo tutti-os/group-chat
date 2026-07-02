@@ -109,7 +109,7 @@ export function ConversationSidebar(props: {
           <CreateChatIcon size={16} />
         </button>
       </div>
-      <div className={"[padding:0_4px_10px] [&_input]:[width:100%] [&_input]:[height:36px] [&_input]:[min-width:0] [&_input]:[border:0] [&_input]:[border-radius:8px] [&_input]:[padding:0_12px] [&_input]:[color:var(--text-primary)] [&_input]:[background:var(--transparency-hover)] [&_input]:[outline:none] [&_input]:[font-size:13px] [&_input::placeholder]:[color:var(--text-placeholder)] [&_input:focus]:[box-shadow:inset_0_0_0_1px_var(--line-focus-window)]"}>
+      <div className={"[padding:0_12px_10px] [&_input]:[width:100%] [&_input]:[height:36px] [&_input]:[min-width:0] [&_input]:[border:0] [&_input]:[border-radius:8px] [&_input]:[padding:0_12px] [&_input]:[color:var(--text-primary)] [&_input]:[background:var(--transparency-hover)] [&_input]:[outline:none] [&_input]:[font-size:13px] [&_input::placeholder]:[color:var(--text-placeholder)] [&_input:focus]:[box-shadow:inset_0_0_0_1px_var(--line-focus-window)]"}>
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
