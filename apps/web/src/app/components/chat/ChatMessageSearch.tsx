@@ -90,7 +90,7 @@ export function ChatMessageSearch(props: {
       </div>
 
       <div className={"[padding:12px_12px_0]"}>
-        <label className={"[display:flex] [height:38px] [align-items:center] [gap:8px] [border-radius:12px] [padding:0_12px] [color:var(--text-secondary)] [background:var(--transparency-block)] [&_input]:[width:100%] [&_input]:[min-width:0] [&_input]:[border:0] [&_input]:[color:var(--text-primary)] [&_input]:[background:transparent] [&_input]:[font-size:13px] [&_input]:[outline:none] [&_input::placeholder]:[color:var(--text-placeholder)]"}>
+        <label className={"[display:flex] [height:38px] [align-items:center] [gap:8px] [border-radius:8px] [padding:0_12px] [color:var(--text-secondary)] [background:var(--transparency-block)] [&_input]:[width:100%] [&_input]:[min-width:0] [&_input]:[border:0] [&_input]:[color:var(--text-primary)] [&_input]:[background:transparent] [&_input]:[font-size:13px] [&_input]:[outline:none] [&_input::placeholder]:[color:var(--text-placeholder)]"}>
           <Search size={15} className={"[flex:0_0_auto]"} />
           <input
             ref={inputRef}
@@ -182,7 +182,7 @@ function SearchResultRow(props: {
     <div
       role="button"
       tabIndex={0}
-      className={"[display:grid] [gap:6px] [width:100%] [border:0] [border-radius:12px] [padding:10px_12px] [text-align:left] [color:var(--text-primary)] [background:transparent] [cursor:pointer] [transition:background-color_0.12s_ease] [&:hover]:[background:var(--transparency-hover)] [&:focus-visible]:[outline:none] [&:focus-visible]:[background:var(--transparency-hover)] [&_.search-result-card]:[width:min(260px,_100%)] [&_.search-result-card]:[padding:6px_8px] [&_.search-result-card]:[border-radius:8px]"}
+      className={"[display:grid] [gap:6px] [width:100%] [border:0] [border-radius:8px] [padding:10px_12px] [text-align:left] [color:var(--text-primary)] [background:transparent] [cursor:pointer] [transition:background-color_0.12s_ease] [&:hover]:[background:var(--transparency-hover)] [&:focus-visible]:[outline:none] [&:focus-visible]:[background:var(--transparency-hover)] [&_.search-result-card]:[width:min(260px,_100%)] [&_.search-result-card]:[padding:6px_8px] [&_.search-result-card]:[border-radius:8px]"}
       onClick={focusSource}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
