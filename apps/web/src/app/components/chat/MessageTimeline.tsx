@@ -2354,7 +2354,7 @@ function SummaryAgentPicker(props: {
     : compactInline(props.messages[0]?.content || attachmentLabel());
   return (
     <div className={"[position:fixed] [inset:0] [z-index:90] [display:grid] [place-items:center] [padding:24px] [background:color-mix(in_srgb,var(--black-stationary)_34%,transparent)]"} role="dialog" aria-modal="true" aria-label={t("messageActions.pickSummaryAgent")}>
-      <div className={"[display:grid] [width:min(420px,_calc(100vw_-_40px))] [gap:12px] [border:1px_solid_var(--border-1)] [border-radius:18px] [padding:16px] [background:var(--background-fronted)] [box-shadow:0_24px_70px_color-mix(in_srgb,var(--black-stationary)_22%,transparent)]"}>
+      <div className={"[display:grid] [width:min(420px,_calc(100vw_-_40px))] [gap:12px] [border:1px_solid_var(--border-1)] [border-radius:16px] [padding:16px] [background:var(--background-fronted)] [box-shadow:0_24px_70px_color-mix(in_srgb,var(--black-stationary)_22%,transparent)]"}>
         <header className={"[display:grid] [grid-template-columns:minmax(0,_1fr)_30px] [align-items:center] [gap:10px]"}>
           <span className={"[display:grid] [gap:3px]"}>
             <strong className={"[font-size:15px] [font-weight:750] [color:var(--text-primary)]"}>{t("messageActions.pickAgentTitle")}</strong>

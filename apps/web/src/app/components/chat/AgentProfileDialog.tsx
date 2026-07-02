@@ -151,7 +151,7 @@ export function AgentProfileDialog(props: {
         role="dialog"
         aria-modal="true"
         aria-label={t("agentProfile.settingsAria", { name: displayName })}
-        className={"[display:flex] [width:min(680px,_calc(100vw_-_32px))] [max-height:min(720px,_calc(100vh_-_32px))] [flex-direction:column] [overflow:hidden] [border:1px_solid_var(--border-1)] [border-radius:20px] [background:var(--background-fronted)] [box-shadow:0_24px_80px_color-mix(in_srgb,var(--black-stationary)_24%,transparent)] max-[760px]:[width:calc(100vw_-_28px)] max-[760px]:[max-height:calc(100vh_-_28px)]"}
+        className={"[display:flex] [width:min(680px,_calc(100vw_-_32px))] [max-height:min(720px,_calc(100vh_-_32px))] [flex-direction:column] [overflow:hidden] [border:1px_solid_var(--border-1)] [border-radius:16px] [background:var(--background-fronted)] [box-shadow:0_24px_80px_color-mix(in_srgb,var(--black-stationary)_24%,transparent)] max-[760px]:[width:calc(100vw_-_28px)] max-[760px]:[max-height:calc(100vh_-_28px)]"}
         onPointerDown={(event) => event.stopPropagation()}
       >
         <div className={"[display:flex] [flex:0_0_auto] [align-items:center] [justify-content:space-between] [gap:12px] [padding:16px_18px] [border-bottom:1px_solid_var(--border-1)]"}>

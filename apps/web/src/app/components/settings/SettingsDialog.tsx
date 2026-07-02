@@ -51,7 +51,7 @@ export function SettingsDialog(props: {
 
   return (
     <section className={"[position:fixed] [inset:0] [z-index:55] [display:grid] [place-items:center] [background:color-mix(in_srgb,var(--black-stationary)_46%,transparent)]"} aria-label={t("settings.title")}>
-      <div className={"[position:relative] [display:grid] [grid-template-columns:232px_minmax(0,_1fr)] [width:min(980px,_calc(100vw_-_96px))] [height:min(720px,_calc(100vh_-_88px))] [overflow:hidden] [border:1px_solid_var(--line-focus-window)] [border-radius:28px] [background:var(--background-fronted)] [box-shadow:0_24px_80px_color-mix(in_srgb,var(--black-stationary)_24%,transparent)] max-[760px]:[grid-template-columns:1fr] max-[760px]:[width:calc(100vw_-_28px)] max-[760px]:[height:calc(100vh_-_28px)]"}>
+      <div className={"[position:relative] [display:grid] [grid-template-columns:232px_minmax(0,_1fr)] [width:min(980px,_calc(100vw_-_96px))] [height:min(720px,_calc(100vh_-_88px))] [overflow:hidden] [border:1px_solid_var(--line-focus-window)] [border-radius:16px] [background:var(--background-fronted)] [box-shadow:0_24px_80px_color-mix(in_srgb,var(--black-stationary)_24%,transparent)] max-[760px]:[grid-template-columns:1fr] max-[760px]:[width:calc(100vw_-_28px)] max-[760px]:[height:calc(100vh_-_28px)]"}>
         <button
           type="button"
           className={"dialog-close-button [position:absolute] [top:20px] [right:20px] [z-index:2] [display:inline-grid] [width:34px] [height:34px] [place-items:center] [border:0] [border-radius:999px] [color:var(--text-secondary)] [background:transparent] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)]"}

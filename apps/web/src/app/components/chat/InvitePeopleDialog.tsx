@@ -22,7 +22,7 @@ export function InvitePeopleDialog(props: {
         aria-modal="true"
         aria-labelledby="invite-people-title"
         aria-describedby="invite-people-desc"
-        className={"[width:min(440px,_calc(100vw_-_32px))] [overflow:hidden] [border:1px_solid_var(--border-1)] [border-radius:18px] [background:var(--background-fronted)] [box-shadow:0_24px_80px_color-mix(in_srgb,var(--black-stationary)_24%,transparent)]"}
+        className={"[width:min(440px,_calc(100vw_-_32px))] [overflow:hidden] [border:1px_solid_var(--border-1)] [border-radius:16px] [background:var(--background-fronted)] [box-shadow:0_24px_80px_color-mix(in_srgb,var(--black-stationary)_24%,transparent)]"}
         onPointerDown={(event) => event.stopPropagation()}
       >
         <div className={"[display:flex] [gap:12px] [padding:20px_20px_16px]"}>

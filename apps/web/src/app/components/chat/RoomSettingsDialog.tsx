@@ -96,7 +96,7 @@ export function RoomSettingsDialog(props: {
       onClick={closeDialog}
     >
       <div
-        className={"[position:relative] [width:min(420px,_calc(100vw_-_32px))] [overflow:hidden] [border:1px_solid_var(--line-focus-window)] [border-radius:8px] [background:var(--background-fronted)] [box-shadow:0_24px_80px_color-mix(in_srgb,var(--black-stationary)_24%,transparent)]"}
+        className={"[position:relative] [width:min(420px,_calc(100vw_-_32px))] [overflow:hidden] [border:1px_solid_var(--line-focus-window)] [border-radius:16px] [background:var(--background-fronted)] [box-shadow:0_24px_80px_color-mix(in_srgb,var(--black-stationary)_24%,transparent)]"}
         onClick={(event) => event.stopPropagation()}
       >
         <button

@@ -33,7 +33,7 @@ export function AttachmentPreviewDialog(props: {
         if (event.target === event.currentTarget) props.onClose();
       }}
     >
-      <div className={"[display:grid] [width:min(920px,_calc(100vw_-_32px))] [max-height:calc(100vh_-_48px)] [overflow:hidden] [border:1px_solid_var(--border-1)] [border-radius:18px] [background:var(--background-fronted)] [box-shadow:0_24px_80px_color-mix(in_srgb,var(--black-stationary)_24%,transparent)]"}>
+      <div className={"[display:grid] [width:min(920px,_calc(100vw_-_32px))] [max-height:calc(100vh_-_48px)] [overflow:hidden] [border:1px_solid_var(--border-1)] [border-radius:16px] [background:var(--background-fronted)] [box-shadow:0_24px_80px_color-mix(in_srgb,var(--black-stationary)_24%,transparent)]"}>
         <header className={"[display:grid] [grid-template-columns:minmax(0,_1fr)_34px] [align-items:center] [gap:12px] [border-bottom:1px_solid_var(--border-1)] [padding:12px_14px] [&_strong]:[min-width:0] [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_strong]:[font-size:13px]"}>
           <strong>{props.preview.title}</strong>
           <button
