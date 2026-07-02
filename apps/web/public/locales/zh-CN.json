@@ -334,6 +334,7 @@
   "summary.htmlResult": "总结",
 
   "system.participantJoined": "{name} 加入了群聊",
+  "system.participantLeft": "{name} 已从群聊移除",
   "system.messageRecalled": "消息已撤回",
 
   "agentError.noTextReplyAfterRun": "Agent 执行结束，但未返回文本回复。",

@@ -462,6 +462,7 @@ function MentionParticipantAvatar(props: {
         avatar={resolvedAvatar.avatar}
         provider={resolvedAvatar.provider}
         size={32}
+        hideProviderBadge
       />
     </span>
   );

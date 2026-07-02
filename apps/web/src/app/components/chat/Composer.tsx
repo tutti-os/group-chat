@@ -1993,7 +1993,7 @@ export function Composer(props: {
   }, [mentionMenuVisible]);
 
   return (
-    <footer ref={footerRef} data-agent-chat-composer className={"[position:relative] [z-index:50] [border-top:0] [padding:4px_12px_12px] [background:transparent] max-[760px]:[padding-inline:12px]"}>
+    <footer ref={footerRef} data-agent-chat-composer className={"[position:relative] [z-index:50] [border-top:0] [padding:0_12px_12px] [background:transparent] max-[760px]:[padding-inline:12px]"}>
       {editingMessageId ? (
         <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [margin-bottom:8px] [border:1px_solid_var(--border-1)] [border-radius:12px] [padding:8px_10px] [background:color-mix(in_srgb,var(--state-warning)_14%,var(--background-fronted))] [color:var(--state-warning)] [font-size:11px] [font-weight:650]"}>
           <span>{t("composer.editingHint")}</span>
@@ -2024,7 +2024,7 @@ export function Composer(props: {
         }}
       >
         <label
-          className={"[display:inline-grid] [place-items:center] [border:0] [width:28px] [height:28px] [border-radius:999px] [color:var(--text-tertiary)] [background:transparent] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)] [&_input]:[display:none]"}
+          className={"[display:inline-grid] [align-self:end] [place-items:center] [border:0] [width:28px] [height:28px] [border-radius:999px] [color:var(--text-tertiary)] [background:transparent] [cursor:pointer] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)] [&_input]:[display:none]"}
           title={t("composer.attachFiles")}
           onMouseDown={() => {
             const editor = editorRef.current;
@@ -2292,7 +2292,7 @@ export function Composer(props: {
             </div>
           </div>
         </div>
-        <button className={"[display:inline-grid] [place-items:center] [border:0] [width:28px] [height:28px] [padding:0] [border-radius:999px] [color:var(--white-stationary)] [background:var(--text-primary)] [&:disabled]:[color:var(--text-secondary)] [&:disabled]:[background:var(--transparency-hover)]"} aria-label={t("composer.sendMessage")} onClick={send} disabled={sending}>
+        <button className={"[display:inline-grid] [align-self:end] [place-items:center] [border:0] [width:28px] [height:28px] [padding:0] [border-radius:999px] [color:var(--white-stationary)] [background:var(--text-primary)] [&:disabled]:[color:var(--text-secondary)] [&:disabled]:[background:var(--transparency-hover)]"} aria-label={t("composer.sendMessage")} onClick={send} disabled={sending}>
           {sending ? <Square size={16} /> : <SendFilledIcon size={16} />}
         </button>
       </div>

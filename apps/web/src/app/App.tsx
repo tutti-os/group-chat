@@ -89,6 +89,7 @@ import {
 import { formatMessageBodyForAgentForward, formatReferenceMentionMarkdown } from "./reference-mentions.js";
 import { enrichMessageContentForCopy } from "./composer-paste-content.js";
 import { collectImageFileArtifactsForMessages } from "./message-artifacts.js";
+import { hasTimelineMessages } from "./message-timeline-state.js";
 import { defaultIdentityNameForRuntime, listCanonicalRuntimeProfiles, localAgentStatus } from "./runtime.js";
 import { localAgentMentionSubtitle } from "./local-agent-mention-options.js";
 import { groupAgentForwardSections } from "./agent-forward-format.js";
@@ -651,6 +652,12 @@ export function App() {
       );
     });
   }, [currentConversationMessages, currentTimelinePageState]);
+  const currentTimelineEmpty = !hasTimelineMessages(currentConversationMessages);
+  const emptyTimelineSuggestions = [
+    t("timeline.suggestionAnalyze"),
+    t("timeline.suggestionProductPlan"),
+    t("timeline.suggestionDiscussAll"),
+  ].map((item) => item.trim()).filter(Boolean);
   const currentMessageIdSet = useMemo(
     () => new Set(currentMessages.map((message) => message.id)),
     [currentMessages],
@@ -1006,11 +1013,12 @@ export function App() {
   };
 
   const onRemoveParticipant = async (participantId: string) => {
-    const result = (await deleteParticipant(participantId)) as { participant: Participant | null };
+    const result = (await deleteParticipant(participantId)) as { participant: Participant | null; systemMessage?: Message | null };
     if (!result.participant) return;
     setState((current) => ({
       ...current,
       participants: upsert(current.participants, result.participant),
+      messages: result.systemMessage ? upsert(current.messages, result.systemMessage) : current.messages,
     }));
   };
 
@@ -1934,7 +1942,6 @@ export function App() {
                     onOpenMessageLink={openMessageLink}
                     onOpenSummaryLink={(taskId) => void openSummaryLink(taskId)}
                     onInsertSummaryLink={insertSummaryLinkToComposer}
-                    onInsertSuggestion={insertTextToComposer}
                     onEnsureSummaryTask={ensureBackgroundTask}
                     summaryTasks={backgroundTasks}
                     onQuoteMessages={requestComposerInsert}
@@ -2010,6 +2017,20 @@ export function App() {
                   />
                   <div ref={setBulkToolbarHost} className={"[position:relative] [z-index:50] [min-height:0]"}>
                     <div className={messageSelectionMode ? "[visibility:hidden] [pointer-events:none]" : ""} aria-hidden={messageSelectionMode}>
+                      {currentTimelineEmpty && emptyTimelineSuggestions.length > 0 ? (
+                        <div className={"[display:flex] [flex-wrap:wrap] [align-items:center] [justify-content:flex-start] [gap:8px] [padding:0_12px_8px]"}>
+                          {emptyTimelineSuggestions.map((suggestion) => (
+                            <button
+                              key={suggestion}
+                              type="button"
+                              className={"[border:1px_solid_var(--border-1)] [border-radius:999px] [padding:5px_10px] [color:var(--tutti-purple)] [background:var(--white-stationary)] [font-size:13px] [line-height:1.2] [cursor:pointer] [transition:background-color_0.12s_ease] hover:[background:var(--tutti-purple-bg)] focus-visible:[outline:none] focus-visible:[border-color:var(--border-1)]"}
+                              onClick={() => insertTextToComposer(suggestion)}
+                            >
+                              {suggestion}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
                       <Composer
                         conversation={currentConversation}
                         conversationId={currentConversation.id}

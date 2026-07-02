@@ -403,9 +403,13 @@ export class ChatService {
 
   async removeParticipant(participantId: string) {
     const participant = this.repo.updateParticipantStatus(participantId, "removed");
+    let systemMessage: Message | null = null;
     if (participant) {
       await this.cancelParticipantWork(participant.id, "Participant removed from room");
       const conversation = this.repo.getConversation(participant.conversationId);
+      if (conversation) {
+        systemMessage = this.emitSystemNotice(conversation, `${participant.displayName} left the room`);
+      }
       this.events.emit({
         type: "participant.updated",
         roomId: conversation?.roomId ?? null,
@@ -413,7 +417,7 @@ export class ChatService {
         payload: { participant },
       });
     }
-    return participant;
+    return participant ? { participant, systemMessage } : null;
   }
 
   sendMessage(conversationId: string, input: SendMessageRequest) {

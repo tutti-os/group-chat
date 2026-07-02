@@ -109,7 +109,7 @@ export function ConversationSidebar(props: {
           <CreateChatIcon size={16} />
         </button>
       </div>
-      <div className={"[padding:0_4px_10px] [&_input]:[width:100%] [&_input]:[height:36px] [&_input]:[min-width:0] [&_input]:[border:0] [&_input]:[border-radius:8px] [&_input]:[padding:0_12px] [&_input]:[color:var(--text-primary)] [&_input]:[background:var(--transparency-hover)] [&_input]:[outline:none] [&_input]:[font-size:13px] [&_input::placeholder]:[color:var(--text-placeholder)] [&_input:focus]:[box-shadow:inset_0_0_0_1px_var(--line-focus-window)]"}>
+      <div className={"[padding:0_12px_10px] [&_input]:[width:100%] [&_input]:[height:36px] [&_input]:[min-width:0] [&_input]:[border:0] [&_input]:[border-radius:8px] [&_input]:[padding:0_12px] [&_input]:[color:var(--text-primary)] [&_input]:[background:var(--transparency-hover)] [&_input]:[outline:none] [&_input]:[font-size:13px] [&_input::placeholder]:[color:var(--text-placeholder)] [&_input:focus]:[box-shadow:inset_0_0_0_1px_var(--line-focus-window)]"}>
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
@@ -166,11 +166,11 @@ export function ConversationSidebar(props: {
           );
         })}
       </div>
-      <div className={"[position:relative] [display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [overflow:hidden] [border-top:1px_solid_var(--border-1)] [border-radius:0] [padding:8px_4px] [background:var(--background-panel)]"}>
+      <div className={"[position:relative] [display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [overflow:hidden] [border-top:1px_solid_var(--border-1)] [border-radius:0] [padding:4px] [background:var(--background-panel)]"}>
         <button
           ref={props.profileButtonRef}
           type="button"
-          className={"[display:flex] [min-width:0] [flex:1_1_auto] [align-items:center] [gap:10px] [border:0] [border-radius:8px] [padding:12px] [color:var(--text-primary)] [background:transparent] [text-align:left] [transition:background-color_0.12s_ease] [&:hover]:[background:var(--transparency-hover)]"}
+          className={"[display:flex] [min-width:0] [flex:1_1_auto] [align-items:center] [gap:10px] [border:0] [border-radius:8px] [padding:8px_12px] [color:var(--text-primary)] [background:transparent] [text-align:left] [transition:background-color_0.12s_ease] [&:hover]:[background:var(--transparency-hover)]"}
           aria-label={`${props.userProfile.displayName} profile`}
           title={props.userProfile.displayName}
           aria-expanded={props.profileMenuOpen}

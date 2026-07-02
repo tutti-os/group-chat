@@ -165,7 +165,7 @@ export function ConversationFilesPanel(props: {
     <aside
       className={"[grid-column:2] [grid-row:2_/_4] [display:grid] [min-width:0] [min-height:0] [grid-template-rows:auto_auto_auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border-1)] [background:var(--background-panel)] max-[760px]:[grid-column:1] max-[760px]:[grid-row:2_/_4]"}
     >
-      <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [padding:14px] [border-bottom:1px_solid_var(--border-1)]"}>
+      <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [padding:8px_14px]"}>
         <div className={"[display:flex] [min-width:0] [align-items:baseline] [gap:8px] [&_h3]:[margin:0] [&_h3]:[font-size:15px] [&_h3]:[font-weight:720] [&_h3]:[line-height:1.2] [&_span]:[color:var(--text-secondary)] [&_span]:[font-size:11px] [&_span]:[line-height:1.2]"}>
           <h3>{t("files.title")}</h3>
           <span>{t("files.count", { count: filteredArtifacts.length })}</span>
@@ -181,14 +181,14 @@ export function ConversationFilesPanel(props: {
         </button>
       </div>
 
-      <div className={"[display:flex] [gap:8px] [padding:12px_12px_0] [overflow-x:auto]"}>
+      <div className={"[display:flex] [gap:8px] [padding:0_12px] [overflow-x:auto]"}>
         {categoryTabs.map((tab) => {
           const active = category === tab.id;
           return (
             <button
               key={tab.id}
               type="button"
-              className={`[display:inline-flex] [height:32px] [flex:0_0_auto] [align-items:center] [border:0] [border-radius:999px] [padding:0_14px] [font-size:13px] [font-weight:650] [transition:background-color_0.12s_ease,_color_0.12s_ease] ${active ? "[color:var(--white-stationary)] [background:var(--black-stationary)]" : "[color:var(--text-secondary)] [background:var(--transparency-block)] hover:[color:var(--text-primary)] hover:[background:var(--transparency-hover)]"}`}
+              className={`[display:inline-flex] [height:32px] [flex:0_0_auto] [align-items:center] [border:0] [border-radius:8px] [padding:0_14px] [font-size:13px] [font-weight:650] [transition:background-color_0.12s_ease,_color_0.12s_ease] ${active ? "[color:var(--tutti-purple)] [background:var(--tutti-purple-bg)]" : "[color:var(--text-secondary)] [background:var(--transparency-block)] hover:[color:var(--text-primary)] hover:[background:var(--transparency-hover)]"}`}
               aria-pressed={active}
               onClick={() => setCategory(tab.id)}
             >
@@ -199,7 +199,7 @@ export function ConversationFilesPanel(props: {
       </div>
 
       <div className={"[padding:12px_12px_0]"}>
-        <label className={"[display:flex] [height:38px] [align-items:center] [gap:8px] [border-radius:12px] [padding:0_12px] [color:var(--text-secondary)] [background:var(--transparency-block)] [&_input]:[width:100%] [&_input]:[min-width:0] [&_input]:[border:0] [&_input]:[color:var(--text-primary)] [&_input]:[background:transparent] [&_input]:[font-size:13px] [&_input]:[outline:none] [&_input::placeholder]:[color:var(--text-placeholder)]"}>
+        <label className={"[display:flex] [height:38px] [align-items:center] [gap:8px] [border-radius:8px] [padding:0_12px] [color:var(--text-secondary)] [background:var(--transparency-block)] [&_input]:[width:100%] [&_input]:[min-width:0] [&_input]:[border:0] [&_input]:[color:var(--text-primary)] [&_input]:[background:transparent] [&_input]:[font-size:13px] [&_input]:[outline:none] [&_input::placeholder]:[color:var(--text-placeholder)]"}>
           <Search size={15} />
           <input
             value={query}
@@ -234,7 +234,7 @@ export function ConversationFilesPanel(props: {
           return (
             <article
               key={artifact.id}
-              className={"[display:grid] [grid-template-columns:40px_minmax(0,_1fr)_auto] [align-items:center] [gap:8px] [border:1px_solid_var(--border-1)] [border-radius:12px] [padding:8px] [background:var(--white-stationary)] [transition:border-color_0.12s_ease,_background-color_0.12s_ease] hover:[border-color:var(--line-focus-window)] hover:[background:var(--background-panel)]"}
+              className={"[display:grid] [grid-template-columns:40px_minmax(0,_1fr)_auto] [align-items:center] [gap:8px] [border:1px_solid_var(--border-1)] [border-radius:8px] [padding:8px] [background:var(--white-stationary)] [transition:border-color_0.12s_ease,_background-color_0.12s_ease] hover:[border-color:var(--line-focus-window)] hover:[background:var(--background-panel)]"}
             >
               <button
                 type="button"
@@ -243,7 +243,7 @@ export function ConversationFilesPanel(props: {
                 onClick={() => handleFileRowClick(artifact)}
                 onDoubleClick={(event) => handleFileRowDoubleClick(artifact, event)}
               >
-                <span className={"[display:grid] [width:40px] [height:40px] [place-items:center] [overflow:hidden] [border-radius:8px] [background:var(--background-panel)]"}>
+                <span className={"[display:grid] [width:40px] [height:40px] [place-items:center] [overflow:hidden] [border-radius:4px] [background:var(--background-panel)]"}>
                   {artifactCategory === "image" ? (
                     <img
                       src={artifact.publicUrl}
@@ -251,7 +251,7 @@ export function ConversationFilesPanel(props: {
                       className={"[width:100%] [height:100%] [object-fit:cover]"}
                     />
                   ) : (
-                    <span className={"[display:grid] [width:30px] [height:34px] [place-items:center] [border-radius:6px] [color:var(--white-stationary)] [background:var(--text-secondary)]"}>
+                    <span className={"[display:grid] [width:30px] [height:34px] [place-items:center] [border-radius:4px] [color:var(--white-stationary)] [background:var(--text-secondary)]"}>
                       {artifactCategory === "video" ? <Video size={16} /> : <FileText size={16} />}
                     </span>
                   )}

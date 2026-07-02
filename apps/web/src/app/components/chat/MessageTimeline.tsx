@@ -293,7 +293,6 @@ export function MessageTimeline(props: {
   onOpenMessageLink: (messageId: string) => void;
   onOpenSummaryLink: (taskId: string) => void;
   onInsertSummaryLink?: (taskId: string) => void;
-  onInsertSuggestion?: (content: string) => void;
   onEnsureSummaryTask: (taskId: string) => Promise<BackgroundTask | null>;
   summaryTasks: BackgroundTask[];
   onQuoteMessages: (messages: Message[], mode?: "quote" | "summary" | "send-to-app" | "send-to-agent") => void;
@@ -883,14 +882,13 @@ export function MessageTimeline(props: {
   return (
     <section
       ref={scrollRef}
-      className={`[position:relative] [min-height:0] [overflow-y:auto] [background:var(--background-panel)] [padding:26px_18px_8px_14px] [&_article:last-of-type]:[margin-bottom:0] max-[1080px]:[padding-inline:14px_18px] max-[760px]:[padding:18px_18px_8px_14px]`}
+      className={`[position:relative] [min-height:0] [overflow-y:auto] [background:var(--background-panel)] [padding:26px_24px_120px] [&_article:last-of-type]:[margin-bottom:0] max-[760px]:[padding:18px_24px_120px]`}
       onScroll={handleTimelineScroll}
     >
       {!hasAnyTimelineMessages ? (
         <EmptyTimelineState
           participantsCount={props.participantsCount}
           onOpenMembers={props.onOpenMembers}
-          onInsertSuggestion={props.onInsertSuggestion}
         />
       ) : null}
       {visibleMessages.map((message) => {
@@ -1108,34 +1106,18 @@ export function MessageTimeline(props: {
 function EmptyTimelineState(props: {
   participantsCount: number;
   onOpenMembers: (options?: { startAdding?: boolean }) => void;
-  onInsertSuggestion?: (content: string) => void;
 }) {
   const noAgents = props.participantsCount === 0;
   const title = (noAgents ? t("timeline.emptyNoAgentsTitle") : t("timeline.emptyStartTitle")).trim();
   const hint = (noAgents ? t("timeline.emptyNoAgentsHint") : t("timeline.emptyStartHint")).trim();
-  const suggestions = [
-    t("timeline.suggestionAnalyze"),
-    t("timeline.suggestionProductPlan"),
-    t("timeline.suggestionDiscussAll"),
-  ].map((item) => item.trim()).filter(Boolean);
 
   return (
     <div className={"[display:grid] [min-height:100%] [place-items:center] [padding:28px] [text-align:center]"}>
       <div className={"[display:grid] [max-width:520px] [gap:14px] [&_h3]:[margin:0] [&_h3]:[color:var(--text-primary)] [&_h3]:[font-size:15px] [&_h3]:[font-weight:700] [&_p]:[margin:0] [&_p]:[color:var(--text-secondary)] [&_p]:[font-size:13px] [&_p]:[line-height:1.6]"}>
-        {title ? <h3>{title}</h3> : null}
-        {hint ? <p>{hint}</p> : null}
-        {suggestions.length > 0 ? (
-          <div className={"[display:flex] [flex-wrap:wrap] [justify-content:center] [gap:8px]"}>
-            {suggestions.map((suggestion) => (
-              <button
-                key={suggestion}
-                type="button"
-                className={"[border:1px_solid_var(--border-1)] [border-radius:999px] [padding:5px_10px] [color:var(--tutti-purple)] [background:var(--white-stationary)] [font-size:11px] [line-height:1.2] [cursor:pointer] [transition:background-color_0.12s_ease] hover:[background:var(--tutti-purple-bg)] focus-visible:[outline:none] focus-visible:[border-color:var(--border-1)]"}
-                onClick={() => props.onInsertSuggestion?.(suggestion)}
-              >
-                {suggestion}
-              </button>
-            ))}
+        {title || hint ? (
+          <div className={"[display:grid] [gap:12px]"}>
+            {title ? <h3>{title}</h3> : null}
+            {hint ? <p>{hint}</p> : null}
           </div>
         ) : null}
         <Button
@@ -1389,7 +1371,8 @@ function SystemNoticeRow(props: {
 }
 
 const messageRoleContentClassName =
-  "[&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[background:var(--transparency-block)] "
+  "[&_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[max-width:min(760px,_100%)] "
+  + "[&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[background:var(--transparency-block)] "
   + "[&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[border-radius:8px] "
   + "[&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[border-color:transparent] "
   + "[&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[background:var(--accent-bg)] "
@@ -1644,7 +1627,7 @@ function MessageRow(props: {
             {shouldRenderCompositeConversationBlocks ? (
               <div
                 data-slot="message-composite-block"
-                className={"message-prose [box-sizing:border-box] [display:grid] [width:fit-content] [min-width:0] [max-width:100%] [gap:6px] [overflow-wrap:break-word] [word-break:normal] [white-space:pre-wrap] [border:0] [border-radius:4px_6px_6px_4px] [padding:10px_13px] [color:var(--text-primary)] [&_[data-slot=artifact-block]]:[margin-top:0] [&_[data-slot=message-block]]:[max-width:100%]"}
+                className={"message-prose [box-sizing:border-box] [display:grid] [width:fit-content] [min-width:0] [max-width:min(640px,_100%)] [gap:6px] [overflow-wrap:break-word] [word-break:normal] [white-space:pre-wrap] [border:0] [border-radius:4px_6px_6px_4px] [padding:10px_13px] [color:var(--text-primary)] [&_[data-slot=artifact-block]]:[margin-top:0] [&_[data-slot=message-block]]:[max-width:100%]"}
               >
                 {visibleConversationBlocks.map((block, index) => renderConversationBlock(block, index, { compositeChild: true }))}
               </div>
@@ -2354,7 +2337,7 @@ function SummaryAgentPicker(props: {
     : compactInline(props.messages[0]?.content || attachmentLabel());
   return (
     <div className={"[position:fixed] [inset:0] [z-index:90] [display:grid] [place-items:center] [padding:24px] [background:color-mix(in_srgb,var(--black-stationary)_34%,transparent)]"} role="dialog" aria-modal="true" aria-label={t("messageActions.pickSummaryAgent")}>
-      <div className={"[display:grid] [width:min(420px,_calc(100vw_-_40px))] [gap:12px] [border:1px_solid_var(--border-1)] [border-radius:18px] [padding:16px] [background:var(--background-fronted)] [box-shadow:0_24px_70px_color-mix(in_srgb,var(--black-stationary)_22%,transparent)]"}>
+      <div className={"[display:grid] [width:min(420px,_calc(100vw_-_40px))] [gap:12px] [border:1px_solid_var(--border-1)] [border-radius:16px] [padding:16px] [background:var(--background-fronted)] [box-shadow:0_24px_70px_color-mix(in_srgb,var(--black-stationary)_22%,transparent)]"}>
         <header className={"[display:grid] [grid-template-columns:minmax(0,_1fr)_30px] [align-items:center] [gap:10px]"}>
           <span className={"[display:grid] [gap:3px]"}>
             <strong className={"[font-size:15px] [font-weight:750] [color:var(--text-primary)]"}>{t("messageActions.pickAgentTitle")}</strong>
@@ -3377,7 +3360,7 @@ export function MessageBlockRenderer(props: {
       data-block-id={props.block.id}
       data-link-only={isLinkOnly || undefined}
       data-composite-child={props.compositeChild || undefined}
-      className={`message-prose [box-sizing:border-box] [width:max-content] [min-width:0] [max-width:100%] [overflow-wrap:break-word] [word-break:normal] [white-space:pre-wrap] [border:0] [color:var(--text-primary)] ${props.compositeChild ? "[padding:0] [background:transparent] [border-radius:0]" : isLinkOnly ? "[display:grid] [gap:6px] [padding:0] [background:transparent] [border-radius:0]" : hasWhisperFooter ? "[display:flex] [flex-direction:column] [gap:4px] [padding:10px_12px] [border-radius:8px]" : "[padding:10px_13px] [border-radius:4px_6px_6px_4px]"} ${props.block.status === "streaming" ? "[border-color:color-mix(in_srgb,var(--accent-codex)_18%,transparent)]" : ""} ${props.block.status === "error" && !hasWhisperFooter ? "[border:1px_solid_color-mix(in_srgb,var(--state-danger)_18%,transparent)] [color:var(--state-danger)] [background:var(--on-danger)]" : ""}`}
+      className={`message-prose [box-sizing:border-box] [width:max-content] [min-width:0] [max-width:min(640px,_100%)] [overflow-wrap:break-word] [word-break:normal] [white-space:pre-wrap] [border:0] [color:var(--text-primary)] ${props.compositeChild ? "[padding:0] [background:transparent] [border-radius:0]" : isLinkOnly ? "[display:grid] [gap:6px] [padding:0] [background:transparent] [border-radius:0]" : hasWhisperFooter ? "[display:flex] [flex-direction:column] [gap:4px] [padding:10px_12px] [border-radius:8px]" : "[padding:10px_13px] [border-radius:4px_6px_6px_4px]"} ${props.block.status === "streaming" ? "[border-color:color-mix(in_srgb,var(--accent-codex)_18%,transparent)]" : ""} ${props.block.status === "error" && !hasWhisperFooter ? "[border:1px_solid_color-mix(in_srgb,var(--state-danger)_18%,transparent)] [color:var(--state-danger)] [background:var(--on-danger)]" : ""}`}
     >
       {props.quotedMessage ? (
         <ReferencedMessagePreview
@@ -3845,7 +3828,7 @@ export function ArtifactBlock(props: { artifact: Artifact; onOpen: () => void })
       type="button"
       data-slot="artifact-block"
       data-artifact-id={props.artifact.id}
-      className={"[display:grid] [width:min(300px,_100%)] [min-width:0] [min-height:40px] [overflow:hidden] [grid-template-columns:28px_minmax(0,_1fr)] [align-items:center] [gap:9px] [margin-top:6px] [border:1px_solid_var(--border-1)] [border-radius:10px] [padding:6px_10px] [color:var(--text-primary)] [background:var(--white-stationary)] [cursor:pointer] [box-shadow:0_1px_2px_color-mix(in_srgb,var(--black-stationary)_3%,transparent)] [transition:border-color_0.12s_ease,_background-color_0.12s_ease,_box-shadow_0.12s_ease] hover:[border-color:var(--line-focus-window)] hover:[background:var(--background-panel)] hover:[box-shadow:0_3px_10px_color-mix(in_srgb,var(--black-stationary)_5%,transparent)] focus-visible:[outline:none] focus-visible:[border-color:var(--line-focus-window)] [&[data-copy-selected]]:[border-color:var(--accent-codex)] [&[data-copy-selected]]:[background:var(--accent-bg)] [&[data-copy-selected]]:[box-shadow:0_0_0_2px_color-mix(in_srgb,var(--accent-codex)_22%,transparent)] [&[data-flash=true]]:[box-shadow:0_0_0_2px_var(--state-warning)] [&[data-flash=true]]:[border-color:var(--state-warning)]"}
+      className={"[display:grid] [width:min(300px,_100%)] [min-width:0] [min-height:40px] [overflow:hidden] [grid-template-columns:28px_minmax(0,_1fr)] [align-items:center] [gap:9px] [margin-top:6px] [border:1px_solid_var(--border-1)] [border-radius:6px] [padding:8px] [color:var(--text-primary)] [background:var(--white-stationary)] [cursor:pointer] [box-shadow:none] [transition:border-color_0.12s_ease,_background-color_0.12s_ease] hover:[border-color:var(--line-focus-window)] hover:[background:var(--background-panel)] hover:[box-shadow:none] focus-visible:[outline:none] focus-visible:[border-color:var(--line-focus-window)] [&[data-copy-selected]]:[border-color:var(--accent-codex)] [&[data-copy-selected]]:[background:var(--accent-bg)] [&[data-copy-selected]]:[box-shadow:none] [&[data-flash=true]]:[box-shadow:none] [&[data-flash=true]]:[border-color:var(--state-warning)]"}
       onClick={props.onOpen}
       title={t("messageActions.revealInFileManager")}
     >

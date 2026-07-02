@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ImageUp, Trash2, X } from "lucide-react";
+import { Input } from "@tutti-os/ui-system";
 import type { Room, UpdateRoomRequest } from "@group-chat/shared";
 import { isRoomImageAvatar, readRoomAvatarImageFile, ROOM_AVATAR_EMOJIS } from "../../room-avatar.js";
 import { useTranslation } from "../../i18n/index.js";
@@ -96,7 +97,7 @@ export function RoomSettingsDialog(props: {
       onClick={closeDialog}
     >
       <div
-        className={"[position:relative] [width:min(420px,_calc(100vw_-_32px))] [overflow:hidden] [border:1px_solid_var(--line-focus-window)] [border-radius:8px] [background:var(--background-fronted)] [box-shadow:0_24px_80px_color-mix(in_srgb,var(--black-stationary)_24%,transparent)]"}
+        className={"[position:relative] [width:min(420px,_calc(100vw_-_32px))] [overflow:hidden] [border:1px_solid_var(--line-focus-window)] [border-radius:16px] [background:var(--background-fronted)] [box-shadow:0_24px_80px_color-mix(in_srgb,var(--black-stationary)_24%,transparent)]"}
         onClick={(event) => event.stopPropagation()}
       >
         <button
@@ -161,10 +162,13 @@ export function RoomSettingsDialog(props: {
             <span className={"[color:var(--text-secondary)] [font-size:11px]"}>{t("roomSettings.localImageHint")}</span>
           ) : null}
         </div>
-        <div className={"[display:grid] [gap:8px] [padding:0_24px_24px] [&_label]:[display:grid] [&_label]:[gap:8px] [&_label_>_span]:[color:var(--text-secondary)] [&_label_>_span]:[font-size:11px] [&_label_>_span]:[font-weight:680] [&_input]:[width:100%] [&_input]:[height:44px] [&_input]:[border:1px_solid_var(--line-focus-window)] [&_input]:[border-radius:8px] [&_input]:[padding:0_13px] [&_input]:[color:var(--text-primary)] [&_input]:[background:var(--background-panel)] [&_input]:[outline:none] [&_input]:[font-size:13px]"}>
-          <label>
+        <div className={"[display:grid] [gap:8px] [padding:0_24px_24px] [&_label]:[display:grid] [&_label]:[gap:8px] [&_label_>_span]:[color:var(--text-secondary)] [&_label_>_span]:[font-size:11px] [&_label_>_span]:[font-weight:680]"}>
+          <label htmlFor="room-settings-name">
             <span>{t("roomSettings.roomName")}</span>
-            <input
+            <Input
+              id="room-settings-name"
+              variant="md"
+              className={"[font-weight:620]"}
               value={title}
               maxLength={64}
               disabled={saving}
