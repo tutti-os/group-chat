@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { X } from "lucide-react";
+import { Button } from "@tutti-os/ui-system";
 import type { LocalUserProfile } from "../../user-profile.js";
 import { useTranslation } from "../../i18n/index.js";
 import { AvatarPicker } from "../ui/AvatarPicker.js";
@@ -101,15 +102,17 @@ export function ProfileMenu(props: {
     >
       <header className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:12px] [padding:14px_16px_0]"}>
         <h2 className={"[margin:0] [color:var(--text-primary)] [font-size:15px] [font-weight:680] [line-height:1.2]"}>{t("profileMenu.title")}</h2>
-        <button
+        <Button
           type="button"
-          className={"dialog-close-button [display:grid] [width:30px] [height:30px] [flex-shrink:0] [place-items:center] [border:0] [border-radius:999px] [color:var(--text-secondary)] [background:transparent] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)]"}
+          variant="ghost"
+          size="icon-sm"
+          className={"[flex-shrink:0]"}
           aria-label={t("common.close")}
           title={t("common.close")}
           onClick={props.onClose}
         >
           <X size={16} />
-        </button>
+        </Button>
       </header>
 
       <div className={"[display:flex] [align-items:center] [gap:14px] [padding:14px_16px_0]"}>
@@ -149,20 +152,22 @@ export function ProfileMenu(props: {
       </section>
 
       <footer className={"[display:flex] [justify-content:flex-end] [gap:8px] [margin-top:16px] [padding:12px_16px_14px] [border-top:1px_solid_var(--border-1)]"}>
-        <button
+        <Button
           type="button"
-          className={"[display:inline-flex] [height:34px] [align-items:center] [justify-content:center] [border:1px_solid_var(--border-1)] [border-radius:10px] [padding:0_14px] [color:var(--text-primary)] [background:var(--white-stationary)] [font-size:13px] [font-weight:650] [&:hover]:[background:var(--background-panel)]"}
+          variant="secondary"
+          size="dialog"
           onClick={props.onClose}
         >
           {t("common.cancel")}
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className={"[display:inline-flex] [height:34px] [align-items:center] [justify-content:center] [border:0] [border-radius:10px] [padding:0_14px] [color:var(--white-stationary)] [background:var(--black-stationary)] [font-size:13px] [font-weight:700] [&:hover]:[background:var(--accent-codex)]"}
+          variant="default"
+          size="dialog"
           onClick={save}
         >
           {t("common.save")}
-        </button>
+        </Button>
       </footer>
     </div>
   );
