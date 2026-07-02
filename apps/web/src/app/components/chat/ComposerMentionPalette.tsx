@@ -29,6 +29,7 @@ import {
   type MentionPanelTab,
 } from "../../mention-panel-tabs.js";
 import {
+  resolveMentionThumbnailUrl,
   tuttiAtMentionKey,
   type TuttiAtQueryResult,
 } from "../../tutti-at-mentions.js";
@@ -285,13 +286,14 @@ function optionToMentionMatch(option: MentionOption): ComposerMentionMatch {
 }
 
 function referenceResultToMentionMatch(item: TuttiAtQueryResult): ComposerMentionMatch {
+  const iconUrl = resolveMentionThumbnailUrl(item.roomFile?.previewUrl ?? item.thumbnailUrl);
   return {
     providerId: item.providerId,
     trigger: COMPOSER_MENTION_TRIGGER,
     key: tuttiAtMentionKey(item.providerId, item.itemId),
     label: item.label,
     subtitle: item.subtitle,
-    iconUrl: item.roomFile?.previewUrl ?? item.thumbnailUrl ?? undefined,
+    iconUrl: iconUrl ?? undefined,
     item,
     insertResult: item.insert,
   };
@@ -344,12 +346,14 @@ function mentionMatchLeading(
   if (isReferenceMentionItem(option)) {
     if (isFileReferenceProvider(option.providerId)) return undefined;
     if (option.providerId === "workspace-issue") return <MentionIssueIcon />;
+    const iconUrl = resolveMentionThumbnailUrl(leadingContext.iconUrl);
+    const thumbnailUrl = resolveMentionThumbnailUrl(leadingContext.thumbnailUrl);
     return renderMentionReferenceLeading({
       fileVisualKind: leadingContext.fileVisualKind,
-      iconUrl: leadingContext.iconUrl,
+      iconUrl: iconUrl ?? undefined,
       kind: leadingContext.providerKind,
       label: leadingContext.label,
-      thumbnailUrl: leadingContext.thumbnailUrl,
+      thumbnailUrl: thumbnailUrl ?? undefined,
     });
   }
   if (option.kind === "all") {
@@ -462,6 +466,7 @@ function MentionParticipantAvatar(props: {
         avatar={resolvedAvatar.avatar}
         provider={resolvedAvatar.provider}
         size={32}
+        hideProviderBadge
       />
     </span>
   );

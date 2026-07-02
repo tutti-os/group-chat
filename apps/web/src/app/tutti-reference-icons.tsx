@@ -7,11 +7,8 @@ const DOC_PATH = "M14 1.001a3.4 3.4 0 0 1 2.411.998l3.586 3.586.116.121A3.4 3.4 
 const ISSUE_PATH = "M18.75 2a3.4 3.4 0 0 1 2.255.838c.62.55.995 1.326.995 2.162v14c0 .836-.375 1.611-.995 2.162A3.4 3.4 0 0 1 18.75 22H5.25a3.4 3.4 0 0 1-2.255-.838A2.9 2.9 0 0 1 2 19V5c0-.836.375-1.611.995-2.162A3.4 3.4 0 0 1 5.25 2zm-7.912 12.115a1 1 0 0 0-1.414 0l-2.047 2.047-.67-.67a1 1 0 0 0-1.414 1.414l1.377 1.377a1 1 0 0 0 1.414 0l2.754-2.754a1 1 0 0 0 0-1.414m3.046 2.298a1 1 0 0 0 0 2h4a1 1 0 1 0 0-2zm0-5.5a1 1 0 0 0 0 2h4a1 1 0 1 0 0-2zM6.688 5.25C5.756 5.25 5 6.006 5 6.938v2.754c0 .933.756 1.689 1.688 1.689h2.754a1.69 1.69 0 0 0 1.689-1.689V6.938c0-.932-.756-1.688-1.689-1.688zm2.443 2v2.13H7V7.25zm4.753-1.837a1 1 0 0 0 0 2h4a1 1 0 0 0 0-2z";
 const SESSION_PATH = "M20.833 2.125a3.085 3.085 0 0 1 3.083 3.083v12.5a3.084 3.084 0 0 1-3.083 3.084H7.113c-.288 0-.563.114-.766.317l-2.294 2.294a1.74 1.74 0 0 1-2.97-1.23V5.208a3.084 3.084 0 0 1 3.083-3.083zM8.5 9A1.5 1.5 0 0 0 7 10.5v2a1.5 1.5 0 0 0 3 0v-2A1.5 1.5 0 0 0 8.5 9m8 0a1.5 1.5 0 0 0-1.5 1.5v2a1.5 1.5 0 0 0 3 0v-2A1.5 1.5 0 0 0 16.5 9";
 
-function workspaceAppIconUrl(appId?: string | null, iconUrl?: string | null) {
-  const explicit = iconUrl?.trim();
-  if (explicit) return explicit;
-  const id = appId?.trim();
-  return id ? `tutti://workspace-apps/${encodeURIComponent(id)}/icon.png` : null;
+function workspaceAppIconUrl(_appId?: string | null, iconUrl?: string | null) {
+  return iconUrl?.trim() || null;
 }
 
 function referenceIconPath(providerId: TuttiAtProviderId) {
