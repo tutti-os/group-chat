@@ -4,6 +4,8 @@ import { t } from "./i18n/index.js";
 export function formatMessageStatus(status: Message["status"]) {
   if (status === "success") return "";
   if (status === "streaming") return "";
+  if (status === "deleted") return "";
+  if (status === "recalled") return "";
   if (status === "pending") return t("message.status.pending");
   if (status === "error") return t("message.status.error");
   if (status === "cancelled") return t("message.status.cancelled");

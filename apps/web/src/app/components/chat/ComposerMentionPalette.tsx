@@ -35,6 +35,7 @@ import {
 import { getRuntimeProviderAvatarStyle, resolveAgentAvatarFromContext } from "../../identity-avatar.js";
 
 const COMPOSER_MENTION_TRIGGER = "@";
+const ISSUE_MENTION_ICON_URL = "/mention-icons/issue-colorful.png";
 
 export type MentionOption =
   | { kind: "all"; key: "all"; label: string }
@@ -148,7 +149,7 @@ export function ComposerMentionPalette(props: ComposerMentionPaletteProps) {
     <div
       ref={props.menuRef}
       data-agent-chat-composer-palette
-      className={`mentionMenu [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:18px] [background:var(--panel)] [box-shadow:0_14px_42px_rgb(0_0_0_/_12%)] ${fileSelectMode ? "[display:grid] [grid-template-rows:minmax(0,_1fr)_auto]" : ""}`}
+      className={`mentionMenu [overflow:hidden] [border:1px_solid_var(--border-1)] [border-radius:18px] [background:var(--background-fronted)] [box-shadow:0_14px_42px_color-mix(in_srgb,var(--black-stationary)_12%,transparent)] ${fileSelectMode ? "[display:grid] [grid-template-rows:minmax(0,_1fr)_auto]" : ""}`}
       style={props.menuStyle}
     >
       <MentionPaletteFromState<ComposerMentionMatch>
@@ -342,6 +343,7 @@ function mentionMatchLeading(
   const option = leadingContext.match.item;
   if (isReferenceMentionItem(option)) {
     if (isFileReferenceProvider(option.providerId)) return undefined;
+    if (option.providerId === "workspace-issue") return <MentionIssueIcon />;
     return renderMentionReferenceLeading({
       fileVisualKind: leadingContext.fileVisualKind,
       iconUrl: leadingContext.iconUrl,
@@ -352,7 +354,7 @@ function mentionMatchLeading(
   }
   if (option.kind === "all") {
     return (
-      <MentionLeadingIconFrame rounded="full" background="var(--primary)" color="#ffffff">
+      <MentionLeadingIconFrame rounded="full" background="var(--black-stationary)" color="var(--white-stationary)">
         <AtSign size={14} />
       </MentionLeadingIconFrame>
     );
@@ -363,6 +365,20 @@ function mentionMatchLeading(
       participant={option.participant}
       identities={context.identities}
       runtimeProfiles={context.runtimeProfiles}
+    />
+  );
+}
+
+function MentionIssueIcon() {
+  return (
+    <img
+      src={ISSUE_MENTION_ICON_URL}
+      alt=""
+      className={"[display:block] [width:32px] [height:32px] [flex:0_0_32px] [object-fit:contain]"}
+      aria-hidden="true"
+      decoding="async"
+      draggable={false}
+      loading="lazy"
     />
   );
 }
@@ -384,7 +400,7 @@ function MentionLeadingIconFrame(props: {
   return (
     <span
       aria-hidden="true"
-      className={`[display:inline-grid] [width:32px] [height:32px] [flex:0_0_32px] [overflow:hidden] [place-items:center] [font-size:12px] [font-weight:800] [line-height:1] ${props.rounded === "full" ? "[border-radius:999px]" : "[border-radius:10px]"}`}
+      className={`[display:inline-grid] [width:32px] [height:32px] [flex:0_0_32px] [overflow:hidden] [place-items:center] [font-size:11px] [font-weight:800] [line-height:1] ${props.rounded === "full" ? "[border-radius:999px]" : "[border-radius:10px]"}`}
       style={{ background: props.background, color: props.color }}
     >
       {props.children}
@@ -394,21 +410,29 @@ function MentionLeadingIconFrame(props: {
 
 function MentionLocalAgentAvatar(props: { runtimeProfile: LocalAgentMentionOption["runtimeProfile"] }) {
   const style = getRuntimeProviderAvatarStyle(props.runtimeProfile.provider);
-  const usesAppIcon = Boolean(style?.iconUrl);
-  return (
-    <span
-      className={`[display:inline-grid] [width:32px] [height:32px] [flex:0_0_32px] [overflow:hidden] [border-radius:10px] [place-items:center] ${usesAppIcon ? "[background:transparent]" : "[background:#f3f4f6]"}`}
-      style={style && !usesAppIcon ? { background: style.background } : undefined}
-    >
-      {style?.iconUrl ? (
+  if (style?.iconUrl) {
+    return (
+      <span
+        className={"[display:inline-grid] [width:32px] [height:32px] [flex:0_0_32px] [overflow:hidden] [border-radius:8px] [place-items:center]"}
+        aria-hidden="true"
+      >
         <img
           src={style.iconUrl}
           alt=""
-          className={usesAppIcon ? "[width:32px] [height:32px] [object-fit:cover]" : "[width:18px] [height:18px] [object-fit:contain]"}
+          className={"[display:block] [object-fit:cover]"}
+          style={{ width: 34, height: 34 }}
         />
-      ) : (
-        <Bot size={14} className={"[color:#ffffff]"} />
-      )}
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className={"[display:inline-grid] [width:32px] [height:32px] [flex:0_0_32px] [overflow:hidden] [border-radius:8px] [place-items:center] [background:var(--background-panel)]"}
+      style={style ? { background: style.background } : undefined}
+      aria-hidden="true"
+    >
+      <Bot size={16} className={"[color:var(--white-stationary)]"} />
     </span>
   );
 }

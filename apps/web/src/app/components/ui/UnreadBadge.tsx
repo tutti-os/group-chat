@@ -16,7 +16,7 @@ export function UnreadBadge(props: {
 
   return (
     <span
-      className={`[position:absolute] [display:inline-grid] [place-items:center] [border:2px_solid_var(--panel)] [border-radius:999px] [color:#ffffff] [background:#ef4444] [font-weight:700] [line-height:1] [pointer-events:none] [box-shadow:0_1px_4px_rgb(239_68_68_/_35%)] ${size === "sm" ? "[top:-4px] [left:-4px] [min-width:16px] [height:16px] [padding:0_4px] [font-size:10px]" : "[top:-6px] [right:-6px] [left:auto] [min-width:18px] [height:18px] [padding:0_5px] [font-size:11px]"} ${compact ? "" : "[width:16px]"} ${props.className ?? ""}`}
+      className={`[position:absolute] [display:inline-grid] [place-items:center] [border:2px_solid_var(--background-fronted)] [border-radius:999px] [color:var(--white-stationary)] [background:var(--state-danger)] [font-weight:700] [line-height:1] [pointer-events:none] [box-shadow:0_1px_4px_color-mix(in_srgb,var(--state-danger)_35%,transparent)] ${size === "sm" ? "[top:-4px] [left:-4px] [min-width:16px] [height:16px] [padding:0_4px] [font-size:11px]" : "[top:-6px] [right:-6px] [left:auto] [min-width:18px] [height:18px] [padding:0_5px] [font-size:11px]"} ${compact ? "" : "[width:16px]"} ${props.className ?? ""}`}
       aria-label={t("unread.count", { count: props.count })}
     >
       {label}

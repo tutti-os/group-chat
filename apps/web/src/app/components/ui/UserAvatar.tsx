@@ -1,5 +1,4 @@
-import type { AvatarPresetId, LocalUserProfile } from "../../user-profile.js";
-import { SAIYAN_AVATAR_ART, SaiyanAvatarSvg } from "./saiyan-avatar-art.js";
+import { avatarPresetUrl, type AvatarPresetId, type LocalUserProfile } from "../../user-profile.js";
 
 export type UserAvatarSize = 34 | 40 | 48 | 58 | 68;
 
@@ -11,7 +10,7 @@ export function UserAvatar(props: {
   className?: string;
 }) {
   const size = props.size ?? 40;
-  const ringClass = props.selected ? "[box-shadow:0_0_0_3px_#ffffff,_0_0_0_5px_#171717]" : "";
+  const ringClass = props.selected ? "[box-shadow:0_0_0_3px_var(--white-stationary),_0_0_0_5px_var(--black-stationary)]" : "";
 
   if (props.customAvatarUrl) {
     return (
@@ -25,12 +24,12 @@ export function UserAvatar(props: {
   }
 
   return (
-    <span
-      className={`[display:inline-grid] [place-items:center] [overflow:hidden] [border-radius:999px] [flex:0_0_auto] ${ringClass} ${props.className ?? ""}`}
+    <img
+      src={avatarPresetUrl(props.preset)}
+      alt=""
+      className={`[display:block] [overflow:hidden] [border-radius:999px] [object-fit:cover] [flex:0_0_auto] ${ringClass} ${props.className ?? ""}`}
       style={{ width: size, height: size }}
-    >
-      <SaiyanAvatarSvg art={SAIYAN_AVATAR_ART[props.preset]} size={size} clipId={`avatar-${props.preset}-${size}`} />
-    </span>
+    />
   );
 }
 

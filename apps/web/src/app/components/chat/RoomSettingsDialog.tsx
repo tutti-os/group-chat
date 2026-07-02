@@ -91,25 +91,25 @@ export function RoomSettingsDialog(props: {
 
   return (
     <section
-      className={"[position:fixed] [inset:0] [z-index:60] [display:grid] [place-items:center] [background:rgb(0_0_0_/_46%)]"}
+      className={"[position:fixed] [inset:0] [z-index:60] [display:grid] [place-items:center] [background:color-mix(in_srgb,var(--black-stationary)_46%,transparent)]"}
       aria-label={t("roomSettings.title")}
       onClick={closeDialog}
     >
       <div
-        className={"[position:relative] [width:min(420px,_calc(100vw_-_32px))] [overflow:hidden] [border:1px_solid_#00000012] [border-radius:24px] [background:var(--panel)] [box-shadow:0_24px_80px_rgb(0_0_0_/_24%)]"}
+        className={"[position:relative] [width:min(420px,_calc(100vw_-_32px))] [overflow:hidden] [border:1px_solid_var(--line-focus-window)] [border-radius:8px] [background:var(--background-fronted)] [box-shadow:0_24px_80px_color-mix(in_srgb,var(--black-stationary)_24%,transparent)]"}
         onClick={(event) => event.stopPropagation()}
       >
         <button
           type="button"
-          className={"[position:absolute] [top:16px] [right:16px] [z-index:2] [display:inline-grid] [width:34px] [height:34px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000008]"}
+          className={"dialog-close-button [position:absolute] [top:16px] [right:16px] [z-index:2] [display:inline-grid] [width:34px] [height:34px] [place-items:center] [border:0] [border-radius:999px] [color:var(--text-secondary)] [background:transparent] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)]"}
           aria-label={t("common.close")}
           onClick={closeDialog}
         >
           <X size={18} />
         </button>
         <div className={"[padding:28px_24px_22px]"}>
-          <h3 className={"[margin:0] [color:var(--text)] [font-size:18px] [font-weight:760]"}>{t("roomSettings.title")}</h3>
-          <p className={"[margin:6px_0_0] [color:var(--muted)] [font-size:12px] [line-height:1.5]"}>{t("roomSettings.desc")}</p>
+          <h3 className={"[margin:0] [color:var(--text-primary)] [font-size:15px] [font-weight:760]"}>{t("roomSettings.title")}</h3>
+          <p className={"[margin:6px_0_0] [color:var(--text-secondary)] [font-size:11px] [line-height:1.5]"}>{t("roomSettings.desc")}</p>
         </div>
         <div className={"[display:grid] [justify-items:center] [gap:10px] [padding:0_24px_18px]"}>
           <button
@@ -119,16 +119,16 @@ export function RoomSettingsDialog(props: {
             onClick={pickLocalAvatar}
           >
             <span className={"[position:relative] [display:inline-grid]"}>
-              <RoomAvatar key={avatar ?? "default"} title={title || props.room.title} avatar={avatar} size={72} />
-              <span className={"[position:absolute] [right:-2px] [bottom:-2px] [display:inline-grid] [width:24px] [height:24px] [place-items:center] [border-radius:999px] [color:#ffffff] [background:#171717] [box-shadow:0_2px_8px_rgb(0_0_0_/_18%)]"}>
+              <RoomAvatar key={avatar ?? "default"} title={title || props.room.title} avatar={avatar} seed={props.room.id} size={72} />
+              <span className={"[position:absolute] [right:-2px] [bottom:-2px] [display:inline-grid] [width:24px] [height:24px] [place-items:center] [border-radius:999px] [color:var(--white-stationary)] [background:var(--black-stationary)] [box-shadow:0_2px_8px_color-mix(in_srgb,var(--black-stationary)_18%,transparent)]"}>
                 <ImageUp size={13} />
               </span>
             </span>
           </button>
           <div className={"[display:flex] [align-items:center] [justify-content:center]"}>
-            <span className={"[color:var(--muted)] [font-size:12px]"}>{t("roomSettings.pickAvatar")}</span>
+            <span className={"[color:var(--text-secondary)] [font-size:11px]"}>{t("roomSettings.pickAvatar")}</span>
           </div>
-          {uploadError ? <span className={"[color:var(--danger)] [font-size:12px]"}>{uploadError}</span> : null}
+          {uploadError ? <span className={"[color:var(--state-danger)] [font-size:11px]"}>{uploadError}</span> : null}
           <input
             ref={fileInputRef}
             type="file"
@@ -136,7 +136,7 @@ export function RoomSettingsDialog(props: {
             className={"[display:none]"}
             onChange={(event) => void handleAvatarFile(event.target.files?.[0] ?? null)}
           />
-          <div className={"[display:grid] [grid-template-columns:repeat(6,_minmax(0,_1fr))] [gap:8px] [width:100%] [&_button]:[display:grid] [&_button]:[place-items:center] [&_button]:[height:42px] [&_button]:[border:1px_solid_var(--border)] [&_button]:[border-radius:12px] [&_button]:[background:#ffffff] [&_button]:[font-size:20px] [&_button]:[transition:border-color_0.12s_ease,_background-color_0.12s_ease,_box-shadow_0.12s_ease] [&_button:hover]:[border-color:var(--border-strong)] [&_button:focus-visible]:[outline:none]"}>
+          <div className={"[display:grid] [grid-template-columns:repeat(6,_minmax(0,_1fr))] [gap:8px] [width:100%] [&_button]:[display:grid] [&_button]:[place-items:center] [&_button]:[height:42px] [&_button]:[border:1px_solid_var(--border-1)] [&_button]:[border-radius:8px] [&_button]:[background:var(--white-stationary)] [&_button]:[font-size:15px] [&_button]:[transition:border-color_0.12s_ease,_background-color_0.12s_ease,_box-shadow_0.12s_ease] [&_button:hover]:[border-color:var(--line-focus-window)] [&_button:focus-visible]:[outline:none]"}>
             {ROOM_AVATAR_EMOJIS.map((emoji) => {
               const selected = avatar === emoji;
               return (
@@ -145,7 +145,7 @@ export function RoomSettingsDialog(props: {
                   type="button"
                   aria-label={t("roomSettings.pickEmojiAvatar", { emoji })}
                   aria-pressed={selected}
-                  className={selected ? "![border-color:#171717] ![background:#f7f7f8] [box-shadow:0_0_0_2px_#17171722]" : ""}
+                  className={selected ? "![border-color:var(--black-stationary)] ![background:var(--background-panel)]" : ""}
                   onClick={() => {
                     setUploadError(null);
                     setAvatar(emoji);
@@ -158,10 +158,10 @@ export function RoomSettingsDialog(props: {
             })}
           </div>
           {isRoomImageAvatar(avatar) ? (
-            <span className={"[color:var(--muted)] [font-size:11px]"}>{t("roomSettings.localImageHint")}</span>
+            <span className={"[color:var(--text-secondary)] [font-size:11px]"}>{t("roomSettings.localImageHint")}</span>
           ) : null}
         </div>
-        <div className={"[display:grid] [gap:8px] [padding:0_24px_24px] [&_label]:[display:grid] [&_label]:[gap:8px] [&_label_>_span]:[color:#5f6368] [&_label_>_span]:[font-size:12px] [&_label_>_span]:[font-weight:680] [&_input]:[width:100%] [&_input]:[height:44px] [&_input]:[border:1px_solid_var(--border-strong)] [&_input]:[border-radius:12px] [&_input]:[padding:0_13px] [&_input]:[color:var(--text)] [&_input]:[background:#f7f7f8] [&_input]:[outline:none] [&_input]:[font-size:13px]"}>
+        <div className={"[display:grid] [gap:8px] [padding:0_24px_24px] [&_label]:[display:grid] [&_label]:[gap:8px] [&_label_>_span]:[color:var(--text-secondary)] [&_label_>_span]:[font-size:11px] [&_label_>_span]:[font-weight:680] [&_input]:[width:100%] [&_input]:[height:44px] [&_input]:[border:1px_solid_var(--line-focus-window)] [&_input]:[border-radius:8px] [&_input]:[padding:0_13px] [&_input]:[color:var(--text-primary)] [&_input]:[background:var(--background-panel)] [&_input]:[outline:none] [&_input]:[font-size:13px]"}>
           <label>
             <span>{t("roomSettings.roomName")}</span>
             <input
@@ -176,18 +176,18 @@ export function RoomSettingsDialog(props: {
             />
           </label>
         </div>
-        <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:12px] [padding:0_24px_24px] [&_button]:[display:inline-flex] [&_button]:[align-items:center] [&_button]:[justify-content:center] [&_button]:[height:36px] [&_button]:[border:0] [&_button]:[border-radius:12px] [&_button]:[padding:0_14px] [&_button]:[font-size:13px] [&_button]:[font-weight:650]"}>
-          <button type="button" className={"[gap:6px] [color:var(--danger)] [background:#dc26260d] [&:hover]:[background:#dc26261a]"} onClick={() => void props.onDeleteRoom()}>
+        <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:12px] [padding:0_24px_24px] [&_button]:[display:inline-flex] [&_button]:[align-items:center] [&_button]:[justify-content:center] [&_button]:[height:36px] [&_button]:[border:0] [&_button]:[border-radius:8px] [&_button]:[padding:0_14px] [&_button]:[font-size:13px] [&_button]:[font-weight:650]"}>
+          <button type="button" className={"[gap:6px] [color:var(--state-danger)] [background:var(--on-danger)] [&:hover]:[background:color-mix(in_srgb,var(--state-danger)_10%,transparent)]"} onClick={() => void props.onDeleteRoom()}>
             <Trash2 size={14} />
             {t("sidebar.deleteChat")}
           </button>
           <div className={"[display:flex] [gap:8px]"}>
-            <button type="button" className={"[color:var(--text)] [background:#00000008] [&:hover]:[background:#00000012]"} onClick={closeDialog}>
+            <button type="button" className={"[color:var(--text-primary)] [background:var(--transparency-hover)] [&:hover]:[background:var(--line-focus-window)]"} onClick={closeDialog}>
               {t("common.cancel")}
             </button>
             <button
               type="button"
-              className={"[color:#ffffff] [background:var(--primary)] [&:hover]:[background:#111111ee] [&:disabled]:[opacity:0.55]"}
+              className={"[color:var(--white-stationary)] [background:var(--black-stationary)] [&:hover]:[background:color-mix(in_srgb,var(--black-stationary)_93%,transparent)] [&:disabled]:[opacity:0.55]"}
               disabled={saving || !title.trim()}
               onClick={() => void save()}
             >

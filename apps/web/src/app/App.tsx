@@ -46,6 +46,7 @@ import {
 } from "../api/client.js";
 import { ConversationSidebar } from "./components/chat/ConversationSidebar.js";
 import { ChatHeader } from "./components/chat/ChatHeader.js";
+import { ChatMessageSearch } from "./components/chat/ChatMessageSearch.js";
 import { ConversationFilesPanel } from "./components/chat/ConversationFilesPanel.js";
 import { MessageLinkDetailPanel } from "./components/chat/MessageLinkDetailPanel.js";
 import { revealArtifactInTuttiFileManager } from "./artifact-actions.js";
@@ -58,7 +59,6 @@ import { DeleteMessageConfirmDialog } from "./components/chat/DeleteMessageConfi
 import { InvitePeopleDialog } from "./components/chat/InvitePeopleDialog.js";
 import { Composer } from "./components/chat/Composer.js";
 import { BackgroundTaskBar } from "./components/chat/BackgroundTaskBar.js";
-import { AppNavRail } from "./components/nav/AppNavRail.js";
 import { ProfileMenu } from "./components/settings/ProfileMenu.js";
 import { createDraftLocalAgent } from "./identity-draft.js";
 import { loadUserProfile, hydrateUserProfile, refreshUserProfileForLocale, saveUserProfile, type LocalUserProfile } from "./user-profile.js";
@@ -97,9 +97,7 @@ const MIN_CONVERSATION_SIDEBAR_WIDTH = 240;
 const DEFAULT_CONVERSATION_SIDEBAR_WIDTH = MIN_CONVERSATION_SIDEBAR_WIDTH;
 const CONVERSATION_SIDEBAR_WIDTH_STORAGE_KEY = "group-chat:conversation-sidebar-width";
 const MIN_CHAT_PANE_WIDTH = 460;
-const SPLITTER_WIDTH = 4;
-const DESKTOP_NAV_WIDTH = 60;
-const COMPACT_NAV_WIDTH = 56;
+const SPLITTER_WIDTH = 1;
 const MESSAGE_PAGE_SIZE = 10;
 const MESSAGE_PRERENDER_PAGE_COUNT = 1;
 const MESSAGE_PREFETCH_PAGE_COUNT = 2;
@@ -177,7 +175,7 @@ export function App() {
   );
   const [refreshingLocalAgentProviders, setRefreshingLocalAgentProviders] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
-  const [profileMenuPlacement, setProfileMenuPlacement] = useState<"rail" | "mobile" | "chat">("rail");
+  const [profileMenuPlacement, setProfileMenuPlacement] = useState<"sidebar" | "mobile" | "chat">("sidebar");
   const [profileMenuAnchorEl, setProfileMenuAnchorEl] = useState<HTMLElement | null>(null);
   const [userProfile, setUserProfile] = useState<LocalUserProfile>(() => loadUserProfile());
   const saveUserProfileState = useCallback((profile: LocalUserProfile) => {
@@ -189,6 +187,7 @@ export function App() {
   const [agentProfileShowRemove, setAgentProfileShowRemove] = useState(false);
   const [pendingNewAgentDraft, setPendingNewAgentDraft] = useState<Identity | null>(null);
   const [filesPanelOpen, setFilesPanelOpen] = useState(false);
+  const [searchPanelOpen, setSearchPanelOpen] = useState(false);
   const [openAgentRunId, setOpenAgentRunId] = useState<string | null>(null);
   const [openAgentRunSnapshot, setOpenAgentRunSnapshot] = useState<AgentRun | null>(null);
   const [openThinkingMessageId, setOpenThinkingMessageId] = useState<string | null>(null);
@@ -215,7 +214,7 @@ export function App() {
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [pendingReplyTargets, setPendingReplyTargets] = useState<PendingAgentReplyTarget[]>([]);
 
-  const openProfileMenu = useCallback((placement: "rail" | "mobile" | "chat", anchorEl?: HTMLElement | null) => {
+  const openProfileMenu = useCallback((placement: "sidebar" | "mobile" | "chat", anchorEl?: HTMLElement | null) => {
     setProfileMenuPlacement(placement);
     setProfileMenuAnchorEl(anchorEl ?? null);
     setProfileMenuOpen(true);
@@ -226,7 +225,7 @@ export function App() {
     setProfileMenuAnchorEl(null);
   }, []);
 
-  const toggleProfileMenu = useCallback((placement: "rail" | "mobile") => {
+  const toggleProfileMenu = useCallback((placement: "sidebar" | "mobile") => {
     setProfileMenuPlacement(placement);
     setProfileMenuOpen((current) => !current);
   }, []);
@@ -845,6 +844,7 @@ export function App() {
     setOpenAgentRunId(run?.id ?? runId);
     setOpenThinkingMessageId(null);
     setFilesPanelOpen(false);
+    setSearchPanelOpen(false);
     setOpenBackgroundTaskId(null);
   }, [currentActiveRuns, currentConversationAgentRuns, findAgentRunByPendingKey, state.activeRuns, state.agentRuns]);
   useEffect(() => {
@@ -860,6 +860,7 @@ export function App() {
     setOpenAgentRunId(null);
     setOpenAgentRunSnapshot(null);
     setFilesPanelOpen(false);
+    setSearchPanelOpen(false);
     setOpenBackgroundTaskId(null);
   }, []);
   const openThinkingMessage = openThinkingMessageId
@@ -1314,14 +1315,14 @@ export function App() {
     const shell = appShellRef.current;
     if (!shell) return;
     const shellRect = shell.getBoundingClientRect();
-    const navWidth = window.matchMedia("(max-width: 1080px)").matches ? COMPACT_NAV_WIDTH : DESKTOP_NAV_WIDTH;
     const maxSidebarWidth = Math.max(
       MIN_CONVERSATION_SIDEBAR_WIDTH,
-      shellRect.width - navWidth - SPLITTER_WIDTH - MIN_CHAT_PANE_WIDTH,
+      shellRect.width - SPLITTER_WIDTH - MIN_CHAT_PANE_WIDTH,
     );
+    const pointerOffset = event.clientX - (shellRect.left + conversationSidebarWidth);
     let latestWidth = conversationSidebarWidth;
     const updateWidth = (clientX: number) => {
-      const rawWidth = clientX - shellRect.left - navWidth;
+      const rawWidth = clientX - shellRect.left - pointerOffset;
       latestWidth = clamp(rawWidth, MIN_CONVERSATION_SIDEBAR_WIDTH, maxSidebarWidth);
       setConversationSidebarWidth(latestWidth);
     };
@@ -1491,6 +1492,15 @@ export function App() {
     setFocusComposerRequest((current) => ({ seq: (current?.seq ?? 0) + 1 }));
   }, []);
 
+  const insertTextToComposer = useCallback((content: string) => {
+    setComposerRequest((current) => ({
+      seq: (current?.seq ?? 0) + 1,
+      type: "insert",
+      content,
+    }));
+    setFocusComposerRequest((current) => ({ seq: (current?.seq ?? 0) + 1 }));
+  }, []);
+
   const forwardMessagesToAgent = async (messages: Message[], provider: TuttiAgentGuiProvider) => {
     const visibleMessages = messages.filter((message) => message.status !== "deleted" && message.status !== "recalled");
     if (!visibleMessages.length) return;
@@ -1555,6 +1565,7 @@ export function App() {
   useEffect(() => {
     setMembersPanelOpen(false);
     setFilesPanelOpen(false);
+    setSearchPanelOpen(false);
     setOpenAgentRunId(null);
     setOpenAgentRunSnapshot(null);
     setOpenThinkingMessageId(null);
@@ -1621,11 +1632,6 @@ export function App() {
     return counts;
   }, [conversationReadAt, currentConversationId, state.conversations, state.messages]);
 
-  const totalUnreadCount = useMemo(() => {
-    if (!UNREAD_FEATURE_ENABLED) return 0;
-    return Object.values(unreadCountsByConversation).reduce((sum, count) => sum + count, 0);
-  }, [unreadCountsByConversation]);
-
   useEffect(() => {
     if (!UNREAD_FEATURE_ENABLED) return;
     if (!state.ready) return;
@@ -1654,22 +1660,8 @@ export function App() {
       ref={appShellRef}
       style={shellStyle}
       data-resizing-sidebar={resizingConversationSidebar || undefined}
-      className={"[display:grid] [grid-template-columns:60px_var(--conversation-sidebar-width)_3px_minmax(var(--chat-pane-min-width),_1fr)] [height:100vh] [overflow:hidden] [background:var(--bg)] [&[data-resizing-sidebar=true]_*]:[cursor:col-resize] max-[1080px]:[grid-template-columns:56px_var(--conversation-sidebar-width)_3px_minmax(var(--chat-pane-min-width),_1fr)] max-[760px]:[grid-template-columns:1fr]"}
+      className={"[display:grid] [grid-template-columns:var(--conversation-sidebar-width)_1px_minmax(var(--chat-pane-min-width),_1fr)] [height:100vh] [overflow:hidden] [background:var(--background-panel)] [&[data-resizing-sidebar=true]_*]:[cursor:col-resize] max-[760px]:[grid-template-columns:1fr]"}
     >
-      <AppNavRail
-        profileMenuOpen={profileMenuOpen && profileMenuPlacement === "rail"}
-        onToggleProfileMenu={() => toggleProfileMenu("rail")}
-        profileButtonRef={profileButtonRef}
-        profileMenuRef={profileMenuRef}
-        userProfile={userProfile}
-        onSaveProfile={(profile) => {
-          saveUserProfileState(profile);
-          closeProfileMenu();
-        }}
-        onCloseProfileMenu={closeProfileMenu}
-        totalUnreadCount={totalUnreadCount}
-      />
-
       <ConversationSidebar
             rooms={state.rooms}
             conversations={state.conversations}
@@ -1679,73 +1671,97 @@ export function App() {
             onSelect={setCurrentConversationId}
             onCreateRoom={onCreateRoom}
             onTogglePin={onToggleConversationPin}
+            userProfile={userProfile}
+            profileMenuOpen={profileMenuOpen && profileMenuPlacement === "sidebar"}
+            profileButtonRef={profileButtonRef}
+            profileMenuRef={profileMenuRef}
+            onToggleProfileMenu={() => toggleProfileMenu("sidebar")}
+            onSaveProfile={(profile) => {
+              saveUserProfileState(profile);
+              closeProfileMenu();
+            }}
+            onCloseProfileMenu={closeProfileMenu}
           />
 
           <button
             type="button"
-            className={"[position:relative] [z-index:20] [width:3px] [min-width:3px] [height:100vh] [border:0] [padding:0] [background:var(--border)] [cursor:col-resize] [transition:background-color_0.12s_ease] hover:[background:var(--border-strong)] focus-visible:[outline:none] focus-visible:[background:var(--border-strong)] max-[760px]:[display:none]"}
+            className={"[position:relative] [z-index:20] [justify-self:center] [width:9px] [min-width:9px] [height:100vh] [margin-inline:-4px] [border:0] [padding:0] [background:transparent] [cursor:col-resize] before:[content:''] before:[position:absolute] before:[inset-block:0] before:[left:50%] before:[width:1px] before:[transform:translateX(-50%)] before:[background:var(--border-1)] before:[transition:background-color_0.12s_ease] hover:before:[background:var(--line-focus-window)] focus-visible:[outline:none] focus-visible:before:[background:var(--line-focus-window)] max-[760px]:[display:none]"}
             aria-label={t("app.resizeHandle")}
             title={t("app.resizeTitle")}
             onPointerDown={startConversationSidebarResize}
           />
 
-          <main className={"[display:grid] [position:relative] [min-width:0] [min-height:0] [grid-template-rows:56px_minmax(0,_1fr)_auto] [background:var(--panel)]"}>
+          <main className={`[display:grid] [position:relative] [min-width:0] [min-height:0] [grid-template-rows:56px_minmax(0,_1fr)_auto] [background:var(--background-panel)] max-[760px]:[grid-template-columns:1fr] ${filesPanelOpen || searchPanelOpen ? "[grid-template-columns:minmax(0,_1fr)_320px]" : "[grid-template-columns:minmax(0,_1fr)_0px]"}`}>
             {currentConversation && currentRoom ? (
               <>
-                <ChatHeader
-                  room={currentRoom}
-                  conversation={currentConversation}
-                  participants={currentParticipants}
-                  allParticipants={state.participants}
-                  identities={state.identities}
-                  runtimeProfiles={state.runtimeProfiles}
-                  conversations={state.conversations}
-                  rooms={state.rooms}
-                  artifacts={state.artifacts}
-                  allMessages={state.messages}
-                  allBlocks={state.messageBlocks}
-                  summaryTasks={backgroundTasks}
-                  agentCount={currentAgents.length}
-                  messages={currentMessages}
-                  agentsOpen={membersPanelOpen}
-                  filesOpen={filesPanelOpen}
-                  userProfile={userProfile}
-                  profileMenuOpen={profileMenuOpen && profileMenuPlacement === "mobile"}
-                  profileButtonRef={mobileProfileButtonRef}
-                  onToggleProfileMenu={() => toggleProfileMenu("mobile")}
-                  onUpdateRoom={onUpdateRoom}
-                  onDeleteRoom={() => onDeleteRoom(currentRoom, currentConversation)}
-                  onRoomPreviewChange={onRoomPreviewChange}
-                  onToggleAgents={() => {
-                    setFilesPanelOpen(false);
-                    clearAgentProfileDialog();
-                    setMembersPanelOpen((current) => !current);
-                  }}
-                  onToggleFiles={() => {
-                    setMembersPanelOpen(false);
-                    clearAgentProfileDialog();
-                    setOpenAgentRunId(null);
-                    setOpenAgentRunSnapshot(null);
-                    setOpenThinkingMessageId(null);
-                    setFilesPanelOpen((current) => !current);
-                  }}
-                  onInvitePeople={() => setInviteDialogOpen(true)}
-                  onFocusMessage={(messageId) => {
-                    setFocusMessageRequest((current) => ({
-                      messageId,
-                      seq: (current?.seq ?? 0) + 1,
-                    }));
-                  }}
-                  onOpenMessageLink={openMessageLink}
-                  onOpenSummaryLink={(taskId) => void openSummaryLink(taskId)}
-                  onEnsureSummaryTask={ensureBackgroundTask}
-                  onOpenArtifact={(artifact) => revealArtifactInTuttiFileManager(artifact)}
-                  onOpenAgentProfile={(participant) => {
-                    setPendingNewAgentDraft(null);
-                    setAgentProfileShowRemove(true);
-                    setAgentProfileParticipantId(participant.id);
-                  }}
-                />
+                <div className={"[grid-column:1_/_-1] [grid-row:1] [min-width:0]"}>
+                  <ChatHeader
+                    room={currentRoom}
+                    conversation={currentConversation}
+                    participants={currentParticipants}
+                    allParticipants={state.participants}
+                    identities={state.identities}
+                    runtimeProfiles={state.runtimeProfiles}
+                    conversations={state.conversations}
+                    rooms={state.rooms}
+                    artifacts={state.artifacts}
+                    allMessages={state.messages}
+                    allBlocks={state.messageBlocks}
+                    summaryTasks={backgroundTasks}
+                    agentCount={currentAgents.length}
+                    messages={currentMessages}
+                    agentsOpen={membersPanelOpen}
+                    filesOpen={filesPanelOpen}
+                    searchOpen={searchPanelOpen}
+                    userProfile={userProfile}
+                    profileMenuOpen={profileMenuOpen && profileMenuPlacement === "mobile"}
+                    profileButtonRef={mobileProfileButtonRef}
+                    onToggleProfileMenu={() => toggleProfileMenu("mobile")}
+                    onUpdateRoom={onUpdateRoom}
+                    onDeleteRoom={() => onDeleteRoom(currentRoom, currentConversation)}
+                    onRoomPreviewChange={onRoomPreviewChange}
+                    onToggleAgents={() => {
+                      setFilesPanelOpen(false);
+                      setSearchPanelOpen(false);
+                      clearAgentProfileDialog();
+                      setMembersPanelOpen((current) => !current);
+                    }}
+                    onToggleFiles={() => {
+                      setMembersPanelOpen(false);
+                      setSearchPanelOpen(false);
+                      clearAgentProfileDialog();
+                      setOpenAgentRunId(null);
+                      setOpenAgentRunSnapshot(null);
+                      setOpenThinkingMessageId(null);
+                      setFilesPanelOpen((current) => !current);
+                    }}
+                    onToggleSearch={() => {
+                      setMembersPanelOpen(false);
+                      setFilesPanelOpen(false);
+                      clearAgentProfileDialog();
+                      setOpenAgentRunId(null);
+                      setOpenAgentRunSnapshot(null);
+                      setOpenThinkingMessageId(null);
+                      setSearchPanelOpen((current) => !current);
+                    }}
+                    onInvitePeople={() => setInviteDialogOpen(true)}
+                    onFocusMessage={(messageId) => {
+                      setFocusMessageRequest((current) => ({
+                        messageId,
+                        seq: (current?.seq ?? 0) + 1,
+                      }));
+                    }}
+                    onOpenMessageLink={openMessageLink}
+                    onOpenSummaryLink={(taskId) => void openSummaryLink(taskId)}
+                    onEnsureSummaryTask={ensureBackgroundTask}
+                    onOpenArtifact={(artifact) => revealArtifactInTuttiFileManager(artifact)}
+                    onOpenAgentProfile={(participant) => {
+                      setPendingNewAgentDraft(null);
+                      setAgentProfileShowRemove(true);
+                      setAgentProfileParticipantId(participant.id);
+                    }}
+                  />
+                </div>
                 {isReconnecting ? <ReconnectingBanner /> : null}
                 <RoomAgentsDialog
                   open={membersPanelOpen}
@@ -1783,6 +1799,38 @@ export function App() {
                       seq: (current?.seq ?? 0) + 1,
                     }));
                     setFilesPanelOpen(false);
+                  }}
+                />
+                <ChatMessageSearch
+                  open={searchPanelOpen}
+                  messages={currentMessages}
+                  allMessages={state.messages}
+                  allBlocks={state.messageBlocks}
+                  artifacts={currentArtifacts}
+                  participants={state.participants}
+                  identities={state.identities}
+                  runtimeProfiles={state.runtimeProfiles}
+                  conversations={state.conversations}
+                  rooms={state.rooms}
+                  summaryTasks={backgroundTasks}
+                  userDisplayName={userProfile.displayName}
+                  onClose={() => setSearchPanelOpen(false)}
+                  onFocusMessage={(messageId) => {
+                    setFocusMessageRequest((current) => ({
+                      messageId,
+                      seq: (current?.seq ?? 0) + 1,
+                    }));
+                    setSearchPanelOpen(false);
+                  }}
+                  onOpenMessageLink={openMessageLink}
+                  onOpenSummaryLink={(taskId) => void openSummaryLink(taskId)}
+                  onEnsureSummaryTask={ensureBackgroundTask}
+                  onOpenArtifact={(artifact) => revealArtifactInTuttiFileManager(artifact)}
+                  onOpenAgentProfile={(participant) => {
+                    setPendingNewAgentDraft(null);
+                    setAgentProfileShowRemove(true);
+                    setAgentProfileParticipantId(participant.id);
+                    setSearchPanelOpen(false);
                   }}
                 />
                 <MessageLinkDetailPanel
@@ -1834,91 +1882,96 @@ export function App() {
                   sections={openThinkingSections}
                   onClose={() => setOpenThinkingMessageId(null)}
                 />
-                <MessageTimeline
-                  key={currentConversation.id}
-                  messages={currentMessages}
-                  allMessages={state.messages}
-                  blocks={currentMessageBlocks}
-                  allBlocks={state.messageBlocks}
-                  artifacts={currentArtifacts}
-                  allArtifacts={state.artifacts}
-                  agentRunEvents={state.agentRunEvents}
-                  agentRuns={state.agentRuns}
-                  participants={currentParticipants}
-                  allParticipants={state.participants}
-                  conversations={state.conversations}
-                  rooms={state.rooms}
-                  participantsCount={currentAgents.length}
-                  agentForwardTargets={agentForwardTargets}
-                  focusMessageRequest={focusMessageRequest}
-                  scrollToBottomRequest={scrollToBottomRequest}
-                  hasMoreBefore={Boolean(currentTimelinePageState?.hasMore)}
-                  loadingBefore={Boolean(currentTimelinePageState?.loadingOlder)}
-                  onLoadBefore={() => void loadOlderConversationMessages(currentConversation.id)}
-                  bulkToolbarHost={bulkToolbarHost}
-                  userProfile={userProfile}
-                  identities={state.identities}
-                  runtimeProfiles={state.runtimeProfiles}
-                  onOpenUserProfile={(anchor) => openProfileMenu("chat", anchor)}
-                  onViewThinking={openMessageThinking}
-                  onRegisterScrollPreserver={(preserver) => {
-                    timelineScrollPreserverRef.current = preserver;
-                  }}
-                  onSelectionModeChange={setMessageSelectionMode}
-                  onOpenMembers={(options) => {
-                    clearAgentProfileDialog();
-                    if (options?.startAdding) {
-                      openNewAgentSetup();
-                      return;
-                    }
-                    setMembersPanelOpen(true);
-                  }}
-                  onOpenAgentProfile={(participant) => {
-                    setFilesPanelOpen(false);
-                    setMembersPanelOpen(false);
-                    clearAgentProfileDialog();
-                    setAgentProfileParticipantId(participant.id);
-                  }}
-                  onMentionParticipant={requestMention}
-                  onOpenMessageLink={openMessageLink}
-                  onOpenSummaryLink={(taskId) => void openSummaryLink(taskId)}
-                  onInsertSummaryLink={insertSummaryLinkToComposer}
-                  onEnsureSummaryTask={ensureBackgroundTask}
-                  summaryTasks={backgroundTasks}
-                  onQuoteMessages={requestComposerInsert}
-                  onForwardMessagesToAgent={(messages, provider) => void forwardMessagesToAgent(messages, provider)}
-                  onForwardSummaryToAgent={(task, provider) => void forwardSummaryToAgent(task, provider)}
-                  onStartSummary={startBackgroundSummary}
-                  openBackgroundTask={enrichedOpenBackgroundTask}
-                  onCloseBackgroundTaskPanel={closeBackgroundTaskPanel}
-                  onFocusMessage={(messageId) => {
-                    setFocusMessageRequest((current) => ({
-                      messageId,
-                      seq: (current?.seq ?? 0) + 1,
-                    }));
-                  }}
-                  onEditMessage={requestComposerEdit}
-                  onDeleteMessage={async (message) => {
-                    try {
-                      await requestDeleteMessages([message.id]);
-                    } catch {
-                      // cancelled
-                    }
-                  }}
-                  onDeleteMessages={async (messages) => {
-                    try {
-                      await requestDeleteMessages(messages.map((message) => message.id));
-                    } catch {
-                      // cancelled
-                    }
-                  }}
-                  onRecallMessage={(message) => {
-                    if (!isLocalUserMessage(message)) return Promise.resolve();
-                    if (!window.confirm(t("app.recallConfirm"))) return Promise.resolve();
-                    timelineScrollPreserverRef.current?.capture();
-                    return onUpdateMessage(message.id, { status: "recalled" });
-                  }}
-                />
+                <div className={`[grid-column:1] [grid-row:2] [display:grid] [min-width:0] [min-height:0] ${filesPanelOpen || searchPanelOpen ? "max-[760px]:[display:none]" : ""}`}>
+                  <MessageTimeline
+                    key={currentConversation.id}
+                    messages={currentMessages}
+                    allMessages={state.messages}
+                    blocks={currentMessageBlocks}
+                    allBlocks={state.messageBlocks}
+                    artifacts={currentArtifacts}
+                    allArtifacts={state.artifacts}
+                    agentRunEvents={state.agentRunEvents}
+                    agentRuns={state.agentRuns}
+                    participants={currentParticipants}
+                    allParticipants={state.participants}
+                    conversations={state.conversations}
+                    rooms={state.rooms}
+                    participantsCount={currentAgents.length}
+                    agentForwardTargets={agentForwardTargets}
+                    focusMessageRequest={focusMessageRequest}
+                    scrollToBottomRequest={scrollToBottomRequest}
+                    hasMoreBefore={Boolean(currentTimelinePageState?.hasMore)}
+                    loadingBefore={Boolean(currentTimelinePageState?.loadingOlder)}
+                    onLoadBefore={() => void loadOlderConversationMessages(currentConversation.id)}
+                    bulkToolbarHost={bulkToolbarHost}
+                    userProfile={userProfile}
+                    identities={state.identities}
+                    runtimeProfiles={state.runtimeProfiles}
+                    onOpenUserProfile={(anchor) => openProfileMenu("chat", anchor)}
+                    onViewThinking={openMessageThinking}
+                    onRegisterScrollPreserver={(preserver) => {
+                      timelineScrollPreserverRef.current = preserver;
+                    }}
+                    onSelectionModeChange={setMessageSelectionMode}
+                    onOpenMembers={(options) => {
+                      clearAgentProfileDialog();
+                      if (options?.startAdding) {
+                        openNewAgentSetup();
+                        return;
+                      }
+                      setSearchPanelOpen(false);
+                      setMembersPanelOpen(true);
+                    }}
+                    onOpenAgentProfile={(participant) => {
+                      setFilesPanelOpen(false);
+                      setSearchPanelOpen(false);
+                      setMembersPanelOpen(false);
+                      clearAgentProfileDialog();
+                      setAgentProfileParticipantId(participant.id);
+                    }}
+                    onMentionParticipant={requestMention}
+                    onOpenMessageLink={openMessageLink}
+                    onOpenSummaryLink={(taskId) => void openSummaryLink(taskId)}
+                    onInsertSummaryLink={insertSummaryLinkToComposer}
+                    onInsertSuggestion={insertTextToComposer}
+                    onEnsureSummaryTask={ensureBackgroundTask}
+                    summaryTasks={backgroundTasks}
+                    onQuoteMessages={requestComposerInsert}
+                    onForwardMessagesToAgent={(messages, provider) => void forwardMessagesToAgent(messages, provider)}
+                    onForwardSummaryToAgent={(task, provider) => void forwardSummaryToAgent(task, provider)}
+                    onStartSummary={startBackgroundSummary}
+                    openBackgroundTask={enrichedOpenBackgroundTask}
+                    onCloseBackgroundTaskPanel={closeBackgroundTaskPanel}
+                    onFocusMessage={(messageId) => {
+                      setFocusMessageRequest((current) => ({
+                        messageId,
+                        seq: (current?.seq ?? 0) + 1,
+                      }));
+                    }}
+                    onEditMessage={requestComposerEdit}
+                    onDeleteMessage={async (message) => {
+                      try {
+                        await requestDeleteMessages([message.id]);
+                      } catch {
+                        // cancelled
+                      }
+                    }}
+                    onDeleteMessages={async (messages) => {
+                      try {
+                        await requestDeleteMessages(messages.map((message) => message.id));
+                      } catch {
+                        // cancelled
+                      }
+                    }}
+                    onRecallMessage={(message) => {
+                      if (!isLocalUserMessage(message)) return Promise.resolve();
+                      if (!window.confirm(t("app.recallConfirm"))) return Promise.resolve();
+                      timelineScrollPreserverRef.current?.capture();
+                      return onUpdateMessage(message.id, { status: "recalled" });
+                    }}
+                  />
+                </div>
                 <AgentProfileDialog
                   participant={agentProfileParticipant}
                   setupIdentity={pendingAgentSetupIdentity}
@@ -1944,7 +1997,7 @@ export function App() {
                   onCreateIdentity={onCreateIdentity}
                   onUpdateIdentity={onUpdateIdentity}
                 />
-                <div className={"[display:flex] [flex-direction:column] [flex-shrink:0] [position:relative] [z-index:20] [min-height:0] [background:var(--panel)]"}>
+                <div className={`[grid-column:1] [grid-row:3] [display:flex] [flex-direction:column] [flex-shrink:0] [position:relative] [z-index:20] [min-width:0] [min-height:0] [background:transparent] ${filesPanelOpen || searchPanelOpen ? "max-[760px]:[display:none]" : ""}`}>
                   <BackgroundTaskBar
                     tasks={currentBackgroundTasks}
                     agentRuns={agentRunTasks}
@@ -1996,12 +2049,12 @@ export function App() {
                 </div>
               </>
             ) : (
-              <div className={"[display:grid] [min-height:100%] [place-items:center] [padding:28px] [color:var(--muted)] [text-align:center] [&_p]:[margin:8px_0_0] [&_p]:[font-size:13px]"}>
-                <div className={"[display:grid] [place-items:center] [gap:12px] [max-width:320px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:34px_28px] [background:var(--panel)] [box-shadow:var(--shadow-soft)]"}>
-                  <span className={"[display:grid] [width:58px] [height:58px] [place-items:center] [border-radius:16px] [color:#ffffff] [background:var(--primary)]"}>
+              <div className={"[display:grid] [min-height:100%] [place-items:center] [padding:28px] [color:var(--text-secondary)] [text-align:center] [&_p]:[margin:8px_0_0] [&_p]:[font-size:13px]"}>
+                <div className={"[display:grid] [place-items:center] [gap:12px] [max-width:320px] [border:1px_solid_var(--border-1)] [border-radius:14px] [padding:34px_28px] [background:var(--background-fronted)] [box-shadow:var(--shadow-soft)]"}>
+                  <span className={"[display:grid] [width:58px] [height:58px] [place-items:center] [border-radius:16px] [color:var(--white-stationary)] [background:var(--black-stationary)]"}>
                     <Bot size={30} />
                   </span>
-                  <strong className={"[color:var(--text)] [font-size:17px] [font-weight:760]"}>{t("app.selectChannel")}</strong>
+                  <strong className={"[color:var(--text-primary)] [font-size:15px] [font-weight:760]"}>{t("app.selectChannel")}</strong>
                   <p>{t("app.emptyChannelHint")}</p>
                 </div>
               </div>
@@ -2049,7 +2102,7 @@ export function App() {
 
 function ReconnectingBanner() {
   return (
-    <div className={"[position:absolute] [top:56px] [left:50%] [z-index:28] [display:inline-flex] [transform:translateX(-50%)] [align-items:center] [gap:6px] [border:1px_solid_var(--border)] [border-radius:999px] [padding:5px_10px] [color:var(--muted)] [background:#fffffff2] [box-shadow:var(--shadow-soft)] [font-size:12px] [font-weight:650]"}>
+    <div className={"[position:absolute] [top:56px] [left:50%] [z-index:28] [display:inline-flex] [transform:translateX(-50%)] [align-items:center] [gap:6px] [border:1px_solid_var(--border-1)] [border-radius:999px] [padding:5px_10px] [color:var(--text-secondary)] [background:color-mix(in_srgb,var(--white-stationary)_95%,transparent)] [box-shadow:var(--shadow-soft)] [font-size:11px] [font-weight:650]"}>
       <Loader2 size={13} className={"animate-spin"} aria-hidden />
       <span>{t("app.reconnecting")}</span>
     </div>
@@ -2068,19 +2121,11 @@ function AppLoadingSkeleton(props: { shellStyle: CSSProperties }) {
   return (
     <div
       style={props.shellStyle}
-      className={"[display:grid] [grid-template-columns:60px_var(--conversation-sidebar-width)_3px_minmax(var(--chat-pane-min-width),_1fr)] [height:100vh] [overflow:hidden] [background:var(--bg)] max-[1080px]:[grid-template-columns:56px_var(--conversation-sidebar-width)_3px_minmax(var(--chat-pane-min-width),_1fr)] max-[760px]:[grid-template-columns:1fr]"}
+      className={"[display:grid] [grid-template-columns:var(--conversation-sidebar-width)_1px_minmax(var(--chat-pane-min-width),_1fr)] [height:100vh] [overflow:hidden] [background:var(--background-panel)] max-[760px]:[grid-template-columns:1fr]"}
       aria-busy="true"
       aria-label={t("app.loading")}
     >
-      <div className={"[display:flex] [height:100vh] [flex-direction:column] [align-items:center] [gap:14px] [border-right:1px_solid_var(--border)] [background:var(--panel)] [padding:12px_8px] max-[760px]:[display:none]"}>
-        <SkeletonBlock className={"[width:34px] [height:34px] [border-radius:12px]"} />
-        <SkeletonBlock className={"[width:32px] [height:32px] [border-radius:10px]"} />
-        <SkeletonBlock className={"[width:32px] [height:32px] [border-radius:10px]"} />
-        <div className={"[flex:1]"} />
-        <SkeletonBlock className={"[width:34px] [height:34px] [border-radius:999px]"} />
-      </div>
-
-      <aside className={"[display:flex] [height:100vh] [min-width:0] [flex-direction:column] [background:var(--panel)] max-[760px]:[display:none]"}>
+      <aside className={"[display:flex] [height:100vh] [min-width:0] [flex-direction:column] [background:var(--background-panel)] max-[760px]:[display:none]"}>
         <div className={"[display:flex] [height:52px] [align-items:center] [justify-content:space-between] [gap:12px] [padding:12px_14px_10px_16px]"}>
           <SkeletonBlock className={"[width:92px] [height:18px] [border-radius:6px]"} />
           <SkeletonBlock className={"[width:34px] [height:34px] [border-radius:12px]"} />
@@ -2088,7 +2133,7 @@ function AppLoadingSkeleton(props: { shellStyle: CSSProperties }) {
         <div className={"[padding:0_8px_10px]"}>
           <SkeletonBlock className={"[width:100%] [height:36px] [border-radius:14px]"} />
         </div>
-        <div className={"[display:grid] [gap:6px] [padding:2px_8px_12px]"}>
+        <div className={"[display:grid] [min-height:0] [flex:1_1_auto] [gap:6px] [overflow:hidden] [padding:2px_8px_12px]"}>
           {sidebarRows.map((row) => (
             <div key={row} className={"[display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:8px] [min-height:56px] [padding:4px_8px]"}>
               <SkeletonBlock className={"[width:32px] [height:32px] [border-radius:11px]"} />
@@ -2102,12 +2147,16 @@ function AppLoadingSkeleton(props: { shellStyle: CSSProperties }) {
             </div>
           ))}
         </div>
+        <div className={"[display:flex] [align-items:center] [gap:10px] [border-top:1px_solid_var(--border-1)] [padding:10px_12px]"}>
+          <SkeletonBlock className={"[width:34px] [height:34px] [border-radius:999px]"} />
+          <SkeletonBlock className={"[width:72px] [height:13px] [border-radius:5px]"} />
+        </div>
       </aside>
 
-      <div className={"[width:3px] [height:100vh] [background:var(--border)] max-[760px]:[display:none]"} />
+      <div className={"[width:1px] [height:100vh] [background:var(--border-1)] max-[760px]:[display:none]"} />
 
-      <main className={"[display:grid] [min-width:0] [min-height:0] [grid-template-rows:56px_minmax(0,_1fr)_auto] [background:var(--panel)]"}>
-        <header className={"[display:flex] [height:56px] [align-items:center] [justify-content:space-between] [gap:12px] [border-bottom:1px_solid_var(--border)] [padding:0_16px]"}>
+      <main className={"[display:grid] [min-width:0] [min-height:0] [grid-template-rows:56px_minmax(0,_1fr)_auto] [background:var(--background-panel)]"}>
+        <header className={"[display:flex] [height:56px] [align-items:center] [justify-content:space-between] [gap:12px] [border-bottom:1px_solid_var(--border-1)] [padding:0_16px]"}>
           <div className={"[display:flex] [min-width:0] [align-items:center] [gap:10px]"}>
             <SkeletonBlock className={"[width:34px] [height:34px] [border-radius:12px]"} />
             <div className={"[display:grid] [gap:7px]"}>
@@ -2130,7 +2179,7 @@ function AppLoadingSkeleton(props: { shellStyle: CSSProperties }) {
           ))}
         </div>
 
-        <div className={"[border-top:1px_solid_var(--border)] [padding:12px_16px_16px]"}>
+        <div className={"[border-top:1px_solid_var(--border-1)] [padding:12px_16px_16px]"}>
           <SkeletonBlock className={"[width:100%] [height:72px] [border-radius:16px]"} />
         </div>
       </main>
@@ -2141,7 +2190,7 @@ function AppLoadingSkeleton(props: { shellStyle: CSSProperties }) {
 function SkeletonBlock(props: { className: string; style?: CSSProperties }) {
   return (
     <span
-      className={`app-skeleton [display:block] [overflow:hidden] [background:#0000000a] ${props.className}`}
+      className={`app-skeleton [display:block] [overflow:hidden] [background:var(--transparency-hover)] ${props.className}`}
       style={props.style}
       aria-hidden
     />
@@ -2156,10 +2205,9 @@ function loadConversationSidebarWidth() {
   if (typeof window === "undefined") return DEFAULT_CONVERSATION_SIDEBAR_WIDTH;
   const stored = Number(window.localStorage.getItem(CONVERSATION_SIDEBAR_WIDTH_STORAGE_KEY));
   if (!Number.isFinite(stored) || stored <= 0) return DEFAULT_CONVERSATION_SIDEBAR_WIDTH;
-  const navWidth = window.matchMedia("(max-width: 1080px)").matches ? COMPACT_NAV_WIDTH : DESKTOP_NAV_WIDTH;
   const maxWidth = Math.max(
     MIN_CONVERSATION_SIDEBAR_WIDTH,
-    window.innerWidth - navWidth - SPLITTER_WIDTH - MIN_CHAT_PANE_WIDTH,
+    window.innerWidth - SPLITTER_WIDTH - MIN_CHAT_PANE_WIDTH,
   );
   return clamp(stored, MIN_CONVERSATION_SIDEBAR_WIDTH, maxWidth);
 }

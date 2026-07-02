@@ -188,20 +188,20 @@ export function RuntimeStatusHint(props: {
 }) {
   const { t } = useTranslation();
   if (!props.profile) {
-    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap] [color:var(--danger)]"}>{t("runtime.noRuntimeSelected")}</span>;
+    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--text-secondary)] [font-size:11px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap] [color:var(--state-danger)]"}>{t("runtime.noRuntimeSelected")}</span>;
   }
   if (props.profile.kind !== "local-agent") {
-    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>{t("runtime.serverHosted")}</span>;
+    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--text-secondary)] [font-size:11px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>{t("runtime.serverHosted")}</span>;
   }
   const status = localAgentStatus(props.profile, props.localAgentProviders);
   if (!status) {
-    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>{t("runtime.detectingProvider")}</span>;
+    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--text-secondary)] [font-size:11px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>{t("runtime.detectingProvider")}</span>;
   }
   if (!status.available) {
-    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap] [color:var(--danger)]"}>{t("runtime.needsSetup")} · {status.reason ?? t("runtime.providerUnavailable")}</span>;
+    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--text-secondary)] [font-size:11px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap] [color:var(--state-danger)]"}>{t("runtime.needsSetup")} · {status.reason ?? t("runtime.providerUnavailable")}</span>;
   }
   const version = status.version && status.version !== "not-installed" ? status.version : null;
-  return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap] [color:#16a34a]"}>{t("runtime.ready")}{version ? ` · ${version}` : ""}</span>;
+  return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--text-secondary)] [font-size:11px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap] [color:var(--state-success)]"}>{t("runtime.ready")}{version ? ` · ${version}` : ""}</span>;
 }
 
 function providerStatusLine(profile: RuntimeProfile, status: LocalAgentProviderStatus | null) {
@@ -247,15 +247,15 @@ export function LocalAgentProvidersPanel(props: {
     (item) => item.profile.provider,
   );
   return (
-    <section className={"[margin:8px] [overflow:hidden] [border:0] [border-top:1px_solid_var(--border)] [border-radius:0] [background:transparent]"} aria-label={t("runtime.localProviders")}>
-      <div className={"[&_h3]:[margin:0] [&_h3]:[color:var(--text)] [&_h3]:[font-size:13px] [&_h3]:[font-weight:650] [&_span]:[display:block] [&_span]:[margin-top:3px] [display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [padding:12px] [border-bottom:0] [&_span]:[color:var(--muted)] [&_span]:[font-size:11px]"}>
+    <section className={"[margin:8px] [overflow:hidden] [border:0] [border-top:1px_solid_var(--border-1)] [border-radius:0] [background:transparent]"} aria-label={t("runtime.localProviders")}>
+      <div className={"[&_h3]:[margin:0] [&_h3]:[color:var(--text-primary)] [&_h3]:[font-size:13px] [&_h3]:[font-weight:650] [&_span]:[display:block] [&_span]:[margin-top:3px] [display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [padding:12px] [border-bottom:0] [&_span]:[color:var(--text-secondary)] [&_span]:[font-size:11px]"}>
         <div>
           <h3>{t("runtime.localProviders")}</h3>
           <span>{t("runtime.configuredCount", { count: providers.length })}</span>
         </div>
         <button
           type="button"
-          className={"[display:inline-grid] [place-items:center] [border:0] [width:34px] [height:34px] [border-radius:12px] [color:var(--muted)] [background:#00000008] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [width:28px] [height:28px] [&:disabled]:[opacity:0.45]"}
+          className={"[display:inline-grid] [place-items:center] [border:0] [width:34px] [height:34px] [border-radius:12px] [color:var(--text-secondary)] [background:var(--transparency-hover)] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--line-focus-window)] [width:28px] [height:28px] [&:disabled]:[opacity:0.45]"}
           title={t("runtime.refreshProviders")}
           aria-label={t("runtime.refreshProviders")}
           disabled={props.refreshing}
@@ -266,7 +266,7 @@ export function LocalAgentProvidersPanel(props: {
       </div>
       <div className={"[display:grid] [gap:4px] [padding:8px]"}>
         {providers.map(({ profile, status }) => (
-          <div key={profile.provider} className={`[&_strong]:[display:block] [&_strong]:[min-width:0] [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:[display:block] [&_span]:[min-width:0] [&_span]:[overflow:hidden] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_small]:[display:block] [&_small]:[min-width:0] [&_small]:[overflow:hidden] [&_small]:[text-overflow:ellipsis] [&_small]:[white-space:nowrap] [&_small]:[color:var(--muted)] [&_small]:[font-size:12px] [&_small]:[font-size:11px] [display:grid] [grid-template-columns:22px_minmax(0,_1fr)] [gap:8px] [align-items:start] [border-radius:12px] [padding:9px] [color:var(--muted)] [background:transparent] [&_strong]:[color:var(--text)] [&_strong]:[font-size:12px] [&_span]:[margin-top:2px] [&_span]:[font-size:12px] [&_span]:[font-weight:650] ${status?.available ? "[color:#16a34a]" : "[color:var(--danger)]"}`}>
+          <div key={profile.provider} className={`[&_strong]:[display:block] [&_strong]:[min-width:0] [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:[display:block] [&_span]:[min-width:0] [&_span]:[overflow:hidden] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_small]:[display:block] [&_small]:[min-width:0] [&_small]:[overflow:hidden] [&_small]:[text-overflow:ellipsis] [&_small]:[white-space:nowrap] [&_small]:[color:var(--text-secondary)] [&_small]:[font-size:11px] [&_small]:[font-size:11px] [display:grid] [grid-template-columns:22px_minmax(0,_1fr)] [gap:8px] [align-items:start] [border-radius:12px] [padding:9px] [color:var(--text-secondary)] [background:transparent] [&_strong]:[color:var(--text-primary)] [&_strong]:[font-size:11px] [&_span]:[margin-top:2px] [&_span]:[font-size:11px] [&_span]:[font-weight:650] ${status?.available ? "[color:var(--state-success)]" : "[color:var(--state-danger)]"}`}>
             <Terminal size={15} />
             <div>
               <strong>{defaultIdentityNameForRuntime(profile, props.localAgentProviders)}</strong>

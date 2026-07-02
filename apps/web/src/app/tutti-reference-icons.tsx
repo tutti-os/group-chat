@@ -95,14 +95,14 @@ export function TuttiMessageLinkIcon(props: { className?: string }) {
   return (
     <span
       aria-hidden="true"
-      className={props.className ?? "[display:inline-grid] [flex:0_0_auto] [width:16px] [height:16px] [place-items:center] [overflow:hidden] [border-radius:4px] [background:#eef2ff]"}
+      className={props.className ?? "[display:inline-grid] [flex:0_0_auto] [width:16px] [height:16px] [place-items:center] [overflow:hidden] [border-radius:4px] [background:var(--tutti-purple-bg)]"}
     >
       <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-        <rect x="1.5" y="1.5" width="13" height="13" rx="3.5" fill="#f8fafc" />
-        <path d="M4 5.6A2.6 2.6 0 0 1 6.6 3h2.8A2.6 2.6 0 0 1 12 5.6v2.1a2.6 2.6 0 0 1-2.6 2.6H7.05L4.9 12.05a.55.55 0 0 1-.9-.43z" fill="#60a5fa" />
-        <circle cx="6.2" cy="6.75" r=".65" fill="#ffffff" />
-        <circle cx="8" cy="6.75" r=".65" fill="#ffffff" />
-        <path d="M10.25 10.2c1.22 0 2.2.82 2.2 1.84v1.1l-1.28-.92h-.92c-1.22 0-2.2-.82-2.2-1.84s.98-1.84 2.2-1.84z" fill="#a855f7" />
+        <rect x="1.5" y="1.5" width="13" height="13" rx="3.5" fill="var(--background-panel)" />
+        <path d="M4 5.6A2.6 2.6 0 0 1 6.6 3h2.8A2.6 2.6 0 0 1 12 5.6v2.1a2.6 2.6 0 0 1-2.6 2.6H7.05L4.9 12.05a.55.55 0 0 1-.9-.43z" fill="var(--accent-codex)" />
+        <circle cx="6.2" cy="6.75" r=".65" fill="var(--white-stationary)" />
+        <circle cx="8" cy="6.75" r=".65" fill="var(--white-stationary)" />
+        <path d="M10.25 10.2c1.22 0 2.2.82 2.2 1.84v1.1l-1.28-.92h-.92c-1.22 0-2.2-.82-2.2-1.84s.98-1.84 2.2-1.84z" fill="var(--rich-text-mention-app)" />
       </svg>
     </span>
   );
@@ -159,7 +159,7 @@ export function createTuttiMessageLinkIconElement() {
   span.style.placeItems = "center";
   span.style.overflow = "hidden";
   span.style.borderRadius = "4px";
-  span.style.background = "#eef2ff";
+  span.style.background = "var(--tutti-purple-bg)";
 
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("width", "16");
@@ -172,11 +172,11 @@ export function createTuttiMessageLinkIconElement() {
     Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, value));
     svg.append(element);
   };
-  add("rect", { x: "1.5", y: "1.5", width: "13", height: "13", rx: "3.5", fill: "#f8fafc" });
-  add("path", { d: "M4 5.6A2.6 2.6 0 0 1 6.6 3h2.8A2.6 2.6 0 0 1 12 5.6v2.1a2.6 2.6 0 0 1-2.6 2.6H7.05L4.9 12.05a.55.55 0 0 1-.9-.43z", fill: "#60a5fa" });
-  add("circle", { cx: "6.2", cy: "6.75", r: ".65", fill: "#ffffff" });
-  add("circle", { cx: "8", cy: "6.75", r: ".65", fill: "#ffffff" });
-  add("path", { d: "M10.25 10.2c1.22 0 2.2.82 2.2 1.84v1.1l-1.28-.92h-.92c-1.22 0-2.2-.82-2.2-1.84s.98-1.84 2.2-1.84z", fill: "#a855f7" });
+  add("rect", { x: "1.5", y: "1.5", width: "13", height: "13", rx: "3.5", fill: "var(--background-panel)" });
+  add("path", { d: "M4 5.6A2.6 2.6 0 0 1 6.6 3h2.8A2.6 2.6 0 0 1 12 5.6v2.1a2.6 2.6 0 0 1-2.6 2.6H7.05L4.9 12.05a.55.55 0 0 1-.9-.43z", fill: "var(--accent-codex)" });
+  add("circle", { cx: "6.2", cy: "6.75", r: ".65", fill: "var(--white-stationary)" });
+  add("circle", { cx: "8", cy: "6.75", r: ".65", fill: "var(--white-stationary)" });
+  add("path", { d: "M10.25 10.2c1.22 0 2.2.82 2.2 1.84v1.1l-1.28-.92h-.92c-1.22 0-2.2-.82-2.2-1.84s.98-1.84 2.2-1.84z", fill: "var(--rich-text-mention-app)" });
 
   span.append(svg);
   return span;

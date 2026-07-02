@@ -123,7 +123,7 @@ server.put<{ Body: Partial<StoredUserProfile> }>("/api/user-profile", async (req
   }
   const profile = writeUserProfile({
     displayName: body.displayName,
-    avatarPreset: typeof body.avatarPreset === "string" ? body.avatarPreset : "saiyan-01",
+    avatarPreset: typeof body.avatarPreset === "string" ? body.avatarPreset : "avatar-01",
     customAvatarUrl: typeof body.customAvatarUrl === "string" ? body.customAvatarUrl : null,
     bio: typeof body.bio === "string" ? body.bio : "",
   });

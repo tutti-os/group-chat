@@ -38,9 +38,9 @@ export function AvatarUploadButton(props: {
       >
         <UserAvatar size={size} preset={props.preset} customAvatarUrl={props.customAvatarUrl} />
         <span
-          className={"[pointer-events:none] [position:absolute] [inset:0] [display:grid] [place-items:center] [border-radius:999px] [background:rgb(0_0_0_/_52%)] [opacity:0] [transition:opacity_0.14s_ease] group-hover:[opacity:1] group-focus-visible:[opacity:1]"}
+          className={"[pointer-events:none] [position:absolute] [inset:0] [display:grid] [place-items:center] [border-radius:999px] [background:color-mix(in_srgb,var(--black-stationary)_52%,transparent)] [opacity:0] [transition:opacity_0.14s_ease] group-hover:[opacity:1] group-focus-visible:[opacity:1]"}
         >
-          <Camera size={iconSize} strokeWidth={1.75} className={"[color:#ffffff]"} />
+          <Camera size={iconSize} strokeWidth={1.75} className={"[color:var(--white-stationary)]"} />
         </span>
       </button>
       <input

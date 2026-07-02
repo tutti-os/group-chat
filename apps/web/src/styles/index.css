@@ -3,49 +3,39 @@
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
 
+@source "../../node_modules/@tutti-os/ui-system/dist";
+
 @theme inline {
-  --font-sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Tahoma, "PingFang SC", "Microsoft YaHei", Arial, "Hiragino Sans GB", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --color-app-bg: var(--bg);
-  --color-app-panel: var(--panel);
-  --color-app-panel-2: var(--panel-2);
-  --color-app-border: var(--border);
-  --color-app-border-strong: var(--border-strong);
-  --color-app-text: var(--text);
-  --color-app-muted: var(--muted);
-  --color-app-primary: var(--primary);
-  --color-app-accent: var(--accent);
-  --color-app-danger: var(--danger);
-  --shadow-app: var(--shadow);
+  --font-sans: var(--font-ui);
+  --color-app-bg: var(--background-panel);
+  --color-app-panel: var(--background-fronted);
+  --color-app-panel-2: var(--background-panel);
+  --color-app-border: var(--border-1);
+  --color-app-border-strong: var(--line-focus-window);
+  --color-app-text: var(--text-primary);
+  --color-app-muted: var(--text-secondary);
+  --color-app-primary: var(--black-stationary);
+  --color-app-accent: var(--accent-codex);
+  --color-app-danger: var(--state-danger);
+  --shadow-app: var(--shadow-panel);
   --shadow-app-soft: var(--shadow-soft);
+}
+
+:root {
+  --accent-codex: var(--tutti-purple);
+  --accent: var(--tutti-purple);
+  --accent-codex-border: var(--tutti-purple-border);
+  --status-running: var(--tutti-purple);
+  --border-focus: color-mix(in srgb, var(--tutti-purple) 24%, transparent);
+  --accent-bg: color-mix(in srgb, var(--background-fronted) 90%, var(--tutti-purple) 10%);
+  --tutti-purple-bg: color-mix(in srgb, var(--background-fronted) 90%, var(--tutti-purple) 10%);
 }
 
 @layer base {
   :root {
     font-family: var(--font-sans);
-    color: #171717;
-    background: #f5f5f5;
-    --bg: #f5f5f5;
-    --panel: #ffffff;
-    --panel-2: #f3f4f6;
-    --border: #0000000f;
-    --border-strong: #0000001a;
-    --text: #171717;
-    --muted: #737373;
-    --primary: #171717;
-    --primary-contrast: #ffffff;
-    --accent: #3b82f6;
-    --accent-soft: #3b82f61f;
-    --accent-hover: #3b82f62e;
-    --danger: #dc2626;
-    --agent-bubble: #00000008;
-    --own-bubble: #3b82f61f;
-    --sidebar-hover: #00000008;
-    --tag-agent: #eef2ff;
-    --tag-agent-text: #6366f1;
-    --mention-all: #d6e6fb;
-    --focus-ring: #3b82f64d;
-    --shadow: 0 6px 18px rgb(0 0 0 / 8%);
-    --shadow-soft: 0 1px 2px rgb(0 0 0 / 4%);
+    color: var(--text-primary);
+    background: var(--background-panel);
     --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%231c1c1f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   }
 
@@ -63,7 +53,7 @@
 
   body {
     margin: 0;
-    background: var(--bg);
+    background: var(--background-panel);
     -webkit-font-smoothing: antialiased;
   }
 
@@ -83,7 +73,7 @@
   textarea:focus-visible,
   select:focus-visible,
   [role="button"]:focus-visible {
-    outline: 2px solid #3b82f64d;
+    outline: 2px solid var(--border-focus);
     outline-offset: 2px;
   }
 
@@ -109,9 +99,20 @@
 }
 
 .app-skeleton {
-  background-image: linear-gradient(90deg, #00000008 0%, #00000012 42%, #00000008 84%);
+  background-image: linear-gradient(90deg, var(--transparency-block) 0%, var(--transparency-hover) 42%, var(--transparency-block) 84%);
   background-size: 220% 100%;
   animation: skeleton-shimmer 1.15s ease-in-out infinite;
+}
+
+.dialog-close-button {
+  border-radius: 6px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.dialog-close-button:hover {
+  color: var(--text-primary) !important;
+  background: var(--transparency-hover) !important;
 }
 
 .message-prose {
@@ -144,7 +145,7 @@
 .message-prose h3,
 .message-prose h4 {
   margin: 0.65em 0 0.35em;
-  color: var(--text);
+  color: var(--text-primary);
   font-weight: 700;
   line-height: 1.28;
   overflow-wrap: anywhere;
@@ -159,7 +160,7 @@
 }
 
 .message-prose h1 {
-  font-size: 18px;
+  font-size: 15px;
 }
 
 .message-prose h2 {
@@ -168,7 +169,7 @@
 
 .message-prose h3,
 .message-prose h4 {
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .message-prose ul,
@@ -196,7 +197,7 @@
 }
 
 .message-prose a {
-  color: var(--accent);
+  color: var(--accent-codex);
   text-decoration: underline;
   text-underline-offset: 2px;
   overflow-wrap: anywhere;
@@ -207,7 +208,7 @@
   border: 0;
   border-radius: 0;
   padding: 0;
-  color: var(--accent);
+  color: var(--accent-codex);
   background: transparent;
   box-shadow: none;
   text-decoration: none;
@@ -217,15 +218,15 @@
 }
 
 .message-prose a[data-mention-display-mode="reference-link"] {
-  color: var(--accent);
+  color: var(--accent-codex);
   text-decoration: none;
 }
 
 .message-prose code:not(pre code) {
   border-radius: 4px;
   padding: 1px 4px;
-  background: #0000000d;
-  font-size: 0.92em;
+  background: var(--transparency-hover);
+  font-size: 13px;
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -237,18 +238,18 @@
   overflow-x: auto;
   border-radius: 10px;
   padding: 10px;
-  color: #262626;
-  background: #ffffff;
-  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--background-fronted);
+  font-size: 11px;
   line-height: 1.5;
   white-space: pre-wrap;
 }
 
 .message-prose blockquote {
   margin: 8px 0;
-  border-left: 3px solid var(--border-strong);
+  border-left: 3px solid var(--line-focus-window);
   padding-left: 10px;
-  color: var(--muted);
+  color: var(--text-secondary);
 }
 
 [data-upload-caret-anchor] {
@@ -258,14 +259,14 @@
 }
 
 [data-agent-chat-composer] {
-  --agent-chat-composer-control-size: 34px;
+  --agent-chat-composer-control-size: 28px;
 }
 
 [data-agent-chat-composer-box] {
   grid-template-columns: var(--agent-chat-composer-control-size) minmax(0, 1fr) var(--agent-chat-composer-control-size) !important;
   gap: 6px !important;
-  border-radius: 20px !important;
-  padding: 6px !important;
+  border-radius: 12px !important;
+  padding: 12px !important;
 }
 
 [data-agent-chat-composer-box][data-stop="true"] {
@@ -303,7 +304,7 @@
 
 [data-agent-chat-composer-palette] .rich-text-at-mention-palette__shell {
   max-height: 300px;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 [data-agent-chat-composer-palette] .rich-text-at-mention-palette-header {
@@ -353,8 +354,16 @@
 [data-agent-chat-composer-palette] .rich-text-at-mention-palette__row-button {
   min-height: 38px;
   gap: 8px;
-  border-radius: 12px;
+  border-radius: 8px;
   padding: 4px 8px;
+}
+
+[data-agent-chat-composer-palette] .rich-text-at-mention-file-icon {
+  background-color: transparent;
+}
+
+[data-agent-chat-composer-palette] .rich-text-at-mention-row--session .rich-text-at-mention-avatar-stack {
+  display: none;
 }
 
 [data-agent-chat-composer-palette] .rich-text-at-mention-row__title,
@@ -365,14 +374,14 @@
 [data-agent-chat-composer-palette] .rich-text-at-mention-row__file-count,
 [data-agent-chat-composer-palette] .rich-text-at-mention-row__session-participant,
 [data-agent-chat-composer-palette] .rich-text-at-mention-row__session-summary {
-  font-size: 12px;
+  font-size: 11px;
 }
 
 [data-agent-chat-composer-palette] .rich-text-at-mention-row__description,
 [data-agent-chat-composer-palette] .rich-text-at-mention-row__app-description,
 [data-agent-chat-composer-palette] .rich-text-at-mention-row__file-count,
 [data-agent-chat-composer-palette] .rich-text-at-mention-row__session-summary {
-  font-size: 11px;
+  font-size: 11px !important;
   line-height: 14px;
 }
 
@@ -385,7 +394,7 @@
   height: 28px;
   gap: 6px;
   padding: 0 10px 1px;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 16px;
 }
 
@@ -406,7 +415,7 @@
   width: 18px;
   min-width: 18px;
   padding: 0;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 [data-agent-chat-composer-palette] .rich-text-at-mention-multiselect-footer {
@@ -417,12 +426,12 @@
   height: 30px;
   padding-inline: 12px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 @media (max-width: 760px) {
   [data-agent-chat-composer] {
-    --agent-chat-composer-control-size: 32px;
+    --agent-chat-composer-control-size: 28px;
   }
 }
 
@@ -434,16 +443,16 @@
   width: 100%;
   margin: 8px 0;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .message-prose th,
 .message-prose td {
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-1);
   padding: 5px 7px;
   text-align: left;
 }
 
 .message-prose th {
-  background: #00000008;
+  background: var(--transparency-block);
 }

@@ -10,10 +10,10 @@ import type { BackgroundTask } from "../../background-tasks.js";
 import type { LocalUserProfile } from "../../user-profile.js";
 
 const MESSAGE_ROLE_CONTENT_CLASS =
-  "[&[data-role=assistant]_[data-slot=message-block]:not([data-link-only])]:[background:#f2f3f5] "
+  "[&[data-role=assistant]_[data-slot=message-block]:not([data-link-only])]:[background:var(--transparency-block)] "
   + "[&[data-role=assistant]_[data-slot=message-block]:not([data-link-only])]:[border-radius:8px] "
   + "[&[data-role=user]_[data-slot=message-block]:not([data-link-only])]:[border-color:transparent] "
-  + "[&[data-role=user]_[data-slot=message-block]:not([data-link-only])]:[background:#d6e9ff]";
+  + "[&[data-role=user]_[data-slot=message-block]:not([data-link-only])]:[background:var(--accent-bg)]";
 
 const MESSAGE_GROUP_GAP_MS = 60_000;
 
@@ -90,15 +90,15 @@ export function MessageLinkDetailPanel(props: {
   return (
     <aside
       ref={panelRef}
-      className={"[position:absolute] [top:56px] [right:0] [bottom:0] [z-index:36] [display:grid] [width:min(420px,_calc(100vw_-_24px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border)] [background:var(--panel)] [box-shadow:-18px_0_40px_rgb(0_0_0_/_8%)]"}
+      className={"[position:absolute] [top:56px] [right:0] [bottom:0] [z-index:36] [display:grid] [width:min(420px,_calc(100vw_-_24px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border-1)] [background:var(--background-fronted)] [box-shadow:-18px_0_40px_color-mix(in_srgb,var(--black-stationary)_8%,transparent)]"}
     >
-      <div className={"[display:grid] [min-width:0] [grid-template-columns:minmax(0,_1fr)_32px] [align-items:center] [gap:10px] [padding:14px] [border-bottom:1px_solid_var(--border)]"}>
-        <div className={"[min-width:0] [&_h3]:[margin:0] [&_h3]:[overflow:hidden] [&_h3]:[font-size:15px] [&_h3]:[font-weight:720] [&_h3]:[line-height:1.2] [&_h3]:[text-overflow:ellipsis] [&_h3]:[white-space:nowrap] [&_span]:[display:block] [&_span]:[min-width:0] [&_span]:[overflow:hidden] [&_span]:[margin-top:3px] [&_span]:[color:var(--muted)] [&_span]:[font-size:12px] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap]"}>
+      <div className={"[display:grid] [min-width:0] [grid-template-columns:minmax(0,_1fr)_32px] [align-items:center] [gap:10px] [padding:14px] [border-bottom:1px_solid_var(--border-1)]"}>
+        <div className={"[min-width:0] [&_h3]:[margin:0] [&_h3]:[overflow:hidden] [&_h3]:[font-size:15px] [&_h3]:[font-weight:720] [&_h3]:[line-height:1.2] [&_h3]:[text-overflow:ellipsis] [&_h3]:[white-space:nowrap] [&_span]:[display:block] [&_span]:[min-width:0] [&_span]:[overflow:hidden] [&_span]:[margin-top:3px] [&_span]:[color:var(--text-secondary)] [&_span]:[font-size:11px] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap]"}>
           <h3>{panelTitle}</h3>
           <span>{room?.title || conversation?.title || t("common.unknownConversation")}</span>
         </div>
         <button
-          className={"[display:inline-grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [&:focus-visible]:[outline:none]"}
+          className={"dialog-close-button [display:inline-grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--text-secondary)] [background:var(--transparency-hover)] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--line-focus-window)] [&:focus-visible]:[outline:none]"}
           type="button"
           aria-label={t("common.close")}
           title={t("common.close")}
@@ -110,7 +110,7 @@ export function MessageLinkDetailPanel(props: {
 
       <div className={"[min-height:0] [overflow-y:auto] [padding:8px_6px] [display:grid] [align-content:start]"}>
         {linkedMessages.length === 0 ? (
-          <div className={"[padding:28px_12px] [color:var(--muted)] [font-size:13px] [line-height:1.5] [text-align:center]"}>
+          <div className={"[padding:28px_12px] [color:var(--text-secondary)] [font-size:13px] [line-height:1.5] [text-align:center]"}>
             {t("messageLink.notFound")}
           </div>
         ) : null}
@@ -159,13 +159,13 @@ export function MessageLinkDetailPanel(props: {
               <div className={"[min-width:0] [display:grid]"}>
                 {showHeader ? (
                   <div className={"[display:flex] [min-width:0] [align-items:center] [gap:7px] [overflow:hidden] [min-height:20px] [margin-bottom:4px]"}>
-                    <strong className={"[min-width:0] [overflow:hidden] [color:var(--muted)] [font-size:12px] [font-weight:550] [text-overflow:ellipsis] [white-space:nowrap]"}>{senderLabel}</strong>
-                    <span className={"[flex:0_0_auto] [color:var(--muted)] [font-size:12px]"}>{formatMessageTime(message.createdAt)}</span>
+                    <strong className={"[min-width:0] [overflow:hidden] [color:var(--text-secondary)] [font-size:11px] [font-weight:550] [text-overflow:ellipsis] [white-space:nowrap]"}>{senderLabel}</strong>
+                    <span className={"[flex:0_0_auto] [color:var(--text-secondary)] [font-size:11px]"}>{formatMessageTime(message.createdAt)}</span>
                   </div>
                 ) : null}
                 <div className={"[user-select:text] [min-width:0] [max-width:100%]"}>
                   {visibleBlocks.length === 0 ? (
-                    <span className={"[color:var(--muted)] [font-size:13px]"}>{t("common.attachment")}</span>
+                    <span className={"[color:var(--text-secondary)] [font-size:13px]"}>{t("common.attachment")}</span>
                   ) : null}
                   {visibleBlocks.map((block) => (
                     <MessageBlockRenderer

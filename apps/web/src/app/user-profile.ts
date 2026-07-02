@@ -1,10 +1,14 @@
 import { fetchUserProfile, saveUserProfileRemote } from "../api/client.js";
 import { getLocale, t, translate } from "./i18n/index.js";
 
-export type AvatarPresetId =
-  | "saiyan-01" | "saiyan-02" | "saiyan-03" | "saiyan-04" | "saiyan-05"
-  | "saiyan-06" | "saiyan-07" | "saiyan-08" | "saiyan-09" | "saiyan-10"
-  | "saiyan-11" | "saiyan-12" | "saiyan-13" | "saiyan-14" | "saiyan-15";
+export const AVATAR_PRESET_IDS = [
+  "avatar-01", "avatar-02", "avatar-03", "avatar-04", "avatar-06",
+  "avatar-07", "avatar-08", "avatar-09", "avatar-10", "avatar-11",
+  "avatar-12", "avatar-13", "avatar-14", "avatar-15", "avatar-16",
+  "avatar-17", "avatar-18", "avatar-19", "avatar-20",
+] as const;
+
+export type AvatarPresetId = typeof AVATAR_PRESET_IDS[number];
 
 export interface LocalUserProfile {
   displayName: string;
@@ -13,20 +17,18 @@ export interface LocalUserProfile {
   bio: string;
 }
 
-export const AVATAR_PRESET_IDS: AvatarPresetId[] = [
-  "saiyan-01", "saiyan-02", "saiyan-03", "saiyan-04", "saiyan-05",
-  "saiyan-06", "saiyan-07", "saiyan-08", "saiyan-09", "saiyan-10",
-  "saiyan-11", "saiyan-12", "saiyan-13", "saiyan-14", "saiyan-15",
-];
-
 export function avatarPresetLabel(preset: AvatarPresetId): string {
   return t(`avatarPreset.${preset}`);
+}
+
+export function avatarPresetUrl(preset: AvatarPresetId): string {
+  return `/user-avatars/${preset}.png`;
 }
 
 /** Static fallback for SSR / pre-i18n bootstrap. */
 export const DEFAULT_USER_PROFILE: LocalUserProfile = {
   displayName: "Me",
-  avatarPreset: "saiyan-01",
+  avatarPreset: "avatar-01",
   customAvatarUrl: null,
   bio: "Local-first agent group chat workspace.",
 };
@@ -34,10 +36,25 @@ export const DEFAULT_USER_PROFILE: LocalUserProfile = {
 const STORAGE_KEY = "group-chat:user-profile";
 
 const LEGACY_PRESET_MAP: Record<string, AvatarPresetId> = {
-  "gradient-orange": "saiyan-01",
-  "gradient-slate": "saiyan-07",
-  "initials-by": "saiyan-09",
-  "initials-im": "saiyan-14",
+  "gradient-orange": "avatar-01",
+  "gradient-slate": "avatar-07",
+  "initials-by": "avatar-09",
+  "initials-im": "avatar-14",
+  "saiyan-01": "avatar-01",
+  "saiyan-02": "avatar-02",
+  "saiyan-03": "avatar-03",
+  "saiyan-04": "avatar-04",
+  "saiyan-05": "avatar-06",
+  "saiyan-06": "avatar-06",
+  "saiyan-07": "avatar-07",
+  "saiyan-08": "avatar-08",
+  "saiyan-09": "avatar-09",
+  "saiyan-10": "avatar-10",
+  "saiyan-11": "avatar-11",
+  "saiyan-12": "avatar-12",
+  "saiyan-13": "avatar-13",
+  "saiyan-14": "avatar-14",
+  "saiyan-15": "avatar-15",
 };
 
 const LEGACY_DEFAULT_DISPLAY_NAMES = new Set(["Group Chat", "Me", "我", "common.me"]);
