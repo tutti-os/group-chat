@@ -73,8 +73,8 @@ export function ChatMessageSearch(props: {
     <aside
       className={"[grid-column:2] [grid-row:2_/_4] [display:grid] [min-width:0] [min-height:0] [grid-template-rows:auto_auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border-1)] [background:var(--background-panel)] max-[760px]:[grid-column:1] max-[760px]:[grid-row:2_/_4]"}
     >
-      <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [padding:14px] [border-bottom:1px_solid_var(--border-1)]"}>
-        <div className={"[display:flex] [min-width:0] [align-items:baseline] [gap:8px] [&_h3]:[margin:0] [&_h3]:[min-width:0] [&_h3]:[font-size:15px] [&_h3]:[font-weight:720] [&_h3]:[line-height:1.2] [&_span]:[flex:0_0_auto] [&_span]:[color:var(--text-secondary)] [&_span]:[font-size:11px]"}>
+      <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [padding:8px_14px]"}>
+        <div className={"[display:flex] [min-width:0] [align-items:baseline] [gap:8px] [&_h3]:[margin:0] [&_h3]:[min-width:0] [&_h3]:[font-size:15px] [&_h3]:[font-weight:720] [&_h3]:[line-height:1.2] [&_span]:[flex:0_0_auto] [&_span]:[color:var(--text-secondary)] [&_span]:[font-size:11px] [&_span]:[line-height:1.2]"}>
           <h3>{t("chatHeader.searchMessages")}</h3>
           {normalizedQuery ? <span>{t("messageSearch.resultCount", { count: results.length })}</span> : null}
         </div>
@@ -89,7 +89,7 @@ export function ChatMessageSearch(props: {
         </button>
       </div>
 
-      <div className={"[padding:12px_12px_0]"}>
+      <div className={"[padding:0_12px]"}>
         <label className={"[display:flex] [height:38px] [align-items:center] [gap:8px] [border-radius:8px] [padding:0_12px] [color:var(--text-secondary)] [background:var(--transparency-block)] [&_input]:[width:100%] [&_input]:[min-width:0] [&_input]:[border:0] [&_input]:[color:var(--text-primary)] [&_input]:[background:transparent] [&_input]:[font-size:13px] [&_input]:[outline:none] [&_input::placeholder]:[color:var(--text-placeholder)]"}>
           <Search size={15} className={"[flex:0_0_auto]"} />
           <input
@@ -440,7 +440,7 @@ function highlightText(text: string, query: string): ReactNode {
     parts.push(
       <mark
         key={`${match.start}-${match.end}`}
-        className={"[color:inherit] [background:var(--tutti-purple-bg)] [padding:0_2px] [border-radius:2px]"}
+        className={"[color:inherit] [background:color-mix(in_srgb,var(--tutti-purple)_30%,transparent)] [padding:0_2px] [border-radius:2px]"}
       >
         {text.slice(match.start, match.end)}
       </mark>,

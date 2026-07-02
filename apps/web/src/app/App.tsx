@@ -1013,11 +1013,12 @@ export function App() {
   };
 
   const onRemoveParticipant = async (participantId: string) => {
-    const result = (await deleteParticipant(participantId)) as { participant: Participant | null };
+    const result = (await deleteParticipant(participantId)) as { participant: Participant | null; systemMessage?: Message | null };
     if (!result.participant) return;
     setState((current) => ({
       ...current,
       participants: upsert(current.participants, result.participant),
+      messages: result.systemMessage ? upsert(current.messages, result.systemMessage) : current.messages,
     }));
   };
 

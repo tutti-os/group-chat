@@ -406,9 +406,9 @@ server.patch<{ Params: { participantId: string }; Body: UpdateParticipantRequest
 );
 
 server.delete<{ Params: { participantId: string } }>("/api/participants/:participantId", async (request, reply) => {
-  const participant = await chat.removeParticipant(request.params.participantId);
-  if (!participant) return reply.code(404).send({ error: "Participant not found" });
-  return { participant };
+  const result = await chat.removeParticipant(request.params.participantId);
+  if (!result) return reply.code(404).send({ error: "Participant not found" });
+  return result;
 });
 
 server.get<{ Params: { participantId: string } }>(

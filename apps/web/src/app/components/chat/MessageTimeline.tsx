@@ -1627,7 +1627,7 @@ function MessageRow(props: {
             {shouldRenderCompositeConversationBlocks ? (
               <div
                 data-slot="message-composite-block"
-                className={"message-prose [box-sizing:border-box] [display:grid] [width:fit-content] [min-width:0] [max-width:100%] [gap:6px] [overflow-wrap:break-word] [word-break:normal] [white-space:pre-wrap] [border:0] [border-radius:4px_6px_6px_4px] [padding:10px_13px] [color:var(--text-primary)] [&_[data-slot=artifact-block]]:[margin-top:0] [&_[data-slot=message-block]]:[max-width:100%]"}
+                className={"message-prose [box-sizing:border-box] [display:grid] [width:fit-content] [min-width:0] [max-width:min(640px,_100%)] [gap:6px] [overflow-wrap:break-word] [word-break:normal] [white-space:pre-wrap] [border:0] [border-radius:4px_6px_6px_4px] [padding:10px_13px] [color:var(--text-primary)] [&_[data-slot=artifact-block]]:[margin-top:0] [&_[data-slot=message-block]]:[max-width:100%]"}
               >
                 {visibleConversationBlocks.map((block, index) => renderConversationBlock(block, index, { compositeChild: true }))}
               </div>
@@ -3360,7 +3360,7 @@ export function MessageBlockRenderer(props: {
       data-block-id={props.block.id}
       data-link-only={isLinkOnly || undefined}
       data-composite-child={props.compositeChild || undefined}
-      className={`message-prose [box-sizing:border-box] [width:max-content] [min-width:0] [max-width:min(760px,_100%)] [overflow-wrap:break-word] [word-break:normal] [white-space:pre-wrap] [border:0] [color:var(--text-primary)] ${props.compositeChild ? "[padding:0] [background:transparent] [border-radius:0]" : isLinkOnly ? "[display:grid] [gap:6px] [padding:0] [background:transparent] [border-radius:0]" : hasWhisperFooter ? "[display:flex] [flex-direction:column] [gap:4px] [padding:10px_12px] [border-radius:8px]" : "[padding:10px_13px] [border-radius:4px_6px_6px_4px]"} ${props.block.status === "streaming" ? "[border-color:color-mix(in_srgb,var(--accent-codex)_18%,transparent)]" : ""} ${props.block.status === "error" && !hasWhisperFooter ? "[border:1px_solid_color-mix(in_srgb,var(--state-danger)_18%,transparent)] [color:var(--state-danger)] [background:var(--on-danger)]" : ""}`}
+      className={`message-prose [box-sizing:border-box] [width:max-content] [min-width:0] [max-width:min(640px,_100%)] [overflow-wrap:break-word] [word-break:normal] [white-space:pre-wrap] [border:0] [color:var(--text-primary)] ${props.compositeChild ? "[padding:0] [background:transparent] [border-radius:0]" : isLinkOnly ? "[display:grid] [gap:6px] [padding:0] [background:transparent] [border-radius:0]" : hasWhisperFooter ? "[display:flex] [flex-direction:column] [gap:4px] [padding:10px_12px] [border-radius:8px]" : "[padding:10px_13px] [border-radius:4px_6px_6px_4px]"} ${props.block.status === "streaming" ? "[border-color:color-mix(in_srgb,var(--accent-codex)_18%,transparent)]" : ""} ${props.block.status === "error" && !hasWhisperFooter ? "[border:1px_solid_color-mix(in_srgb,var(--state-danger)_18%,transparent)] [color:var(--state-danger)] [background:var(--on-danger)]" : ""}`}
     >
       {props.quotedMessage ? (
         <ReferencedMessagePreview

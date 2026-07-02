@@ -334,6 +334,7 @@
   "summary.htmlResult": "Summary",
 
   "system.participantJoined": "{name} joined the room",
+  "system.participantLeft": "{name} left the room",
   "system.messageRecalled": "Message recalled",
 
   "agentError.noTextReplyAfterRun": "Agent finished without a text reply.",

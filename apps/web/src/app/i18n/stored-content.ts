@@ -14,6 +14,12 @@ export function translateSystemNotice(content: string) {
   const joinedEn = text.match(/^(.+) joined the room$/);
   if (joinedEn) return t("system.participantJoined", { name: joinedEn[1]! });
 
+  const leftZh = text.match(/^(.+) 已从群聊移除$/);
+  if (leftZh) return t("system.participantLeft", { name: leftZh[1]! });
+
+  const leftEn = text.match(/^(.+) left the room$/);
+  if (leftEn) return t("system.participantLeft", { name: leftEn[1]! });
+
   if (text === "消息已撤回" || text === "Message recalled") {
     return t("system.messageRecalled");
   }

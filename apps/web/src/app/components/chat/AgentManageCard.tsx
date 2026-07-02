@@ -41,11 +41,11 @@ export function AgentManageCard(props: {
         <span className={"[display:grid] [width:34px] [height:34px] [flex-shrink:0] [place-items:center]"}>
           <AgentAvatar title={participant.displayName} avatar={resolvedAvatar.avatar} provider={resolvedAvatar.provider} size={34} hideProviderBadge />
         </span>
-        <span className={"[min-width:0]"}>
-          <strong className={"[display:block] [overflow:hidden] [font-size:13px] [font-weight:700] [text-overflow:ellipsis] [white-space:nowrap]"}>
+        <span className={"[display:grid] [height:34px] [min-width:0] [align-content:center]"}>
+          <strong className={"[display:block] [overflow:hidden] [font-size:13px] [font-weight:700] [line-height:1.15] [text-overflow:ellipsis] [white-space:nowrap]"}>
             {participant.displayName}
           </strong>
-          <small className={"[display:block] [overflow:hidden] [margin-top:2px] [color:var(--text-secondary)] [font-size:11px] [text-overflow:ellipsis] [white-space:nowrap]"}>
+          <small className={"[display:block] [overflow:hidden] [margin-top:2px] [color:var(--text-secondary)] [font-size:11px] [line-height:1.15] [text-overflow:ellipsis] [white-space:nowrap]"}>
             {[identity?.name, runtimeStatusSummary(selectedRuntime, props.localAgentProviders)]
               .filter(Boolean)
               .join(" · ")}
