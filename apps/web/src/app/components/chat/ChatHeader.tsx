@@ -112,7 +112,7 @@ export function ChatHeader(props: {
           <HoverTooltip label={t("chatHeader.searchMessages")}>
             <button
               type="button"
-              className={`[display:inline-grid] [width:28px] [height:28px] [place-items:center] [border:0] [border-radius:4px] [color:var(--text-secondary)] [background:transparent] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)] [&:focus-visible]:[outline:none] ${props.searchOpen ? "![color:var(--text-primary)] ![background:var(--transparency-hover)]" : ""}`}
+              className={`[display:inline-grid] [width:28px] [height:28px] [place-items:center] [border:0] [border-radius:4px] [color:var(--text-secondary)] [background:transparent] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)] [&:focus-visible]:[outline:none] ${props.searchOpen ? "![color:var(--tutti-purple)] ![background:var(--tutti-purple-bg)]" : ""}`}
               aria-label={t("chatHeader.searchMessages")}
               onClick={props.onToggleSearch}
             >
@@ -122,7 +122,7 @@ export function ChatHeader(props: {
           <HoverTooltip label={t("chatHeader.viewFiles")}>
             <button
               type="button"
-              className={`[display:inline-grid] [width:28px] [height:28px] [place-items:center] [border:0] [border-radius:4px] [color:var(--text-secondary)] [background:transparent] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)] [&:focus-visible]:[outline:none] ${props.filesOpen ? "![color:var(--text-primary)] ![background:var(--transparency-hover)]" : ""}`}
+              className={`[display:inline-grid] [width:28px] [height:28px] [place-items:center] [border:0] [border-radius:4px] [color:var(--text-secondary)] [background:transparent] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)] [&:focus-visible]:[outline:none] ${props.filesOpen ? "![color:var(--tutti-purple)] ![background:var(--tutti-purple-bg)]" : ""}`}
               aria-label={t("chatHeader.viewFiles")}
               onClick={props.onToggleFiles}
             >

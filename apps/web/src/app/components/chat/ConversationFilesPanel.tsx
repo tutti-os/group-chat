@@ -188,7 +188,7 @@ export function ConversationFilesPanel(props: {
             <button
               key={tab.id}
               type="button"
-              className={`[display:inline-flex] [height:32px] [flex:0_0_auto] [align-items:center] [border:0] [border-radius:8px] [padding:0_14px] [font-size:13px] [font-weight:650] [transition:background-color_0.12s_ease,_color_0.12s_ease] ${active ? "[color:var(--white-stationary)] [background:var(--black-stationary)]" : "[color:var(--text-secondary)] [background:var(--transparency-block)] hover:[color:var(--text-primary)] hover:[background:var(--transparency-hover)]"}`}
+              className={`[display:inline-flex] [height:32px] [flex:0_0_auto] [align-items:center] [border:0] [border-radius:8px] [padding:0_14px] [font-size:13px] [font-weight:650] [transition:background-color_0.12s_ease,_color_0.12s_ease] ${active ? "[color:var(--tutti-purple)] [background:var(--tutti-purple-bg)]" : "[color:var(--text-secondary)] [background:var(--transparency-block)] hover:[color:var(--text-primary)] hover:[background:var(--transparency-hover)]"}`}
               aria-pressed={active}
               onClick={() => setCategory(tab.id)}
             >
