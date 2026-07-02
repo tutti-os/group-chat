@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CircleOff, Power, X } from "lucide-react";
 import type {
+  AgentContextUsage,
   AddParticipantRequest,
   CreateIdentityRequest,
   Identity,
@@ -11,6 +12,7 @@ import type {
 } from "@group-chat/shared";
 import { DEFAULT_PARTICIPANT_LISTEN_MODE, uniqueParticipantDisplayNameInRoom } from "@group-chat/shared";
 import { runtimeStatusSummary } from "../../runtime.js";
+import { compactAgentContext, fetchAgentContextUsage } from "../../../api/client.js";
 import { resolveAgentAvatar } from "../../identity-avatar.js";
 import { useTranslation } from "../../i18n/index.js";
 import { AgentAvatar } from "../ui/AgentAvatar.js";
@@ -62,6 +64,9 @@ export function AgentProfileDialog(props: {
   const [avatar, setAvatar] = useState<string | null>(formParticipant?.avatar ?? setupIdentity?.icon ?? null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [mutePending, setMutePending] = useState(false);
+  const [contextUsage, setContextUsage] = useState<AgentContextUsage | null>(null);
+  const [contextUsageLoading, setContextUsageLoading] = useState(false);
+  const [contextCompactPending, setContextCompactPending] = useState(false);
   const [previewDisplayName, setPreviewDisplayName] = useState(formParticipant?.displayName ?? setupIdentity?.name ?? "");
   const [previewRuntimeProfileId, setPreviewRuntimeProfileId] = useState(
     formParticipant?.runtimeProfileId ?? setupIdentity?.defaultRuntimeProfileId ?? null,
@@ -108,6 +113,39 @@ export function AgentProfileDialog(props: {
     }
     wasOpenRef.current = isOpen;
   }, [formParticipant, props.onRefreshLocalAgentProviders]);
+
+  const loadContextUsage = useCallback(async () => {
+    if (!props.conversationId || !participant || isAddMode) {
+      setContextUsage(null);
+      return;
+    }
+    setContextUsageLoading(true);
+    try {
+      const result = await fetchAgentContextUsage(props.conversationId, participant.id);
+      setContextUsage(result.usage);
+    } catch {
+      setContextUsage(null);
+    } finally {
+      setContextUsageLoading(false);
+    }
+  }, [isAddMode, participant, props.conversationId]);
+
+  useEffect(() => {
+    void loadContextUsage();
+  }, [loadContextUsage]);
+
+  const compactContext = async () => {
+    if (!props.conversationId || !participant || contextCompactPending) return;
+    setContextCompactPending(true);
+    try {
+      const result = await compactAgentContext(props.conversationId, participant.id);
+      setContextUsage(result.after);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : t("agentForm.contextCompactFailed"));
+    } finally {
+      setContextCompactPending(false);
+    }
+  };
 
   if (!formParticipant) return null;
 
@@ -244,6 +282,11 @@ export function AgentProfileDialog(props: {
             onAddParticipant={props.onAddParticipant}
             onUpdateParticipant={props.onUpdateParticipant}
             onRemoveParticipant={props.onRemoveParticipant}
+            contextUsage={contextUsage}
+            contextUsageLoading={contextUsageLoading}
+            contextCompactPending={contextCompactPending}
+            onRefreshContextUsage={loadContextUsage}
+            onCompactContext={compactContext}
             onSaved={props.onSaved ?? props.onClose}
             onRemoved={props.onRemoved ?? props.onClose}
           />

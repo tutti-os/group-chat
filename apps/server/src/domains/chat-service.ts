@@ -256,6 +256,26 @@ export class ChatService {
     return participant;
   }
 
+  getParticipantContextUsage(conversationId: string, participantId: string) {
+    const conversation = this.repo.getConversation(conversationId);
+    if (!conversation) throw new Error("Conversation not found");
+    const participant = this.repo.getParticipant(participantId);
+    if (!participant || participant.conversationId !== conversationId || participant.status === "removed") {
+      throw new Error("Participant not found");
+    }
+    return this.workspaces.getContextUsage({ conversation, participant });
+  }
+
+  compactParticipantContext(conversationId: string, participantId: string) {
+    const conversation = this.repo.getConversation(conversationId);
+    if (!conversation) throw new Error("Conversation not found");
+    const participant = this.repo.getParticipant(participantId);
+    if (!participant || participant.conversationId !== conversationId || participant.status === "removed") {
+      throw new Error("Participant not found");
+    }
+    return this.workspaces.compactConversationContext({ conversation, participant });
+  }
+
   getRuntimeProfile(runtimeProfileId: string | null | undefined) {
     return runtimeProfileId ? this.repo.getRuntimeProfile(runtimeProfileId) : null;
   }

@@ -749,6 +749,29 @@ export interface PrivateTaskSnapshot {
   updatedAt: string;
 }
 
+export interface AgentContextUsage {
+  participantId: Id;
+  conversationId: Id;
+  totalChars: number;
+  estimatedTokens: number;
+  rawConversationLogChars: number;
+  rawConversationLogMaxChars: number;
+  rawConversationLogKeepChars: number;
+  memoryChars: number;
+  distilledContextChars: number;
+  localUserMemoryChars: number;
+  conversationSummaryChars: number;
+  workspaceInstructionChars: number;
+  rawConversationLogExists: boolean;
+  compacted: boolean;
+  updatedAt: string | null;
+}
+
+export interface AgentContextCompactResponse {
+  before: AgentContextUsage;
+  after: AgentContextUsage;
+}
+
 export interface UpdateMessageRequest {
   content?: string;
   parts?: SendMessageRequest["parts"];

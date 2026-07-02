@@ -1,5 +1,7 @@
 import type {
   AddParticipantRequest,
+  AgentContextCompactResponse,
+  AgentContextUsage,
   AppReferenceListRequest,
   AppReferenceListResponse,
   Artifact,
@@ -234,6 +236,19 @@ export async function updateParticipant(participantId: string, input: UpdatePart
     method: "PATCH",
     body: JSON.stringify(input),
   });
+}
+
+export async function fetchAgentContextUsage(conversationId: string, participantId: string) {
+  return fetchJson<{ usage: AgentContextUsage }>(
+    `/api/conversations/${conversationId}/participants/${participantId}/context-usage`,
+  );
+}
+
+export async function compactAgentContext(conversationId: string, participantId: string) {
+  return fetchJson<AgentContextCompactResponse>(
+    `/api/conversations/${conversationId}/participants/${participantId}/context-compact`,
+    { method: "POST" },
+  );
 }
 
 export async function uploadArtifact(

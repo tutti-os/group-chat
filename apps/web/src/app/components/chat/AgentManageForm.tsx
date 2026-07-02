@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown } from "lucide-react";
+import { Archive, Check, ChevronDown, RefreshCw } from "lucide-react";
 import { Button } from "@tutti-os/ui-system";
 import type {
+  AgentContextUsage,
   AddParticipantRequest,
   CreateIdentityRequest,
   Identity,
@@ -65,6 +66,11 @@ export function AgentManageForm(props: {
   ) => Promise<{ participant: Participant }>;
   onUpdateParticipant: (participantId: string, input: UpdateParticipantRequest) => Promise<unknown>;
   onRemoveParticipant?: (participantId: string) => Promise<unknown>;
+  contextUsage?: AgentContextUsage | null;
+  contextUsageLoading?: boolean;
+  contextCompactPending?: boolean;
+  onRefreshContextUsage?: () => void | Promise<void>;
+  onCompactContext?: () => void | Promise<void>;
   onSaved?: () => void;
   onRemoved?: () => void;
   footerHost?: HTMLElement | null;
@@ -379,6 +385,17 @@ export function AgentManageForm(props: {
         </label>
       </div>
 
+      {!isAddMode ? (
+        <AgentContextUsageSection
+          usage={props.contextUsage ?? null}
+          loading={Boolean(props.contextUsageLoading)}
+          compacting={Boolean(props.contextCompactPending)}
+          readOnly={readOnly}
+          onRefresh={props.onRefreshContextUsage}
+          onCompact={props.onCompactContext}
+        />
+      ) : null}
+
       <div className={"[display:grid] [gap:10px]"}>
         <span className={"[color:var(--text-secondary)] [font-size:11px] [font-weight:700]"}>{t("agentForm.roleSetting")}</span>
         <textarea
@@ -425,6 +442,88 @@ export function AgentManageForm(props: {
     {actionFooter && props.footerHost ? createPortal(actionFooter, props.footerHost) : null}
     </>
   );
+}
+
+function AgentContextUsageSection(props: {
+  usage: AgentContextUsage | null;
+  loading: boolean;
+  compacting: boolean;
+  readOnly: boolean;
+  onRefresh?: () => void | Promise<void>;
+  onCompact?: () => void | Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const rawPercent = props.usage
+    ? Math.min(100, Math.round((props.usage.rawConversationLogChars / props.usage.rawConversationLogMaxChars) * 100))
+    : 0;
+  const rawLabel = props.usage
+    ? t("agentForm.contextRawUsage", {
+      used: formatCompactNumber(props.usage.rawConversationLogChars),
+      max: formatCompactNumber(props.usage.rawConversationLogMaxChars),
+    })
+    : props.loading
+      ? t("agentForm.contextLoading")
+      : t("agentForm.contextUnavailable");
+  const totalLabel = props.usage
+    ? t("agentForm.contextTotalUsage", {
+      chars: formatCompactNumber(props.usage.totalChars),
+      tokens: formatCompactNumber(props.usage.estimatedTokens),
+    })
+    : "";
+  return (
+    <section className={"[display:grid] [gap:10px] [border:1px_solid_var(--border-1)] [border-radius:8px] [padding:12px] [background:var(--background-panel)]"}>
+      <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px]"}>
+        <div className={"[min-width:0]"}>
+          <div className={"[color:var(--text-secondary)] [font-size:11px] [font-weight:750]"}>{t("agentForm.contextTitle")}</div>
+          <div className={"[margin-top:3px] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap] [color:var(--text-primary)] [font-size:12px] [font-weight:650]"}>
+            {totalLabel || rawLabel}
+          </div>
+        </div>
+        <div className={"[display:flex] [flex:0_0_auto] [align-items:center] [gap:6px]"}>
+          <button
+            type="button"
+            className={"[display:inline-grid] [width:30px] [height:30px] [place-items:center] [border:1px_solid_var(--border-1)] [border-radius:8px] [color:var(--text-secondary)] [background:var(--white-stationary)] [&:hover:not(:disabled)]:[color:var(--text-primary)] [&:hover:not(:disabled)]:[background:var(--transparency-hover)] [&:disabled]:[opacity:0.55]"}
+            disabled={!props.onRefresh || props.loading || props.compacting}
+            title={t("agentForm.contextRefresh")}
+            aria-label={t("agentForm.contextRefresh")}
+            onClick={() => void props.onRefresh?.()}
+          >
+            <RefreshCw size={14} />
+          </button>
+          <button
+            type="button"
+            className={"[display:inline-flex] [height:30px] [align-items:center] [gap:6px] [border:1px_solid_color-mix(in_srgb,var(--text-primary)_12%,transparent)] [border-radius:8px] [padding:0_10px] [color:var(--text-primary)] [background:var(--white-stationary)] [font-size:11px] [font-weight:700] [&:hover:not(:disabled)]:[background:var(--transparency-hover)] [&:disabled]:[opacity:0.55]"}
+            disabled={props.readOnly || !props.onCompact || props.loading || props.compacting || !props.usage?.rawConversationLogExists}
+            title={t("agentForm.contextCompact")}
+            aria-label={t("agentForm.contextCompact")}
+            onClick={() => void props.onCompact?.()}
+          >
+            <Archive size={13} />
+            {props.compacting ? t("agentForm.contextCompacting") : t("agentForm.contextCompact")}
+          </button>
+        </div>
+      </div>
+      <div className={"[display:grid] [gap:6px]"}>
+        <div className={"[height:6px] [overflow:hidden] [border-radius:999px] [background:color-mix(in_srgb,var(--text-secondary)_12%,transparent)]"}>
+          <div
+            className={"[height:100%] [border-radius:999px] [background:var(--accent-codex)] [transition:width_160ms_ease]"}
+            style={{ width: `${rawPercent}%` }}
+          />
+        </div>
+        <div className={"[display:flex] [justify-content:space-between] [gap:8px] [color:var(--text-secondary)] [font-size:11px] [line-height:1.35]"}>
+          <span>{rawLabel}</span>
+          {props.usage?.compacted ? <span>{t("agentForm.contextCompacted")}</span> : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function formatCompactNumber(value: number) {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 10_000) return `${Math.round(value / 1_000)}k`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return String(value);
 }
 
 function AgentSelect(props: {

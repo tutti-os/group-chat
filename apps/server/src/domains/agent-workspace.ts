@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Conversation, Identity, Message, Participant } from "@group-chat/shared";
+import type { AgentContextCompactResponse, AgentContextUsage, Conversation, Identity, Message, Participant } from "@group-chat/shared";
 import { identityWorkspaceRoot, participantWorkspaceRoot } from "../local/paths.js";
 import {
   buildAgentInstructions,
@@ -63,15 +63,77 @@ export class AgentWorkspaceService {
     const rawConversationLog = readTextFile(conversationLogPath);
     const recentEntries = parseRecentMemoryEntries(rawConversationLog, DIGEST_RECENT_TURNS);
     const digest = buildDistilledContext({
-      ...input,
+      conversation: input.conversation,
+      participant: input.participant,
       recentEntries,
       rawConversationLog,
+      lastUpdated: input.assistantMessage.updatedAt,
     });
-    const userDigest = buildLocalUserDigest(input, recentEntries);
+    const userDigest = buildLocalUserDigest({
+      conversation: input.conversation,
+      participant: input.participant,
+      lastUpdated: input.assistantMessage.updatedAt,
+    }, recentEntries);
     writeGeneratedSection(join(root, "MEMORY.md"), digest);
     writeGeneratedSection(join(root, "memory", "users", "local-user.md"), userDigest);
-    writeGeneratedFile(join(root, "conversations", `${input.conversation.id}.summary.md`), buildConversationSummary(input, recentEntries));
+    writeGeneratedFile(join(root, "conversations", `${input.conversation.id}.summary.md`), buildConversationSummary({
+      conversation: input.conversation,
+      participant: input.participant,
+      lastUpdated: input.assistantMessage.updatedAt,
+    }, recentEntries));
     writeGeneratedFile(join(root, DISTILLED_CONTEXT_FILENAME), digest);
+  }
+
+  getContextUsage(input: { conversation: Conversation; participant: Participant }): AgentContextUsage {
+    return buildContextUsage(input);
+  }
+
+  compactConversationContext(input: { conversation: Conversation; participant: Participant }): AgentContextCompactResponse {
+    const before = buildContextUsage(input);
+    const root = participantWorkspaceRoot(input.conversation.roomId, input.participant.id);
+    const conversationLogPath = join(root, "conversations", `${input.conversation.id}.md`);
+    const raw = readTextFile(conversationLogPath);
+    const now = new Date().toISOString();
+
+    mkdirSync(join(root, "memory", "users"), { recursive: true });
+    mkdirSync(join(root, "conversations"), { recursive: true });
+    writeIfMissing(join(root, "MEMORY.md"), "# Memory\n\nNo room-scoped memory recorded yet.\n");
+    writeIfMissing(join(root, "memory", "users", "local-user.md"), "# Local User Memory\n\nNo user memory recorded yet.\n");
+
+    if (raw.trim()) {
+      writeCompactedConversationLog(conversationLogPath, raw, {
+        reason: `Manually compacted at ${now}.`,
+      });
+    }
+
+    const rawConversationLog = readTextFile(conversationLogPath);
+    const recentEntries = parseRecentMemoryEntries(rawConversationLog, DIGEST_RECENT_TURNS);
+    const digest = buildDistilledContext({
+      conversation: input.conversation,
+      participant: input.participant,
+      recentEntries,
+      rawConversationLog,
+      lastUpdated: now,
+    });
+    const userDigest = buildLocalUserDigest({
+      conversation: input.conversation,
+      participant: input.participant,
+      lastUpdated: now,
+    }, recentEntries);
+
+    writeGeneratedSection(join(root, "MEMORY.md"), digest);
+    writeGeneratedSection(join(root, "memory", "users", "local-user.md"), userDigest);
+    writeGeneratedFile(join(root, "conversations", `${input.conversation.id}.summary.md`), buildConversationSummary({
+      conversation: input.conversation,
+      participant: input.participant,
+      lastUpdated: now,
+    }, recentEntries));
+    writeGeneratedFile(join(root, DISTILLED_CONTEXT_FILENAME), digest);
+
+    return {
+      before,
+      after: buildContextUsage(input),
+    };
   }
 }
 
@@ -225,13 +287,19 @@ function appendCompactedConversationEntry(path: string, entry: string) {
   appendFileSync(path, entry, "utf8");
   const raw = readTextFile(path);
   if (raw.length <= RAW_CONVERSATION_MAX_CHARS) return;
+  writeCompactedConversationLog(path, raw, {
+    reason: `Older raw entries were compacted after this file exceeded ${RAW_CONVERSATION_MAX_CHARS} characters.`,
+  });
+}
+
+function writeCompactedConversationLog(path: string, raw: string, input: { reason: string }) {
   const kept = keepRecentConversationSections(raw, RAW_CONVERSATION_KEEP_CHARS);
   writeGeneratedFile(
     path,
     [
       "# Compacted Conversation Log",
       "",
-      `Older raw entries were compacted after this file exceeded ${RAW_CONVERSATION_MAX_CHARS} characters.`,
+      input.reason,
       "Use the sibling .summary.md file and DISTILLED_CONTEXT.md for durable context.",
       "",
       kept.trim(),
@@ -274,17 +342,16 @@ function parseMemoryEntry(section: string): ParsedMemoryEntry {
 function buildDistilledContext(input: {
   conversation: Conversation;
   participant: Participant;
-  userMessage: Message;
-  assistantMessage: Message;
   recentEntries: ParsedMemoryEntry[];
   rawConversationLog: string;
+  lastUpdated: string;
 }) {
   const userSignals = extractUserSignals(input.recentEntries.map((entry) => entry.userText));
   const recentTurns = input.recentEntries.slice(-6).map(renderRecentTurn);
   return [
     "# Distilled Context",
     "",
-    `Last updated: ${input.assistantMessage.updatedAt}`,
+    `Last updated: ${input.lastUpdated}`,
     `Conversation: ${input.conversation.title} (${input.conversation.id})`,
     `Participant: ${input.participant.displayName} (${input.participant.id})`,
     "",
@@ -309,13 +376,13 @@ function buildDistilledContext(input: {
 function buildLocalUserDigest(input: {
   conversation: Conversation;
   participant: Participant;
-  assistantMessage: Message;
+  lastUpdated: string;
 }, recentEntries: ParsedMemoryEntry[]) {
   const signals = extractUserSignals(recentEntries.map((entry) => entry.userText));
   return [
     "# Local User Memory",
     "",
-    `Last updated: ${input.assistantMessage.updatedAt}`,
+    `Last updated: ${input.lastUpdated}`,
     `Observed in conversation: ${input.conversation.title} (${input.conversation.id})`,
     `Observed by participant: ${input.participant.displayName} (${input.participant.id})`,
     "",
@@ -327,13 +394,13 @@ function buildLocalUserDigest(input: {
 function buildConversationSummary(input: {
   conversation: Conversation;
   participant: Participant;
-  assistantMessage: Message;
+  lastUpdated: string;
 }, recentEntries: ParsedMemoryEntry[]) {
   return [
     "# Conversation Summary",
     "",
     `Conversation: ${input.conversation.title} (${input.conversation.id})`,
-    `Last updated: ${input.assistantMessage.updatedAt}`,
+    `Last updated: ${input.lastUpdated}`,
     "",
     "## Recent Turns",
     recentEntries.length > 0 ? recentEntries.map(renderRecentTurn).join("\n") : "- No turns recorded yet.",
@@ -403,6 +470,49 @@ function writeGeneratedSection(path: string, generatedContent: string) {
 
 function readTextFile(path: string) {
   return existsSync(path) ? readFileSync(path, "utf8") : "";
+}
+
+function buildContextUsage(input: { conversation: Conversation; participant: Participant }): AgentContextUsage {
+  const root = participantWorkspaceRoot(input.conversation.roomId, input.participant.id);
+  const rawConversationLog = readTextFile(join(root, "conversations", `${input.conversation.id}.md`));
+  const conversationSummary = readTextFile(join(root, "conversations", `${input.conversation.id}.summary.md`));
+  const memory = readTextFile(join(root, "MEMORY.md"));
+  const distilledContext = readTextFile(join(root, DISTILLED_CONTEXT_FILENAME));
+  const localUserMemory = readTextFile(join(root, "memory", "users", "local-user.md"));
+  const workspaceInstructionChars = [
+    "AGENTS.md",
+    "IDENTITY.md",
+    "SOUL.md",
+    "BOOTSTRAP.md",
+  ].reduce((sum, filename) => sum + readTextFile(join(root, filename)).length, 0);
+  const totalChars =
+    rawConversationLog.length
+    + conversationSummary.length
+    + memory.length
+    + distilledContext.length
+    + localUserMemory.length
+    + workspaceInstructionChars;
+  return {
+    participantId: input.participant.id,
+    conversationId: input.conversation.id,
+    totalChars,
+    estimatedTokens: Math.ceil(totalChars / 4),
+    rawConversationLogChars: rawConversationLog.length,
+    rawConversationLogMaxChars: RAW_CONVERSATION_MAX_CHARS,
+    rawConversationLogKeepChars: RAW_CONVERSATION_KEEP_CHARS,
+    memoryChars: memory.length,
+    distilledContextChars: distilledContext.length,
+    localUserMemoryChars: localUserMemory.length,
+    conversationSummaryChars: conversationSummary.length,
+    workspaceInstructionChars,
+    rawConversationLogExists: Boolean(rawConversationLog.trim()),
+    compacted: rawConversationLog.startsWith("# Compacted Conversation Log"),
+    updatedAt: extractLastUpdated(distilledContext) ?? null,
+  };
+}
+
+function extractLastUpdated(content: string) {
+  return content.match(/^Last updated:\s+(.+)$/m)?.[1]?.trim() ?? null;
 }
 
 function escapeRegex(value: string) {

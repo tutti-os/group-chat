@@ -40,6 +40,8 @@ type GroupChatLocalAgentProviderPlugin = LocalAgentProviderPlugin<"local-agent",
 const DEFAULT_KIT_HISTORY_LIMIT = 16;
 const COMPACT_KIT_HISTORY_LIMIT = 4;
 
+type ContextRetryMode = "normal" | "compact-history" | "minimal";
+
 type TuttiAgentProviderStatus = {
   provider: string;
   availability?: {
@@ -293,7 +295,6 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       const sessionStore = new LocalAgentSessionStore(workspaceRoot);
       const previousSession = sessionStore.read(context.conversation.id);
       const input = buildLocalAgentInput(context);
-      const prompt = acpPromptFromLocalAgentInput(input);
       const timeoutMs = localAgentTimeoutMs();
       const runtimeRunId = context.runId ?? `${context.conversation.id}:${context.participant.id}`;
       const skillContext = await loadGroupChatAgentSkillContext({
@@ -309,13 +310,17 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
           }
         : { mode: "fresh" as const };
       let canRetryFresh = resume.mode !== "fresh";
-      let canRetryCompactContext = provider === "codex";
       let historyLimit = DEFAULT_KIT_HISTORY_LIMIT;
+      let contextRetryMode: ContextRetryMode = "normal";
       let canRetryWithoutUserSkills = provider === "codex";
       let skillFallbackEnv: Record<string, string> | undefined;
       let emittedNonRetryableEvent = false;
       let emittedContextRetryBlockingEvent = false;
       while (true) {
+        const prompt = acpPromptFromLocalAgentInput(input, { compact: contextRetryMode === "minimal" });
+        const systemPrompt = buildKitAttemptSystemPrompt(context, skillContext, contextRetryMode);
+        const mcpServers = contextRetryMode === "minimal" ? undefined : buildGroupChatMcpServers(context);
+        const skillManifest = contextRetryMode === "minimal" ? undefined : skillContext.skillManifest;
         try {
           for await (const event of this.localAgentRuntime.run({
             runId: runtimeRunId,
@@ -326,12 +331,12 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
             runtimeProvider: provider,
             cwd: workspaceRoot,
             prompt,
-            systemPrompt: joinPromptParts(skillContext.recommendedSystemPrompt?.content, buildKitSystemPrompt(context)),
+            systemPrompt,
             history: buildKitHistory(context, historyLimit),
             model: stripLocalAgentProviderPrefix(context.runtimeProfile?.model ?? "default", provider),
             reasoning: context.participant.reasoningEffort ?? undefined,
-            mcpServers: buildGroupChatMcpServers(context),
-            skillManifest: skillContext.skillManifest,
+            ...(mcpServers ? { mcpServers } : {}),
+            ...(skillManifest ? { skillManifest } : {}),
             env: buildLocalAgentRunEnv(context, workspaceRoot, skillFallbackEnv),
             metadata: context.participant.speedMode ? { speedMode: context.participant.speedMode } : undefined,
             ...(timeoutMs ? { timeoutMs } : {}),
@@ -385,14 +390,20 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
             canRetryFresh = false;
             continue;
           }
-          if (canRetryCompactContext && !emittedContextRetryBlockingEvent && isContextWindowError(error)) {
+          if (provider === "codex" && !emittedContextRetryBlockingEvent && isContextWindowError(error)) {
             sessionStore.remove(context.conversation.id);
             resume = { mode: "fresh" as const };
             canRetryFresh = false;
-            canRetryCompactContext = false;
-            historyLimit = COMPACT_KIT_HISTORY_LIMIT;
-            yield { type: "thinking_delta" as const, text: `${CONTEXT_WINDOW_FRESH_RETRY_NOTICE}\n` };
-            continue;
+            const nextRetryMode = nextContextRetryMode(contextRetryMode);
+            if (nextRetryMode) {
+              contextRetryMode = nextRetryMode;
+              historyLimit = contextRetryMode === "minimal" ? 0 : COMPACT_KIT_HISTORY_LIMIT;
+              yield {
+                type: "thinking_delta" as const,
+                text: `${contextRetryMode === "minimal" ? CONTEXT_WINDOW_MINIMAL_RETRY_NOTICE : CONTEXT_WINDOW_FRESH_RETRY_NOTICE}\n`,
+              };
+              continue;
+            }
           }
           throw error;
         }
@@ -405,6 +416,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
 
 const SKILL_LOAD_FALLBACK_NOTICE = "检测到用户级 skill 元数据损坏，已临时隔离用户级 skills 并自动重试。";
 const CONTEXT_WINDOW_FRESH_RETRY_NOTICE = "检测到 Codex 上下文窗口已满，已自动开启新线程并减少历史上下文重试。";
+const CONTEXT_WINDOW_MINIMAL_RETRY_NOTICE = "上下文仍然过大，已切换到紧急最小上下文重试。";
 
 class LocalAgentCommandError extends Error {
   constructor(message: string, readonly emittedOutput: boolean) {
@@ -867,6 +879,41 @@ export function buildKitSystemPrompt(context: RuntimeReplyContext) {
     .join("\n\n");
 }
 
+function buildKitAttemptSystemPrompt(
+  context: RuntimeReplyContext,
+  skillContext: TuttiAgentSkillContext,
+  mode: ContextRetryMode,
+) {
+  if (mode === "minimal") return buildMinimalKitSystemPrompt(context);
+  return joinPromptParts(skillContext.recommendedSystemPrompt?.content, buildKitSystemPrompt(context));
+}
+
+function buildMinimalKitSystemPrompt(context: RuntimeReplyContext) {
+  const mentionAll = isMentionAllTrigger(context.userMessage.mentions);
+  const workspaceAppOnlyDispatch = isWorkspaceAppOnlyTaskMessage(context);
+  return [
+    "You are a local agent participant inside an IM group chat.",
+    "This is an emergency retry after a model context overflow. Keep only the current user request in focus.",
+    "Reply as the current participant, not as the host application.",
+    "Keep the final reply concise unless the user explicitly requested a target length or detailed answer.",
+    context.conversation.type === "group" && context.participant.listenMode === "passive" && !mentionAll && !workspaceAppOnlyDispatch
+      ? "In passive group listen mode, reply only when directly mentioned or explicitly assigned work; otherwise output [NO_REPLY]."
+      : null,
+    workspaceAppOnlyDispatch
+      ? "This run was triggered by a Tutti workspace app mention without an agent mention; treat it as explicitly assigned work."
+      : null,
+    "Do not claim a tool action happened unless the tool actually succeeded.",
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n\n");
+}
+
+function nextContextRetryMode(mode: ContextRetryMode): ContextRetryMode | null {
+  if (mode === "normal") return "compact-history";
+  if (mode === "compact-history") return "minimal";
+  return null;
+}
+
 async function loadGroupChatAgentSkillContext(input: {
   provider: string;
   agentSessionId: string;
@@ -905,6 +952,7 @@ function tuttiCliEnv(): Record<string, string> {
 }
 
 function buildKitHistory(context: RuntimeReplyContext, limit = DEFAULT_KIT_HISTORY_LIMIT): AgentRunMessage[] {
+  if (limit <= 0) return [];
   return context.recentMessages
     .filter((message) => message.id !== context.userMessage.id)
     .filter((message) => message.status === "success" && message.content.trim())

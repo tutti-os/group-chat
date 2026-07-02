@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -530,6 +530,202 @@ test("codex local agent retries with isolated user skills when skill metadata is
         }
         assert.equal(output, "agent-ok-after-skill-fallback");
         assert.equal(sawFallbackNotice, true);
+      }
+      main().catch((error) => {
+        console.error(error);
+        process.exit(1);
+      });
+    `,
+  );
+
+  try {
+    await execFileAsync("pnpm", ["--filter", "@group-chat/server", "exec", "tsx", checkScript], {
+      cwd: new URL("..", import.meta.url),
+      env: { ...process.env, GROUP_CHAT_HOME: home },
+    });
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("codex local agent falls back to minimal context after repeated context window failures", async () => {
+  const home = await mkdtemp(join(tmpdir(), "group-chat-context-fallback-"));
+  const binDir = join(home, "bin");
+  const promptDir = join(home, "prompts");
+  const codexHome = join(home, "codex-home");
+  const fakeCodex = join(binDir, "codex");
+  const fakeTutti = join(binDir, "tutti-dev");
+  const attemptFile = join(home, "attempt-count.txt");
+  const checkScript = join(home, "check-context-fallback.ts");
+
+  await mkdir(binDir, { recursive: true });
+  await mkdir(promptDir, { recursive: true });
+  await mkdir(codexHome, { recursive: true });
+  await mkdir(join(home, "rooms", "room-1", "agents", "product-agent"), { recursive: true });
+  await writeFile(join(codexHome, "auth.json"), "{}");
+  await writeFile(
+    fakeTutti,
+    `#!/usr/bin/env node
+      const repeated = "PROMPT_INJECTION_MARKER ".repeat(200);
+      console.log(JSON.stringify({
+        provider: "codex",
+        recommendedSystemPrompt: { content: "RECOMMENDED_PROMPT_MARKER ".repeat(200) },
+        skills: [{ skillId: "big-skill", slug: "big-skill", deliveryMode: "prompt-injection", content: repeated }]
+      }));
+    `,
+  );
+  await chmod(fakeTutti, 0o755);
+  await writeFile(
+    fakeCodex,
+    `#!/usr/bin/env node
+      const { existsSync, readFileSync, writeFileSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      const prompt = readFileSync(0, "utf8");
+      const attemptFile = process.env.FAKE_CODEX_ATTEMPT_FILE;
+      const promptDir = process.env.FAKE_CODEX_PROMPT_DIR;
+      const attempt = (attemptFile && existsSync(attemptFile) ? Number(readFileSync(attemptFile, "utf8")) : 0) + 1;
+      writeFileSync(attemptFile, String(attempt));
+      writeFileSync(join(promptDir, \`attempt-\${attempt}.txt\`), prompt);
+      if (attempt < 3) {
+        console.error("Codex ran out of room in the model's context window. Start a new thread or clear earlier history before retrying.");
+        process.exit(1);
+      }
+      for (const marker of [
+        "PROMPT_INJECTION_MARKER",
+        "RECOMMENDED_PROMPT_MARKER",
+        "Conversation history:",
+        "old-message-",
+        "COLLAB_RULE_MARKER",
+        "<tool_gateway>"
+      ]) {
+        if (prompt.includes(marker)) {
+          console.error(\`minimal retry still contains \${marker}\`);
+          process.exit(1);
+        }
+      }
+      console.log(JSON.stringify({ type: "text_delta", text: "recovered-minimal" }));
+    `,
+  );
+  await chmod(fakeCodex, 0o755);
+  await writeFile(
+    checkScript,
+    `
+      import assert from "node:assert/strict";
+      import { readFile } from "node:fs/promises";
+      import { join } from "node:path";
+
+      process.env.GROUP_CHAT_HOME = ${JSON.stringify(home)};
+      process.env.GROUP_CHAT_TUTTI_CLI = ${JSON.stringify(fakeTutti)};
+      process.env.CODEX_HOME = ${JSON.stringify(codexHome)};
+      process.env.FAKE_CODEX_ATTEMPT_FILE = ${JSON.stringify(attemptFile)};
+      process.env.FAKE_CODEX_PROMPT_DIR = ${JSON.stringify(promptDir)};
+      process.env.PATH = ${JSON.stringify(binDir)} + ":" + (process.env.PATH || "");
+      delete process.env.GROUP_CHAT_LOCAL_AGENT_COMMAND;
+      delete process.env.GROUP_CHAT_LOCAL_AGENT_CODEX_COMMAND;
+
+      async function main() {
+        const { LocalAgentRuntimeProvider } = await import(${JSON.stringify(providerModuleUrl)});
+        const provider = new LocalAgentRuntimeProvider();
+        const content = "@产品 帮我修复上下文超限后的死局";
+        const userMessage = {
+          id: "msg-1",
+          conversationId: "conversation-1",
+          role: "user",
+          senderParticipantId: null,
+          senderName: "老板",
+          content,
+          mentions: [{ mentionType: "participant", participantId: "product-agent", displayNameSnapshot: "产品" }],
+          visibility: "public",
+          status: "success",
+          branchId: null,
+          parentMessageId: null,
+          runId: null,
+          tokenUsage: null,
+          createdAt: "2026-06-24T00:00:00.000Z",
+          updatedAt: "2026-06-24T00:00:00.000Z",
+        };
+        const recentMessages = Array.from({ length: 8 }, (_, index) => ({
+          ...userMessage,
+          id: \`old-\${index}\`,
+          role: index % 2 ? "assistant" : "user",
+          senderName: index % 2 ? "产品" : "老板",
+          content: \`old-message-\${index} \${"history ".repeat(200)}\`,
+        }));
+        const context = {
+          runId: "run-1",
+          conversation: {
+            id: "conversation-1",
+            roomId: "room-1",
+            type: "group",
+            title: "AI 讨论室",
+            groupSystemPrompt: "",
+            collaborationRules: "COLLAB_RULE_MARKER ".repeat(200),
+            collaborationRulesVersion: 1,
+            replyPolicy: { mode: "mentioned", order: "sequential", maxRounds: 1, mentionFollowupRounds: 0 },
+            activeBranchId: null,
+            pinned: false,
+            lastMessage: content,
+            lastMessageAt: "2026-06-24T00:00:00.000Z",
+            createdAt: "2026-06-24T00:00:00.000Z",
+            updatedAt: "2026-06-24T00:00:00.000Z",
+          },
+          participant: {
+            id: "product-agent",
+            conversationId: "conversation-1",
+            kind: "ai",
+            displayName: "产品",
+            avatar: null,
+            runtimeProfileId: "local-agent:codex",
+            identityId: "identity-product",
+            roomInstructions: "",
+            status: "active",
+            listenMode: "passive",
+            sortOrder: 0,
+            reasoningEffort: null,
+            speedMode: null,
+            createdAt: "2026-06-24T00:00:00.000Z",
+            updatedAt: "2026-06-24T00:00:00.000Z",
+          },
+          identity: null,
+          runtimeProfile: {
+            id: "local-agent:codex",
+            kind: "local-agent",
+            provider: "codex",
+            model: "codex:default",
+            displayName: "Codex",
+            enabled: true,
+            trustedMode: false,
+            systemPromptMode: "prompt-prefix",
+            capabilities: { streaming: true, toolUse: true, reasoning: true, vision: false, resume: true },
+            createdAt: "2026-06-24T00:00:00.000Z",
+            updatedAt: "2026-06-24T00:00:00.000Z",
+          },
+          userMessage,
+          recentMessages,
+          attachments: [],
+        };
+
+        let output = "";
+        let sawFreshRetry = false;
+        let sawMinimalRetry = false;
+        for await (const event of provider.streamReply(context)) {
+          if (event.type === "thinking_delta" && event.text.includes("减少历史上下文")) sawFreshRetry = true;
+          if (event.type === "thinking_delta" && event.text.includes("紧急最小上下文")) sawMinimalRetry = true;
+          output += event.type === "text_delta" ? event.text : "";
+        }
+
+        assert.equal(output, "recovered-minimal");
+        assert.equal(sawFreshRetry, true);
+        assert.equal(sawMinimalRetry, true);
+        assert.equal(await readFile(${JSON.stringify(attemptFile)}, "utf8"), "3");
+        const compactPrompt = await readFile(join(${JSON.stringify(promptDir)}, "attempt-2.txt"), "utf8");
+        assert.match(compactPrompt, /old-message-7/);
+        assert.doesNotMatch(compactPrompt, /old-message-0/);
+        const minimalPrompt = await readFile(join(${JSON.stringify(promptDir)}, "attempt-3.txt"), "utf8");
+        assert.doesNotMatch(minimalPrompt, /PROMPT_INJECTION_MARKER/);
+        assert.doesNotMatch(minimalPrompt, /RECOMMENDED_PROMPT_MARKER/);
+        assert.doesNotMatch(minimalPrompt, /Conversation history:/);
+        assert.doesNotMatch(minimalPrompt, /COLLAB_RULE_MARKER/);
       }
       main().catch((error) => {
         console.error(error);
