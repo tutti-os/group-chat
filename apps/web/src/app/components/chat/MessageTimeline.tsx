@@ -1371,7 +1371,8 @@ function SystemNoticeRow(props: {
 }
 
 const messageRoleContentClassName =
-  "[&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[background:var(--transparency-block)] "
+  "[&_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[max-width:min(760px,_100%)] "
+  + "[&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[background:var(--transparency-block)] "
   + "[&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[border-radius:8px] "
   + "[&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[border-color:transparent] "
   + "[&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[background:var(--accent-bg)] "
@@ -3359,7 +3360,7 @@ export function MessageBlockRenderer(props: {
       data-block-id={props.block.id}
       data-link-only={isLinkOnly || undefined}
       data-composite-child={props.compositeChild || undefined}
-      className={`message-prose [box-sizing:border-box] [width:max-content] [min-width:0] [max-width:100%] [overflow-wrap:break-word] [word-break:normal] [white-space:pre-wrap] [border:0] [color:var(--text-primary)] ${props.compositeChild ? "[padding:0] [background:transparent] [border-radius:0]" : isLinkOnly ? "[display:grid] [gap:6px] [padding:0] [background:transparent] [border-radius:0]" : hasWhisperFooter ? "[display:flex] [flex-direction:column] [gap:4px] [padding:10px_12px] [border-radius:8px]" : "[padding:10px_13px] [border-radius:4px_6px_6px_4px]"} ${props.block.status === "streaming" ? "[border-color:color-mix(in_srgb,var(--accent-codex)_18%,transparent)]" : ""} ${props.block.status === "error" && !hasWhisperFooter ? "[border:1px_solid_color-mix(in_srgb,var(--state-danger)_18%,transparent)] [color:var(--state-danger)] [background:var(--on-danger)]" : ""}`}
+      className={`message-prose [box-sizing:border-box] [width:max-content] [min-width:0] [max-width:min(760px,_100%)] [overflow-wrap:break-word] [word-break:normal] [white-space:pre-wrap] [border:0] [color:var(--text-primary)] ${props.compositeChild ? "[padding:0] [background:transparent] [border-radius:0]" : isLinkOnly ? "[display:grid] [gap:6px] [padding:0] [background:transparent] [border-radius:0]" : hasWhisperFooter ? "[display:flex] [flex-direction:column] [gap:4px] [padding:10px_12px] [border-radius:8px]" : "[padding:10px_13px] [border-radius:4px_6px_6px_4px]"} ${props.block.status === "streaming" ? "[border-color:color-mix(in_srgb,var(--accent-codex)_18%,transparent)]" : ""} ${props.block.status === "error" && !hasWhisperFooter ? "[border:1px_solid_color-mix(in_srgb,var(--state-danger)_18%,transparent)] [color:var(--state-danger)] [background:var(--on-danger)]" : ""}`}
     >
       {props.quotedMessage ? (
         <ReferencedMessagePreview
