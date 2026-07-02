@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { X } from "lucide-react";
 import type { LocalUserProfile } from "../../user-profile.js";
 import { useTranslation } from "../../i18n/index.js";
@@ -16,17 +16,11 @@ export function ProfileMenu(props: {
   const { t } = useTranslation();
   const [draft, setDraft] = useState<LocalUserProfile>(props.profile);
   const [chatPosition, setChatPosition] = useState<CSSProperties | undefined>();
-  const nameRef = useRef<HTMLInputElement | null>(null);
   const localMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setDraft(props.profile);
   }, [props.profile]);
-
-  useEffect(() => {
-    nameRef.current?.focus();
-    nameRef.current?.select();
-  }, []);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -80,6 +74,10 @@ export function ProfileMenu(props: {
       : props.anchor === "chat"
         ? ""
         : "[position:absolute] [top:0] [left:calc(100%+10px)] [z-index:60]";
+  const menuStyle = useMemo<CSSProperties | undefined>(() => {
+    if (props.anchor !== "chat") return undefined;
+    return chatPosition ?? { position: "fixed", top: 0, left: 0, zIndex: 70, visibility: "hidden" };
+  }, [chatPosition, props.anchor]);
 
   const save = () => {
     const next: LocalUserProfile = {
@@ -95,7 +93,7 @@ export function ProfileMenu(props: {
         localMenuRef.current = node;
         if (props.menuRef) props.menuRef.current = node;
       }}
-      style={props.anchor === "chat" ? chatPosition : undefined}
+      style={menuStyle}
       className={`${positionClass} [width:min(340px,_calc(100vw_-_24px))] [overflow:hidden] [border:1px_solid_var(--border-1)] [border-radius:18px] [background:var(--white-stationary)] [box-shadow:0_20px_56px_color-mix(in_srgb,var(--black-stationary)_16%,transparent),_0_2px_8px_color-mix(in_srgb,var(--black-stationary)_6%,transparent)]`}
       role="dialog"
       aria-label={t("profileMenu.editProfile")}
@@ -127,7 +125,6 @@ export function ProfileMenu(props: {
           </label>
           <input
             id="profile-display-name"
-            ref={nameRef}
             className={"[width:100%] [height:38px] [border:1px_solid_var(--border-1)] [border-radius:11px] [padding:0_11px] [color:var(--text-primary)] [background:var(--white-stationary)] [font-size:13px] [font-weight:620] [outline:none] focus:[border-color:var(--line-focus-window)] focus:[box-shadow:0_0_0_3px_var(--transparency-hover)]"}
             value={draft.displayName}
             maxLength={32}
