@@ -882,7 +882,7 @@ export function MessageTimeline(props: {
   return (
     <section
       ref={scrollRef}
-      className={`[position:relative] [min-height:0] [overflow-y:auto] [background:var(--background-panel)] [padding:26px_24px_8px] [&_article:last-of-type]:[margin-bottom:0] max-[760px]:[padding:18px_24px_8px]`}
+      className={`[position:relative] [min-height:0] [overflow-y:auto] [background:var(--background-panel)] [padding:26px_24px_0] [&_article:last-of-type]:[margin-bottom:0] max-[760px]:[padding:18px_24px_0]`}
       onScroll={handleTimelineScroll}
     >
       {!hasAnyTimelineMessages ? (

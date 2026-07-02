@@ -1993,7 +1993,7 @@ export function Composer(props: {
   }, [mentionMenuVisible]);
 
   return (
-    <footer ref={footerRef} data-agent-chat-composer className={"[position:relative] [z-index:50] [border-top:0] [padding:4px_12px_12px] [background:transparent] max-[760px]:[padding-inline:12px]"}>
+    <footer ref={footerRef} data-agent-chat-composer className={"[position:relative] [z-index:50] [border-top:0] [padding:0_12px_12px] [background:transparent] max-[760px]:[padding-inline:12px]"}>
       {editingMessageId ? (
         <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [margin-bottom:8px] [border:1px_solid_var(--border-1)] [border-radius:12px] [padding:8px_10px] [background:color-mix(in_srgb,var(--state-warning)_14%,var(--background-fronted))] [color:var(--state-warning)] [font-size:11px] [font-weight:650]"}>
           <span>{t("composer.editingHint")}</span>
