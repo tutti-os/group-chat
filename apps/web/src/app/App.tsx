@@ -2022,7 +2022,7 @@ export function App() {
                             <button
                               key={suggestion}
                               type="button"
-                              className={"[border:1px_solid_var(--border-1)] [border-radius:999px] [padding:5px_10px] [color:var(--tutti-purple)] [background:var(--white-stationary)] [font-size:11px] [line-height:1.2] [cursor:pointer] [transition:background-color_0.12s_ease] hover:[background:var(--tutti-purple-bg)] focus-visible:[outline:none] focus-visible:[border-color:var(--border-1)]"}
+                              className={"[border:1px_solid_var(--border-1)] [border-radius:999px] [padding:5px_10px] [color:var(--tutti-purple)] [background:var(--white-stationary)] [font-size:13px] [line-height:1.2] [cursor:pointer] [transition:background-color_0.12s_ease] hover:[background:var(--tutti-purple-bg)] focus-visible:[outline:none] focus-visible:[border-color:var(--border-1)]"}
                               onClick={() => insertTextToComposer(suggestion)}
                             >
                               {suggestion}
