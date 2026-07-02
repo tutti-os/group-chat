@@ -243,7 +243,7 @@ export function ConversationFilesPanel(props: {
                 onClick={() => handleFileRowClick(artifact)}
                 onDoubleClick={(event) => handleFileRowDoubleClick(artifact, event)}
               >
-                <span className={"[display:grid] [width:40px] [height:40px] [place-items:center] [overflow:hidden] [border-radius:8px] [background:var(--background-panel)]"}>
+                <span className={"[display:grid] [width:40px] [height:40px] [place-items:center] [overflow:hidden] [border-radius:4px] [background:var(--background-panel)]"}>
                   {artifactCategory === "image" ? (
                     <img
                       src={artifact.publicUrl}
@@ -251,7 +251,7 @@ export function ConversationFilesPanel(props: {
                       className={"[width:100%] [height:100%] [object-fit:cover]"}
                     />
                   ) : (
-                    <span className={"[display:grid] [width:30px] [height:34px] [place-items:center] [border-radius:6px] [color:var(--white-stationary)] [background:var(--text-secondary)]"}>
+                    <span className={"[display:grid] [width:30px] [height:34px] [place-items:center] [border-radius:4px] [color:var(--white-stationary)] [background:var(--text-secondary)]"}>
                       {artifactCategory === "video" ? <Video size={16} /> : <FileText size={16} />}
                     </span>
                   )}
