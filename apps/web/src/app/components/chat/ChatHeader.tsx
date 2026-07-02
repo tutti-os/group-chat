@@ -84,7 +84,7 @@ export function ChatHeader(props: {
             title={t("chatHeader.openRoomSettings")}
             onClick={() => setSettingsOpen(true)}
           >
-            <RoomAvatar key={props.room.avatar ?? "default"} title={props.conversation.title} avatar={props.room.avatar} seed={props.room.id} size={36} />
+            <RoomAvatar key={props.room.avatar ?? "default"} title={props.conversation.title} avatar={props.room.avatar} seed={props.room.id} size={32} />
           </button>
           <button
             type="button"
