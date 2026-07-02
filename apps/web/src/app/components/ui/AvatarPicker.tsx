@@ -33,7 +33,7 @@ export function AvatarPicker(props: {
           <button
             key={preset}
             type="button"
-            className={"[position:relative] [display:inline-grid] [justify-self:center] [place-items:center] [border:1px_solid_var(--border-1)] [border-radius:999px] [padding:0] [background:var(--white-stationary)] [&:hover]:[border-color:var(--line-focus-window)]"}
+            className={"[position:relative] [display:inline-grid] [justify-self:center] [place-items:center] [border:1px_solid_var(--border-1)] [border-radius:999px] [padding:0] [background:var(--white-stationary)] [&:hover]:[border-color:var(--line-focus-window)] aria-pressed:[border-color:var(--text-primary)]"}
             style={{ width: cellSize, height: cellSize }}
             aria-label={avatarPresetLabel(preset)}
             aria-pressed={selected}
