@@ -27,6 +27,25 @@ export function getRoomAvatarInitial(title: string): string {
   return Array.from(trimmed)[0] ?? "G";
 }
 
+const DEFAULT_ROOM_AVATAR_COLORS = [
+  "var(--black-stationary)",
+  "var(--accent-codex)",
+  "var(--tutti-purple)",
+  "var(--accent-claude)",
+  "var(--state-success)",
+  "var(--state-warning)",
+  "var(--folder)",
+] as const;
+
+export function getDefaultRoomAvatarBackground(seed: string): string {
+  const normalizedSeed = seed.trim() || "default-room-avatar";
+  let hash = 0;
+  for (const char of normalizedSeed) {
+    hash = ((hash << 5) - hash + char.codePointAt(0)!) | 0;
+  }
+  return DEFAULT_ROOM_AVATAR_COLORS[Math.abs(hash) % DEFAULT_ROOM_AVATAR_COLORS.length]!;
+}
+
 export function hasCustomRoomAvatar(avatar: string | null | undefined): boolean {
   return isRoomEmojiAvatar(avatar) || isRoomImageAvatar(avatar);
 }

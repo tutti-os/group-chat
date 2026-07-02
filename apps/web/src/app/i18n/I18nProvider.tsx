@@ -50,7 +50,7 @@ export function I18nProvider(props: { children: ReactNode }) {
   if (!ready) {
     const fallbackLocale = resolveFallbackLocale();
     return (
-      <div className={"[display:grid] [min-height:100vh] [place-items:center] [background:var(--app-bg)] [color:var(--muted)] [font-size:14px] [font-weight:650]"}>
+      <div className={"[display:grid] [min-height:100vh] [place-items:center] [background:var(--app-bg)] [color:var(--text-secondary)] [font-size:13px] [font-weight:650]"}>
         {fallbackLocale === "zh-CN" ? "正在加载 group-chat..." : "Loading group-chat..."}
       </div>
     );

@@ -26,8 +26,8 @@ import {
 } from "../../tutti-bridge.js";
 import { AgentLauncherMentionChip, PARTICIPANT_MENTION_CLASS, ReferenceMentionChip } from "./reference-mention-chip.js";
 
-const PLAIN_LINK_CLASS = "[color:#2563eb] [text-decoration:underline]";
-const INLINE_CODE_LINK_CLASS = "[border:1px_solid_rgb(226_232_240)] [border-radius:5px] [padding:1px_4px] [color:#1d4ed8] [background:#f1f5f9] [font-family:ui-monospace,_SFMono-Regular,_Menlo,_Monaco,_Consolas,_monospace] [font-size:0.95em] [text-decoration:none] hover:[text-decoration:underline]";
+const PLAIN_LINK_CLASS = "[color:var(--accent-codex)] [text-decoration:underline]";
+const INLINE_CODE_LINK_CLASS = "[border:1px_solid_var(--border-1)] [border-radius:5px] [padding:1px_4px] [color:var(--accent-codex)] [background:var(--background-panel)] [font-family:ui-monospace,_SFMono-Regular,_Menlo,_Monaco,_Consolas,_monospace] [font-size:13px] [text-decoration:none] hover:[text-decoration:underline]";
 
 function joinClassName(...parts: Array<string | undefined>) {
   return parts.filter(Boolean).join(" ");

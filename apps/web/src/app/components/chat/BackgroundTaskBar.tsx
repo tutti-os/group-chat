@@ -23,7 +23,7 @@ export function BackgroundTaskBar(props: {
 
   return (
     <div
-      className={`[display:grid] [width:100%] [box-sizing:border-box] [gap:0] [border-top:1px_solid_var(--border)] [background:var(--panel)] [box-shadow:0_-8px_24px_rgb(0_0_0_/_4%)] ${props.className ?? ""}`}
+      className={`[display:grid] [width:100%] [box-sizing:border-box] [gap:0] [background:transparent] ${props.className ?? ""}`}
       aria-label={t("taskBar.panel")}
     >
       {props.tasks.length > 0 ? (
@@ -33,21 +33,21 @@ export function BackgroundTaskBar(props: {
           {props.tasks.map((task) => (
             <div
               key={task.id}
-              className={`[display:inline-flex] [flex:0_0_auto] [max-width:min(280px,_100%)] [align-items:center] [gap:2px] [border:1px_solid_var(--border)] [border-radius:999px] [padding:2px_2px_2px_4px] [color:var(--text)] [background:#ffffff] [font-size:12px] [font-weight:650] ${props.openTaskId === task.id ? "[border-color:var(--primary)] [background:var(--accent-soft)]" : ""}`}
+              className={`[display:inline-flex] [flex:0_0_auto] [max-width:min(280px,_100%)] [align-items:center] [gap:2px] [border:1px_solid_var(--border-1)] [border-radius:999px] [padding:2px_2px_2px_4px] [color:var(--text-primary)] [background:var(--white-stationary)] [font-size:11px] [font-weight:650] ${props.openTaskId === task.id ? "[border-color:var(--black-stationary)] [background:var(--accent-bg)]" : ""}`}
             >
               <button
                 type="button"
-                className={"[display:inline-flex] [min-width:0] [flex:1_1_auto] [align-items:center] [gap:6px] [border:0] [border-radius:999px] [padding:3px_6px] [color:inherit] [background:transparent] [font-size:inherit] [font-weight:inherit] [cursor:pointer] hover:[background:#00000006]"}
+                className={"[display:inline-flex] [min-width:0] [flex:1_1_auto] [align-items:center] [gap:6px] [border:0] [border-radius:999px] [padding:3px_6px] [color:inherit] [background:transparent] [font-size:11px] [font-weight:inherit] [cursor:pointer] hover:[background:var(--transparency-block)]"}
                 onClick={() => props.onOpenTask(task.id)}
                 title={task.sourcePreview}
               >
                 {task.status === "running" ? <LoaderCircle size={13} className={"animate-spin"} /> : <BrainCircuit size={13} />}
                 <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{backgroundTaskLabel(task)}</span>
-                <span className={"[color:var(--muted)] [font-size:11px] [font-weight:550]"}>{backgroundTaskStatusLabel(task)}</span>
+                <span className={"[color:var(--text-secondary)] [font-size:11px] [font-weight:550]"}>{backgroundTaskStatusLabel(task)}</span>
               </button>
               <button
                 type="button"
-                className={"[display:grid] [flex:0_0_auto] [width:22px] [height:22px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [cursor:pointer] hover:[color:var(--text)] hover:[background:#00000008]"}
+                className={"[display:grid] [flex:0_0_auto] [width:22px] [height:22px] [place-items:center] [border:0] [border-radius:999px] [color:var(--text-secondary)] [background:transparent] [cursor:pointer] hover:[color:var(--text-primary)] hover:[background:var(--transparency-hover)]"}
                 aria-label={t("taskBar.closeTask")}
                 onClick={() => props.onDismissTask(task.id)}
               >
@@ -88,26 +88,22 @@ function ExecutingRunsPanel(props: {
   return (
     <section
       aria-label={t("taskBar.executingCount", { count: props.agentRuns.length })}
-      className={"[position:relative] [width:calc(100%-32px)] [max-width:960px] [margin:4px_auto_3px] [border:1px_solid_#dbeafe] [border-radius:11px] [background:linear-gradient(180deg,_#eff6ff_0%,_#eef2ff_100%)] max-[760px]:[width:calc(100%-24px)] max-[760px]:[margin:4px_auto_3px]"}
+      className={"[position:relative] [width:calc(100%-32px)] [max-width:960px] [margin:4px_auto_3px] [border:1px_solid_var(--accent-bg)] [border-radius:11px] [background:linear-gradient(180deg,_var(--accent-bg)_0%,_var(--tutti-purple-bg)_100%)] max-[760px]:[width:calc(100%-24px)] max-[760px]:[margin:4px_auto_3px]"}
     >
       <button
         type="button"
-        className={"[display:flex] [width:100%] [align-items:center] [justify-content:space-between] [gap:8px] [border:0] [border-radius:10px] [padding:5px_8px_5px_11px] [color:inherit] [background:transparent] [cursor:pointer] [text-align:left] hover:[background:#ffffff52] [&:focus-visible]:[outline:none] [&:focus-visible]:[box-shadow:0_0_0_2px_#93c5fd]"}
+        className={"[display:flex] [width:100%] [align-items:center] [justify-content:space-between] [gap:8px] [border:0] [border-radius:10px] [padding:5px_8px_5px_11px] [color:inherit] [background:transparent] [cursor:pointer] [text-align:left] hover:[background:color-mix(in_srgb,var(--white-stationary)_32%,transparent)] [&:focus-visible]:[outline:none] [&:focus-visible]:[box-shadow:0_0_0_2px_var(--border-focus)]"}
         aria-label={expanded ? t("taskBar.collapse") : t("taskBar.expand")}
         aria-expanded={expanded}
         onClick={() => setExpanded((current) => !current)}
       >
-        {!expanded ? (
-          <div className={"[display:inline-flex] [min-width:0] [flex:1_1_auto] [align-items:center] [gap:6px] [color:#1e3a8a] [font-size:12px] [font-weight:650]"}>
-            <LoaderCircle size={14} className={"[flex:0_0_auto] animate-spin"} />
-            <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>
-              {t("taskBar.executingCount", { count: props.agentRuns.length })}
-            </span>
-          </div>
-        ) : (
-          <span className={"[flex:1_1_auto]"} aria-hidden="true" />
-        )}
-        <span className={"[display:grid] [flex:0_0_auto] [width:22px] [height:22px] [place-items:center] [border-radius:6px] [color:#475569] [background:#ffffff99]"}>
+        <div className={"[display:inline-flex] [min-width:0] [flex:1_1_auto] [align-items:center] [gap:6px] [color:var(--accent-codex)] [font-size:11px] [font-weight:650]"}>
+          <LoaderCircle size={14} className={"[flex:0_0_auto] animate-spin"} />
+          <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>
+            {t("taskBar.executingCount", { count: props.agentRuns.length })}
+          </span>
+        </div>
+        <span className={"[display:grid] [flex:0_0_auto] [width:22px] [height:22px] [place-items:center] [border-radius:6px] [color:var(--text-secondary)] [background:color-mix(in_srgb,var(--white-stationary)_60%,transparent)]"}>
           {expanded ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
         </span>
       </button>
@@ -124,11 +120,11 @@ function ExecutingRunsPanel(props: {
                 key={run.id}
                 data-whisper={isWhisper || undefined}
                 style={{ width: `min(${EXECUTING_RUN_CHIP_WIDTH_PX}px, 100%)` }}
-                className={`[position:relative] [display:inline-flex] [flex:0_0_auto] [box-sizing:border-box] [align-items:center] [gap:2px] [border-radius:999px] [padding:2px_2px_2px_4px] [color:var(--text)] [background:#ffffff] [font-size:12px] [font-weight:650] [box-shadow:0_1px_2px_rgb(15_23_42_/_6%)] ${isWhisper ? "[border:1px_dashed_#93c5fd]" : "[border:1px_solid_#bfdbfe]"} ${isOpen ? "[border-color:var(--primary)] [background:var(--accent-soft)]" : ""} ${pendingDismiss ? "[border-color:#fca5a5] [background:#fef2f2]" : ""}`}
+                className={`[position:relative] [display:inline-flex] [flex:0_0_auto] [box-sizing:border-box] [align-items:center] [gap:2px] [border-radius:999px] [padding:2px_2px_2px_4px] [color:var(--text-primary)] [background:var(--white-stationary)] [font-size:11px] [font-weight:650] [box-shadow:0_1px_2px_color-mix(in_srgb,var(--black-stationary)_6%,transparent)] ${isWhisper ? "[border:1px_dashed_var(--border-focus)]" : "[border:1px_solid_var(--border-focus)]"} ${isOpen ? "[border-color:var(--black-stationary)] [background:var(--accent-bg)]" : ""} ${pendingDismiss ? "[border-color:color-mix(in_srgb,var(--state-danger)_28%,transparent)] [background:var(--on-danger)]" : ""}`}
               >
                 <button
                   type="button"
-                  className={`[display:inline-flex] [min-width:0] [flex:1_1_auto] [align-items:center] [gap:6px] [border:0] [border-radius:999px] [padding:3px_8px] [color:inherit] [background:transparent] [font-size:inherit] [font-weight:inherit] [cursor:pointer] hover:[background:#00000006] ${pendingDismiss ? "[pointer-events:none] [opacity:0.72]" : ""}`}
+                  className={`[display:inline-flex] [min-width:0] [flex:1_1_auto] [align-items:center] [gap:6px] [border:0] [border-radius:999px] [padding:3px_8px] [color:inherit] [background:transparent] [font-size:11px] [font-weight:inherit] [cursor:pointer] hover:[background:var(--transparency-block)] ${pendingDismiss ? "[pointer-events:none] [opacity:0.72]" : ""}`}
                   onClick={() => props.onOpenAgentRun(run.id)}
                   title={run.preview}
                 >
@@ -140,7 +136,7 @@ function ExecutingRunsPanel(props: {
                   {!pendingDismiss ? (
                     <button
                       type="button"
-                      className={"[display:grid] [width:22px] [height:22px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [cursor:pointer] hover:[color:var(--text)] hover:[background:#00000008]"}
+                      className={"[display:grid] [width:22px] [height:22px] [place-items:center] [border:0] [border-radius:999px] [color:var(--text-secondary)] [background:transparent] [cursor:pointer] hover:[color:var(--text-primary)] hover:[background:var(--transparency-hover)]"}
                       aria-label={t("taskBar.cancelTask")}
                       onClick={() => setPendingDismissRunId(run.id)}
                     >
@@ -150,18 +146,18 @@ function ExecutingRunsPanel(props: {
                 </div>
                 {pendingDismiss ? (
                   <div
-                    className={"[position:absolute] [top:2px] [right:2px] [bottom:2px] [z-index:1] [display:inline-flex] [align-items:center] [gap:2px] [border-radius:999px] [padding:0_2px_0_10px] [background:linear-gradient(90deg,_#fef2f200_0%,_#fef2f2_18%,_#fef2f2_100%)]"}
+                    className={"[position:absolute] [top:2px] [right:2px] [bottom:2px] [z-index:1] [display:inline-flex] [align-items:center] [gap:2px] [border-radius:999px] [padding:0_2px_0_10px] [background:linear-gradient(90deg,_var(--on-danger)00_0%,_var(--on-danger)_18%,_var(--on-danger)_100%)]"}
                   >
                     <button
                       type="button"
-                      className={"[height:22px] [border:0] [border-radius:999px] [padding:0_8px] [color:var(--muted)] [background:transparent] [font-size:11px] [font-weight:650] [cursor:pointer] hover:[color:var(--text)] hover:[background:#00000008]"}
+                      className={"[height:22px] [border:0] [border-radius:999px] [padding:0_8px] [color:var(--text-secondary)] [background:transparent] [font-size:11px] [font-weight:650] [cursor:pointer] hover:[color:var(--text-primary)] hover:[background:var(--transparency-hover)]"}
                       onClick={() => setPendingDismissRunId(null)}
                     >
                       {t("common.cancel")}
                     </button>
                     <button
                       type="button"
-                      className={"[height:22px] [border:0] [border-radius:999px] [padding:0_8px] [color:#b91c1c] [background:#fee2e2] [font-size:11px] [font-weight:650] [cursor:pointer] hover:[background:#fecaca]"}
+                      className={"[height:22px] [border:0] [border-radius:999px] [padding:0_8px] [color:var(--state-danger)] [background:var(--on-danger)] [font-size:11px] [font-weight:650] [cursor:pointer] hover:[background:color-mix(in_srgb,var(--state-danger)_18%,transparent)]"}
                       onClick={() => {
                         setPendingDismissRunId(null);
                         void props.onDismissAgentRun(run.id);

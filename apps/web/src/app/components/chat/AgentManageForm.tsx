@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
+import { Button } from "@tutti-os/ui-system";
 import type {
   AddParticipantRequest,
   CreateIdentityRequest,
@@ -52,6 +53,7 @@ export function AgentManageForm(props: {
   conversationId?: string;
   roomParticipants?: Participant[];
   onDisplayNameChange?: (displayName: string) => void;
+  onRuntimeProfileChange?: (runtimeProfileId: string | null) => void;
   onCreateIdentity?: (input: CreateIdentityRequest) => Promise<{ identity: Identity }>;
   onUpdateIdentity?: (
     identityId: string,
@@ -65,6 +67,7 @@ export function AgentManageForm(props: {
   onRemoveParticipant?: (participantId: string) => Promise<unknown>;
   onSaved?: () => void;
   onRemoved?: () => void;
+  footerHost?: HTMLElement | null;
 }) {
   const { t } = useTranslation();
   const { participant, identity } = props;
@@ -233,15 +236,39 @@ export function AgentManageForm(props: {
     }
   };
 
+  const actionFooter = !readOnly ? (
+    <div className={"[display:flex] [width:100%] [flex-wrap:wrap] [justify-content:space-between] [gap:8px]"}>
+      <div className={"[display:flex] [flex-wrap:wrap] [gap:6px]"}>
+        {props.showRemove && props.onRemoveParticipant ? (
+          <button
+            type="button"
+            className={"[display:inline-flex] [height:32px] [align-items:center] [border:0] [border-radius:10px] [padding:0_12px] [color:var(--state-danger)] [background:var(--on-danger)] [font-size:11px] [font-weight:650]"}
+            onClick={() => {
+              if (!window.confirm(t("agentForm.removeConfirm", { name: participant.displayName }))) return;
+              void props.onRemoveParticipant!(participant.id).then(() => props.onRemoved?.());
+            }}
+          >
+            {t("common.remove")}
+          </button>
+        ) : null}
+      </div>
+      <Button
+        type="button"
+        variant="default"
+        size="default"
+        disabled={saving || !displayName.trim()}
+        onClick={() => void save()}
+      >
+        {saving ? t("common.saving") : isAddMode ? t("agentForm.addToRoom") : t("common.save")}
+      </Button>
+    </div>
+  ) : null;
+
   return (
-    <div className={"[display:grid] [gap:20px] [&_input]:[height:34px] [&_input]:[width:100%] [&_input]:[min-width:0] [&_input]:[border:1px_solid_var(--border)] [&_input]:[border-radius:12px] [&_input]:[padding:0_10px] [&_input]:[font-size:13px] [&_input]:[outline:none] [&_select]:[height:34px] [&_select]:[width:100%] [&_select]:[min-width:0] [&_select]:[border:1px_solid_var(--border)] [&_select]:[border-radius:12px] [&_select]:[padding:0_10px] [&_select]:[font-size:13px] [&_select]:[outline:none] [&_textarea]:[width:100%] [&_textarea]:[min-height:88px] [&_textarea]:[border:1px_solid_var(--border)] [&_textarea]:[border-radius:12px] [&_textarea]:[padding:10px] [&_textarea]:[font-size:13px] [&_textarea]:[line-height:1.5] [&_textarea]:[outline:none] [&_textarea]:[resize:vertical] [&_label]:[display:grid] [&_label]:[gap:8px] [&_label_span]:[color:var(--muted)] [&_label_span]:[font-size:12px] [&_label_span]:[font-weight:700]"}>
-      {!readOnly && isAddMode ? (
-        <p className={"[margin:0] [border:1px_solid_var(--border)] [border-radius:12px] [padding:10px_12px] [color:var(--muted)] [background:#f7f7f8] [font-size:12px] [line-height:1.5]"}>
-          {t("agentForm.addHint")}
-        </p>
-      ) : null}
+    <>
+    <div className={"[display:grid] [gap:20px] [&_input]:[height:34px] [&_input]:[width:100%] [&_input]:[min-width:0] [&_input]:[border:1px_solid_var(--border-1)] [&_input]:[border-radius:6px] [&_input]:[padding:0_10px] [&_input]:[font-size:13px] [&_input]:[outline:none] [&_select]:[height:34px] [&_select]:[width:100%] [&_select]:[min-width:0] [&_select]:[border:1px_solid_var(--border-1)] [&_select]:[border-radius:6px] [&_select]:[padding:0_10px] [&_select]:[font-size:13px] [&_select]:[outline:none] [&_textarea]:[width:100%] [&_textarea]:[min-height:88px] [&_textarea]:[border:1px_solid_var(--border-1)] [&_textarea]:[border-radius:6px] [&_textarea]:[padding:10px] [&_textarea]:[font-size:13px] [&_textarea]:[line-height:1.5] [&_textarea]:[outline:none] [&_textarea]:[resize:vertical] [&_label]:[display:grid] [&_label]:[gap:8px] [&_label_span]:[color:var(--text-secondary)] [&_label_span]:[font-size:11px] [&_label_span]:[font-weight:700]"}>
       {readOnly && !isAddMode ? (
-        <p className={"[margin:0] [border:1px_solid_var(--border)] [border-radius:12px] [padding:10px_12px] [color:var(--muted)] [background:#f7f7f8] [font-size:12px] [line-height:1.5]"}>
+        <p className={"[margin:0] [border:1px_solid_var(--border-1)] [border-radius:6px] [padding:10px_12px] [color:var(--text-secondary)] [background:var(--background-panel)] [font-size:11px] [line-height:1.5]"}>
           {t("agentForm.removedHint")}
         </p>
       ) : null}
@@ -258,10 +285,10 @@ export function AgentManageForm(props: {
             props.onDisplayNameChange?.(nextValue);
           }}
           maxLength={20}
-          className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
+          className={readOnly ? "[color:var(--text-secondary)] [background:var(--background-panel)] [cursor:default]" : ""}
           aria-label={t("agentForm.roomAliasAria", { name: participant.displayName })}
         />
-        <small className={"[color:var(--muted)] [font-size:11px] [line-height:1.4]"}>
+        <small className={"[color:var(--text-secondary)] [font-size:11px] [line-height:1.4]"}>
           {t("agentForm.roomAliasLimit", { used: participantDisplayNameUnits(displayName) })}
         </small>
       </label>
@@ -283,6 +310,7 @@ export function AgentManageForm(props: {
             onChange={(value) => {
               const nextProfile = props.runtimeProfiles.find((profile) => profile.id === value) ?? null;
               setRuntimeProfileId(value);
+              props.onRuntimeProfileChange?.(nextProfile?.id ?? (value || null));
               const nextModel = preferredRuntimeModelId(nextProfile, props.localAgentProviders);
               setModel(nextModel);
               const nextProvider = localAgentStatus(nextProfile, props.localAgentProviders);
@@ -291,7 +319,7 @@ export function AgentManageForm(props: {
               }
               setSpeedMode(resolveRuntimeSpeedMode(nextProfile, props.localAgentProviders, ""));
             }}
-            className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
+            className={readOnly ? "[color:var(--text-secondary)] [background:var(--background-panel)] [cursor:default]" : ""}
           />
         </label>
         <label>
@@ -309,7 +337,7 @@ export function AgentManageForm(props: {
                 value: option.id,
                 label: option.label,
               }))}
-              className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
+              className={readOnly ? "[color:var(--text-secondary)] [background:var(--background-panel)] [cursor:default]" : ""}
             />
           ) : (
             <input value={model || t("common.notConfigured")} readOnly aria-readonly />
@@ -329,7 +357,7 @@ export function AgentManageForm(props: {
               value: option.value,
               label: option.label,
             }))}
-            className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
+            className={readOnly ? "[color:var(--text-secondary)] [background:var(--background-panel)] [cursor:default]" : ""}
           />
         </label>
         <label>
@@ -346,13 +374,13 @@ export function AgentManageForm(props: {
               value: option.id,
               label: option.label,
             }))}
-            className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
+            className={readOnly ? "[color:var(--text-secondary)] [background:var(--background-panel)] [cursor:default]" : ""}
           />
         </label>
       </div>
 
       <div className={"[display:grid] [gap:10px]"}>
-        <span className={"[color:var(--muted)] [font-size:12px] [font-weight:700]"}>{t("agentForm.roleSetting")}</span>
+        <span className={"[color:var(--text-secondary)] [font-size:11px] [font-weight:700]"}>{t("agentForm.roleSetting")}</span>
         <textarea
           value={roleDescription}
           readOnly={readOnly}
@@ -361,7 +389,7 @@ export function AgentManageForm(props: {
             if (readOnly) return;
             setRoleDescription(event.target.value);
           }}
-          className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
+          className={readOnly ? "[color:var(--text-secondary)] [background:var(--background-panel)] [cursor:default]" : ""}
           placeholder={t("agentForm.rolePlaceholder")}
           aria-label={`${participant.displayName} ${t("agentForm.roleSetting")}`}
         />
@@ -378,7 +406,7 @@ export function AgentManageForm(props: {
               if (readOnly) return;
               setRoomInstructions(event.target.value);
             }}
-            className={readOnly ? "[color:var(--muted)] [background:#f3f4f6] [cursor:default]" : ""}
+            className={readOnly ? "[color:var(--text-secondary)] [background:var(--background-panel)] [cursor:default]" : ""}
             placeholder={t("agentForm.roomDescPlaceholder")}
             aria-label={`${participant.displayName} ${t("agentForm.roomDesc")}`}
           />
@@ -386,41 +414,16 @@ export function AgentManageForm(props: {
       ) : !readOnly ? (
         <button
           type="button"
-          className={"[justify-self:start] [border:0] [padding:0] [color:var(--muted)] [background:transparent] [font-size:12px] [font-weight:650] [text-decoration:underline] [text-underline-offset:3px] [&:hover]:[color:var(--text)]"}
+          className={"[justify-self:start] [border:0] [padding:0] [color:var(--text-secondary)] [background:transparent] [font-size:11px] [font-weight:650] [text-decoration:underline] [text-underline-offset:3px] [&:hover]:[color:var(--text-primary)]"}
           onClick={() => setShowRoomInstructionsEditor(true)}
         >
           {t("agentForm.addRoomDesc")}
         </button>
       ) : null}
 
-      {!readOnly ? (
-        <div className={"[display:flex] [flex-wrap:wrap] [justify-content:space-between] [gap:8px] [padding-top:10px] [margin-top:4px]"}>
-          <div className={"[display:flex] [flex-wrap:wrap] [gap:6px]"}>
-            {props.showRemove && props.onRemoveParticipant ? (
-              <button
-                type="button"
-                className={"[display:inline-flex] [height:32px] [align-items:center] [border:0] [border-radius:10px] [padding:0_12px] [color:var(--danger)] [background:#fde8e7] [font-size:12px] [font-weight:650]"}
-                onClick={() => {
-                  if (!window.confirm(t("agentForm.removeConfirm", { name: participant.displayName }))) return;
-                  void props.onRemoveParticipant!(participant.id).then(() => props.onRemoved?.());
-                }}
-              >
-                {t("common.remove")}
-              </button>
-            ) : null}
-          </div>
-          <button
-            type="button"
-            className={"[display:inline-flex] [height:32px] [align-items:center] [gap:5px] [border:0] [border-radius:10px] [padding:0_14px] [color:#ffffff] [background:var(--primary)] [font-size:12px] [font-weight:650] [&:disabled]:[opacity:0.5]"}
-            disabled={saving || !displayName.trim()}
-            onClick={() => void save()}
-          >
-            <Check size={14} />
-            {saving ? t("common.saving") : isAddMode ? t("agentForm.addToRoom") : t("common.save")}
-          </button>
-        </div>
-      ) : null}
     </div>
+    {actionFooter && props.footerHost ? createPortal(actionFooter, props.footerHost) : null}
+    </>
   );
 }
 
@@ -506,7 +509,7 @@ function AgentSelect(props: {
         aria-haspopup="listbox"
         aria-expanded={props.open}
         data-agent-select-id={props.id}
-        className={`[display:grid] [grid-template-columns:minmax(0,_1fr)_18px] [align-items:center] [height:34px] [width:100%] [min-width:0] [border:1px_solid_var(--border)] [border-radius:12px] [padding:0_10px] [color:var(--text)] [background:#ffffff] [font-size:13px] [text-align:left] [outline:none] [cursor:pointer] focus-visible:[border-color:#8ab4f8] focus-visible:[box-shadow:0_0_0_3px_rgb(74_144_226_/_18%)] disabled:[color:var(--muted)] disabled:[background:#f3f4f6] disabled:[cursor:default] ${props.className ?? ""}`}
+        className={`[display:grid] [grid-template-columns:minmax(0,_1fr)_18px] [align-items:center] [height:34px] [width:100%] [min-width:0] [border:1px_solid_var(--border-1)] [border-radius:6px] [padding:0_10px] [color:var(--text-primary)] [background:var(--white-stationary)] [font-size:13px] [text-align:left] [outline:none] [cursor:pointer] focus-visible:[border-color:var(--border-focus)] focus-visible:[box-shadow:0_0_0_3px_color-mix(in_srgb,var(--accent-codex)_18%,transparent)] disabled:[color:var(--text-secondary)] disabled:[background:var(--background-panel)] disabled:[cursor:default] ${props.className ?? ""}`}
         onClick={() => {
           if (props.disabled) return;
           updatePosition();
@@ -516,14 +519,14 @@ function AgentSelect(props: {
         <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>
           {selected?.label ?? ""}
         </span>
-        <ChevronDown size={16} className={"[justify-self:end] [color:var(--muted)]"} />
+        <ChevronDown size={16} className={"[justify-self:end] [color:var(--text-secondary)]"} />
       </button>
       {props.open && position ? createPortal(
         <div
           ref={menuRef}
           role="listbox"
           aria-label={props.ariaLabel}
-          className={"[position:fixed] [z-index:10000] [display:grid] [max-height:220px] [overflow:auto] [border:1px_solid_#2f2f2f] [border-radius:10px] [padding:4px] [color:#f7f7f7] [background:#4f4f4f] [font-size:12px] [font-weight:600] [line-height:1.2] [box-shadow:0_14px_34px_rgb(0_0_0_/_20%)]"}
+          className={"[position:fixed] [z-index:10000] [display:grid] [max-height:220px] [overflow:auto] [border:1px_solid_var(--border-1)] [border-radius:6px] [padding:4px] [color:var(--text-primary)] [background:var(--background-fronted)] [font-size:11px] [font-weight:600] [line-height:1.2] [box-shadow:0_14px_34px_color-mix(in_srgb,var(--black-stationary)_20%,transparent)]"}
           style={{ top: position.top, left: position.left, width: position.width }}
         >
           {props.options.map((option) => {
@@ -534,14 +537,14 @@ function AgentSelect(props: {
                 type="button"
                 role="option"
                 aria-selected={active}
-                className={`[display:grid] [grid-template-columns:18px_minmax(0,_1fr)] [align-items:center] [gap:6px] [min-height:30px] [border:0] [border-radius:8px] [padding:0_8px] [color:inherit] [background:transparent] [font:inherit] [line-height:1.2] [text-align:left] [cursor:pointer] hover:[background:#ffffff1f] focus-visible:[outline:none] focus-visible:[background:#ffffff2b] ${active ? "[background:#4f8fea]" : ""}`}
+                className={`[display:grid] [grid-template-columns:18px_minmax(0,_1fr)] [align-items:center] [gap:6px] [min-height:30px] [border:0] [border-radius:6px] [padding:0_8px] [color:inherit] [background:transparent] [font:inherit] [line-height:1.2] [text-align:left] [cursor:pointer] hover:[background:color-mix(in_srgb,var(--white-stationary)_12%,transparent)] focus-visible:[outline:none] focus-visible:[background:color-mix(in_srgb,var(--white-stationary)_17%,transparent)] ${active ? "[background:var(--accent-codex)]" : ""}`}
                 onClick={() => {
                   props.onChange(option.value);
                   props.onOpenChange(false);
                   buttonRef.current?.focus();
                 }}
               >
-                <span className={"[width:16px] [color:#ffffff]"}>
+                <span className={"[width:16px] [color:var(--white-stationary)]"}>
                   {active ? "✓" : ""}
                 </span>
                 <span className={"[min-width:0] [white-space:nowrap]"}>

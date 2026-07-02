@@ -11,6 +11,7 @@
   "dependencies": {
     "@group-chat/shared": "workspace:*",
     "@tutti-os/ui-rich-text": "0.0.26",
+    "@tutti-os/ui-system": "0.0.26",
     "@tutti-os/workspace-external-core": "0.0.26",
     "@vitejs/plugin-react": "^5.1.1",
     "lucide-react": "^0.562.0",

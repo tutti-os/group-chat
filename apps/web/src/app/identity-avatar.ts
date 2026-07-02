@@ -23,15 +23,15 @@ export function getRuntimeProviderAvatarStyle(provider: string | null | undefine
   const normalized = provider.trim().toLowerCase();
   const iconUrl = getRuntimeProviderAvatarIconUrl(normalized);
   if (normalized === "codex") {
-    return { label: "Cx", background: "transparent", color: "#ffffff", iconUrl };
+    return { label: "Cx", background: "transparent", color: "var(--white-stationary)", iconUrl };
   }
   if (normalized === "claude") {
-    return { label: "Cc", background: "transparent", color: "#ffffff", iconUrl };
+    return { label: "Cc", background: "transparent", color: "var(--white-stationary)", iconUrl };
   }
   return {
     label: normalized.slice(0, 2).toUpperCase() || "AI",
-    background: "#374151",
-    color: "#ffffff",
+    background: "var(--text-primary)",
+    color: "var(--white-stationary)",
     iconUrl: null,
   };
 }
@@ -53,6 +53,9 @@ export function resolveAgentAvatar(input: {
   const custom = input.avatar ?? input.icon;
   if (hasCustomRoomAvatar(custom)) {
     return { avatar: custom!.trim(), provider: null };
+  }
+  if (input.runtimeProfile?.kind === "local-agent" && input.runtimeProfile.provider.trim()) {
+    return { avatar: null, provider: input.runtimeProfile.provider };
   }
   return { avatar: null, provider: null };
 }

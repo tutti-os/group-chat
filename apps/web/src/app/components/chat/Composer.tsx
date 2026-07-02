@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Ear, Paperclip, Send, Square, X } from "lucide-react";
+import { Ear, Square, X } from "lucide-react";
 import { makeAtPanelKeyDown } from "@tutti-os/ui-rich-text/at-panel";
 import type { AgentRun, Artifact, Conversation, Identity, LocalAgentProviderStatus, MentionTarget, Message, MessageBlock, Participant, Room, RuntimeProfile, TuttiAtProviderId } from "@group-chat/shared";
 import { resolveArtifactLinkedMessageId, sanitizeMentionTargetForAgentContext } from "@group-chat/shared";
@@ -79,6 +79,38 @@ const COMPOSER_UPLOAD_CLIPBOARD_MIME = "application/x-agent-chat-composer-upload
 const COMPOSER_UPLOAD_CLIPBOARD_CACHE_LIMIT = 10;
 const COMPOSER_HISTORY_LIMIT = 80;
 const composerUploadClipboardSnapshots = new Map<string, UploadItem[]>();
+
+function SendFilledIcon(props: { size?: number }) {
+  const size = props.size ?? 16;
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        d="M2.74299 8.80586C2.8458 8.40095 3.14559 8.08842 3.54539 7.97031L18.5196 3.51568C18.9335 3.39381 19.3808 3.50539 19.688 3.81261C19.995 4.11983 20.1075 4.56796 19.9856 4.98168L15.531 19.9559C15.4129 20.3557 15.1003 20.6555 14.6954 20.7583C14.2894 20.8597 13.8689 20.7438 13.5719 20.4469L10.4549 15.1822C10.8584 14.6482 12.1562 12.9094 14.3474 9.96526C14.6085 9.70417 14.638 9.31167 14.4137 9.08691C14.189 8.8622 13.7959 8.89128 13.5347 9.15251L8.31076 13.0423L3.05304 9.92798C2.75608 9.63102 2.64037 9.21069 2.74299 8.80586Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function AddLinedIcon(props: { size?: number }) {
+  const size = props.size ?? 16;
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+      <path
+        d="M12 1.5C12.8284 1.5 13.5 2.17157 13.5 3V10.5H21C21.8284 10.5 22.5 11.1716 22.5 12C22.5 12.8284 21.8284 13.5 21 13.5H13.5V21C13.5 21.8284 12.8284 22.5 12 22.5C11.1716 22.5 10.5 21.8284 10.5 21V13.5H3C2.17157 13.5 1.5 12.8284 1.5 12C1.5 11.1716 2.17157 10.5 3 10.5H10.5V3C10.5 2.17157 11.1716 1.5 12 1.5Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
 
 function mentionPanelCacheKey(tab: MentionPanelTab, roomId: string, roomFileFingerprint: string) {
   return tab === "files"
@@ -1961,13 +1993,13 @@ export function Composer(props: {
   }, [mentionMenuVisible]);
 
   return (
-    <footer ref={footerRef} data-agent-chat-composer className={"[position:relative] [z-index:50] [border-top:0] [padding:8px_16px_16px] [background:var(--panel)] max-[760px]:[padding-inline:12px]"}>
+    <footer ref={footerRef} data-agent-chat-composer className={"[position:relative] [z-index:50] [border-top:0] [padding:4px_12px_12px] [background:transparent] max-[760px]:[padding-inline:12px]"}>
       {editingMessageId ? (
-        <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [margin-bottom:8px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:8px_10px] [background:#fff7ed] [color:#9a3412] [font-size:12px] [font-weight:650]"}>
+        <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [margin-bottom:8px] [border:1px_solid_var(--border-1)] [border-radius:12px] [padding:8px_10px] [background:color-mix(in_srgb,var(--state-warning)_14%,var(--background-fronted))] [color:var(--state-warning)] [font-size:11px] [font-weight:650]"}>
           <span>{t("composer.editingHint")}</span>
           <button
             type="button"
-            className={"[display:inline-grid] [width:24px] [height:24px] [place-items:center] [border:0] [border-radius:999px] [color:#9a3412] [background:#fed7aa]"}
+            className={"[display:inline-grid] [width:24px] [height:24px] [place-items:center] [border:0] [border-radius:999px] [color:var(--state-warning)] [background:color-mix(in_srgb,var(--state-warning)_24%,var(--background-fronted))]"}
             aria-label={t("composer.cancelEdit")}
             onClick={() => {
               setEditingMessageId(null);
@@ -1986,13 +2018,13 @@ export function Composer(props: {
       ) : null}
       <div
         data-agent-chat-composer-box
-        className={"[display:grid] [grid-template-columns:40px_minmax(0,_1fr)_40px] [gap:8px] [align-items:end] [border:1px_solid_var(--border)] [border-radius:22px] [padding:8px] [background:#ffffff] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [&:focus-within]:[border-color:var(--border-strong)] [&:focus-within]:[box-shadow:0_0_0_3px_#00000008] max-[760px]:[grid-template-columns:34px_minmax(0,_1fr)_38px]"}
+        className={"[display:grid] [min-height:56px] [grid-template-columns:28px_minmax(0,_1fr)_28px] [gap:8px] [align-items:center] [border:1px_solid_var(--border-1)] [border-radius:12px] [padding:12px] [background:var(--white-stationary)] [box-shadow:none] [&:focus-within]:[border-color:var(--line-focus-window)] [&:focus-within]:[box-shadow:none]"}
         onClick={(event) => {
           if (event.target === event.currentTarget) editorRef.current?.focus();
         }}
       >
         <label
-          className={"[display:inline-grid] [place-items:center] [border:0] [width:40px] [height:40px] [border-radius:999px] [color:#17171799] [background:transparent] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000008] [&_input]:[display:none] max-[760px]:[width:34px] max-[760px]:[height:34px]"}
+          className={"[display:inline-grid] [place-items:center] [border:0] [width:28px] [height:28px] [border-radius:999px] [color:var(--text-tertiary)] [background:transparent] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)] [&_input]:[display:none]"}
           title={t("composer.attachFiles")}
           onMouseDown={() => {
             const editor = editorRef.current;
@@ -2005,7 +2037,7 @@ export function Composer(props: {
             }
           }}
         >
-          <Paperclip size={18} />
+          <AddLinedIcon size={16} />
           <input
             type="file"
             multiple
@@ -2020,7 +2052,7 @@ export function Composer(props: {
             }}
           />
         </label>
-        <div className={"[display:grid] [min-height:40px] [align-content:start] [gap:6px] [padding:2px_0]"}>
+        <div className={"[display:grid] [min-height:28px] [align-content:center] [gap:6px] [padding:0]"}>
           {quotes.length ? (
             <QuoteComposerBar
               quotes={quotes}
@@ -2033,7 +2065,7 @@ export function Composer(props: {
           <div className={"[display:flex] [min-height:28px] [min-width:0] [flex-wrap:wrap] [align-items:flex-start] [gap:4px_6px]"}>
             <div className={"[position:relative] [min-width:0] [flex:1_1_180px] [min-height:28px] [display:grid] [align-items:start] [overflow:hidden] [&:has([data-upload-item-id])_[data-slot=composer-placeholder]]:[display:none] [&:has([data-mention-chip])_[data-slot=composer-placeholder]]:[display:none] [&:has([data-message-link-id])_[data-slot=composer-placeholder]]:[display:none] [&:has([data-summary-link-id])_[data-slot=composer-placeholder]]:[display:none]"}>
             {!text && uploadItems.length === 0 && t("composer.placeholder").trim() ? (
-              <span data-slot="composer-placeholder" className={"[pointer-events:none] [position:absolute] [left:0] [top:4px] [color:#17171755] [font-size:13px] [line-height:20px]"}>
+              <span data-slot="composer-placeholder" className={"[pointer-events:none] [position:absolute] [left:0] [top:4px] [color:var(--text-placeholder)] [font-size:13px] [line-height:20px]"}>
                 {t("composer.placeholder")}
               </span>
             ) : null}
@@ -2044,7 +2076,7 @@ export function Composer(props: {
               aria-multiline="true"
               contentEditable
               suppressContentEditableWarning
-              className={"[width:100%] [min-width:0] [min-height:28px] [max-height:168px] [overflow-y:hidden] [outline:none] [white-space:pre-wrap] [overflow-wrap:anywhere] [word-break:break-word] [color:var(--text)] [font-size:13px] [line-height:20px] [padding:4px_0] empty:before:[content:'']"}
+              className={"[width:100%] [min-width:0] [min-height:28px] [max-height:168px] [overflow-y:hidden] [outline:none] [white-space:pre-wrap] [overflow-wrap:anywhere] [word-break:break-word] [color:var(--text-primary)] [font-size:13px] [line-height:20px] [padding:4px_0] empty:before:[content:'']"}
               onPointerDown={(event) => {
                 if (event.button !== 0 || uploadItems.length === 0) return;
                 attachmentDragSelectionRef.current = { pointerId: event.pointerId, startX: event.clientX };
@@ -2260,8 +2292,8 @@ export function Composer(props: {
             </div>
           </div>
         </div>
-        <button className={"[display:inline-grid] [place-items:center] [border:0] [width:40px] [height:40px] [border-radius:999px] [color:var(--primary-contrast)] [background:var(--primary)] [&:disabled]:[color:var(--muted)] [&:disabled]:[background:#00000008] max-[760px]:[width:38px] max-[760px]:[height:38px]"} aria-label={t("composer.sendMessage")} onClick={send} disabled={sending}>
-          {sending ? <Square size={18} /> : <Send size={18} />}
+        <button className={"[display:inline-grid] [place-items:center] [border:0] [width:28px] [height:28px] [padding:0] [border-radius:999px] [color:var(--white-stationary)] [background:var(--text-primary)] [&:disabled]:[color:var(--text-secondary)] [&:disabled]:[background:var(--transparency-hover)]"} aria-label={t("composer.sendMessage")} onClick={send} disabled={sending}>
+          {sending ? <Square size={16} /> : <SendFilledIcon size={16} />}
         </button>
       </div>
       {mentionMenuOpen
@@ -2955,7 +2987,7 @@ function localAgentParticipantMeta(reference: TuttiAtQueryResult) {
 
 function appendStyledReferenceChipContent(chip: HTMLAnchorElement, label: string, reference: TuttiAtQueryResult) {
   chip.className = REFERENCE_MENTION_CHIP_CLASS;
-  chip.style.color = "var(--accent)";
+  chip.style.color = "var(--accent-codex)";
 
   const launcherRuntimeProvider = reference.providerId === "workspace-app"
     ? resolveAgentLauncherRuntimeProvider(reference.itemId)
@@ -2966,7 +2998,7 @@ function appendStyledReferenceChipContent(chip: HTMLAnchorElement, label: string
 
   const labelEl = document.createElement("span");
   labelEl.className = REFERENCE_MENTION_LABEL_CLASS;
-  labelEl.style.color = "var(--accent)";
+  labelEl.style.color = "var(--accent-codex)";
   labelEl.textContent = displayLabel;
 
   if (launcherRuntimeProvider) {
@@ -3033,7 +3065,7 @@ function createMentionChip(label: string, mentionId: string, reference?: TuttiAt
     chip.dataset.mentionReferenceInsert = JSON.stringify(reference.insert);
     chip.className = [
       PARTICIPANT_MENTION_CLASS,
-      "[color:#7c3aed]",
+      "[color:var(--tutti-purple)]",
       "[font-weight:500]",
     ].join(" ");
     return chip;
@@ -3052,16 +3084,16 @@ function createWhisperChip(label: string) {
     "[align-items:center]",
     "[gap:3px]",
     "[margin-inline:2px]",
-    "[border:1px_dashed_#c4b5fd]",
+    "[border:1px_dashed_var(--tutti-purple-border)]",
     "[border-radius:999px]",
     "[padding:0_6px]",
-    "[color:#7c3aed]",
+    "[color:var(--tutti-purple)]",
     "[font-size:11px]",
     "[font-weight:600]",
     "[line-height:18px]",
     "[vertical-align:baseline]",
     "[white-space:nowrap]",
-    "[background:#f5f3ff]",
+    "[background:var(--tutti-purple-bg)]",
   ].join(" ");
   return chip;
 }
@@ -3446,17 +3478,17 @@ function createMessageLinkChip(messageId: string, label: string) {
     "[align-items:center]",
     "[gap:6px]",
     "[overflow:hidden]",
-    "[border:1px_solid_var(--border)]",
+    "[border:1px_solid_var(--border-1)]",
     "[border-radius:10px]",
     "[padding:6px_10px]",
-    "[color:#2563eb]",
-    "[background:#ffffff]",
+    "[color:var(--accent-codex)]",
+    "[background:var(--white-stationary)]",
     "[font-size:13px]",
     "[font-weight:650]",
     "[line-height:18px]",
     "[vertical-align:middle]",
     "[white-space:nowrap]",
-    "[box-shadow:0_1px_2px_rgb(0_0_0_/_4%)]",
+    "[box-shadow:0_1px_2px_color-mix(in_srgb,var(--black-stationary)_4%,transparent)]",
   ].join(" ");
   const labelEl = document.createElement("span");
   labelEl.className = "[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]";
@@ -3529,8 +3561,8 @@ function createUploadItemChip(item: UploadItem) {
   chip.setAttribute("aria-label", t("composer.previewFile", { filename: item.filename }));
   chip.title = item.filename;
   chip.className = isMedia
-    ? `group [position:relative] [display:inline-grid] ${isVideo ? "[width:96px] [height:56px]" : "[width:58px] [height:44px]"} [margin:2px_3px] [overflow:hidden] [vertical-align:bottom] [border:1px_solid_var(--border)] [border-radius:10px] [background:#101114] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] [outline:none] [&[data-selected]]:[border-color:var(--primary)] [&[data-selected]]:[box-shadow:0_0_0_3px_#2563eb33] [&[data-error]]:[border-color:var(--danger)]`
-    : "group [position:relative] [display:inline-flex] [max-width:220px] [height:32px] [margin:2px_3px] [align-items:center] [gap:7px] [vertical-align:bottom] [border:1px_solid_var(--border)] [border-radius:10px] [padding:4px_24px_4px_8px] [background:var(--panel)] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] [outline:none] [&[data-selected]]:[border-color:var(--primary)] [&[data-selected]]:[box-shadow:0_0_0_3px_#2563eb33] [&[data-error]]:[border-color:var(--danger)]";
+    ? `group [position:relative] [display:inline-grid] ${isVideo ? "[width:96px] [height:56px]" : "[width:58px] [height:44px]"} [margin:2px_3px] [overflow:hidden] [vertical-align:bottom] [border:1px_solid_var(--border-1)] [border-radius:10px] [background:var(--black-stationary)] [box-shadow:0_1px_2px_color-mix(in_srgb,var(--black-stationary)_4%,transparent)] [cursor:pointer] [outline:none] [&[data-selected]]:[border-color:var(--black-stationary)] [&[data-selected]]:[box-shadow:0_0_0_3px_color-mix(in_srgb,var(--accent-codex)_20%,transparent)] [&[data-error]]:[border-color:var(--state-danger)]`
+    : "group [position:relative] [display:inline-flex] [max-width:220px] [height:32px] [margin:2px_3px] [align-items:center] [gap:7px] [vertical-align:bottom] [border:1px_solid_var(--border-1)] [border-radius:10px] [padding:4px_24px_4px_8px] [background:var(--background-fronted)] [box-shadow:0_1px_2px_color-mix(in_srgb,var(--black-stationary)_4%,transparent)] [cursor:pointer] [outline:none] [&[data-selected]]:[border-color:var(--black-stationary)] [&[data-selected]]:[box-shadow:0_0_0_3px_color-mix(in_srgb,var(--accent-codex)_20%,transparent)] [&[data-error]]:[border-color:var(--state-danger)]";
 
   if (isImage && item.previewUrl) {
     const image = document.createElement("img");
@@ -3554,14 +3586,14 @@ function createUploadItemChip(item: UploadItem) {
     videoBadge.dataset.uploadVideoBadge = "true";
     videoBadge.setAttribute("aria-hidden", "true");
     videoBadge.textContent = "▶";
-    videoBadge.className = "[position:absolute] [left:6px] [bottom:5px] [display:grid] [width:20px] [height:20px] [place-items:center] [border-radius:999px] [padding-left:1px] [color:#fff] [background:rgb(0_0_0_/_58%)] [font-size:9px] [line-height:1] [pointer-events:none]";
+    videoBadge.className = "[position:absolute] [left:6px] [bottom:5px] [display:grid] [width:20px] [height:20px] [place-items:center] [border-radius:999px] [padding-left:1px] [color:var(--white-stationary)] [background:color-mix(in_srgb,var(--black-stationary)_58%,transparent)] [font-size:11px] [line-height:1] [pointer-events:none]";
     chip.append(videoBadge);
   } else {
     const label = document.createElement("span");
-    label.className = "[min-width:0] [overflow:hidden] [font-size:12px] [font-weight:650] [line-height:16px] [text-overflow:ellipsis] [white-space:nowrap]";
+    label.className = "[min-width:0] [overflow:hidden] [font-size:11px] [font-weight:650] [line-height:16px] [text-overflow:ellipsis] [white-space:nowrap]";
     label.textContent = item.filename;
     const size = document.createElement("small");
-    size.className = "[flex:0_0_auto] [color:var(--muted)] [font-size:11px] [line-height:14px]";
+    size.className = "[flex:0_0_auto] [color:var(--text-secondary)] [font-size:11px] [line-height:14px]";
     size.textContent = formatBytes(item.sizeBytes);
     chip.append(label, size);
   }
@@ -3571,9 +3603,9 @@ function createUploadItemChip(item: UploadItem) {
     progress.dataset.uploadProgress = "true";
     progress.hidden = item.status !== "uploading";
     progress.setAttribute("aria-hidden", "true");
-    progress.className = "[position:absolute] [inset:0] [display:grid] [place-items:center] [background:rgb(0_0_0_/_38%)] [pointer-events:none] [&[hidden]]:[display:none]";
+    progress.className = "[position:absolute] [inset:0] [display:grid] [place-items:center] [background:color-mix(in_srgb,var(--black-stationary)_38%,transparent)] [pointer-events:none] [&[hidden]]:[display:none]";
     const spinner = document.createElement("span");
-    spinner.className = "[width:20px] [height:20px] [border:2px_solid_rgb(255_255_255_/_42%)] [border-top-color:#fff] [border-radius:999px] animate-spin";
+    spinner.className = "[width:20px] [height:20px] [border:2px_solid_color-mix(in_srgb,var(--white-stationary)_42%,transparent)] [border-top-color:var(--white-stationary)] [border-radius:999px] animate-spin";
     progress.append(spinner);
     chip.append(progress);
   }
@@ -3584,7 +3616,7 @@ function createUploadItemChip(item: UploadItem) {
   remove.setAttribute("aria-label", `Remove ${item.filename}`);
   remove.title = `Remove ${item.filename}`;
   remove.textContent = "×";
-  remove.className = "[position:absolute] [right:3px] [top:3px] [display:inline-grid] [width:18px] [height:18px] [place-items:center] [border-radius:999px] [color:var(--text)] [background:#fffffff0] [opacity:0] [font-size:14px] [line-height:18px] group-hover:[opacity:1]";
+  remove.className = "[position:absolute] [right:3px] [top:3px] [display:inline-grid] [width:18px] [height:18px] [place-items:center] [border-radius:999px] [color:var(--text-primary)] [background:color-mix(in_srgb,var(--white-stationary)_94%,transparent)] [opacity:0] [font-size:13px] [line-height:18px] group-hover:[opacity:1]";
   chip.append(remove);
   return chip;
 }
@@ -3896,10 +3928,10 @@ function QuoteComposerBar(props: {
   const [firstQuote, ...restQuotes] = props.quotes;
   if (!firstQuote) return null;
   return (
-    <div className={"[display:grid] [grid-template-columns:24px_minmax(0,_1fr)] [align-items:start] [gap:6px] [border-radius:8px] [padding:6px_8px] [background:#00000008] [color:#8a8f98] [font-size:13px] [line-height:20px]"}>
+    <div className={"[display:grid] [grid-template-columns:24px_minmax(0,_1fr)] [align-items:start] [gap:6px] [border-radius:8px] [padding:6px_8px] [background:var(--transparency-hover)] [color:var(--text-secondary)] [font-size:13px] [line-height:20px]"}>
       <button
         type="button"
-        className={"[display:inline-grid] [width:20px] [height:20px] [place-items:center] [border:0] [border-radius:4px] [color:#8a8f98] [background:transparent] [&:hover]:[color:var(--text)] [&:hover]:[background:#0000000c]"}
+        className={"[display:inline-grid] [width:20px] [height:20px] [place-items:center] [border:0] [border-radius:4px] [color:var(--text-secondary)] [background:transparent] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)]"}
         aria-label={t("composer.removeQuote")}
         title={t("composer.removeQuote")}
         onClick={props.onRemove}
@@ -3921,7 +3953,7 @@ function QuoteComposerBar(props: {
           )}
         </span>
         {props.quotes.length > 1 ? (
-          <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap] [color:#9aa1ad] [font-size:12px]"}>
+          <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap] [color:var(--text-tertiary)] [font-size:11px]"}>
             <QuoteContentPreview
               prefix={`${firstQuote.sender}: `}
               quote={firstQuote}

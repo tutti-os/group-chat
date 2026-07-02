@@ -43,7 +43,6 @@ export function ConversationFilesPanel(props: {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<ArtifactFilterCategory>("all");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  const panelRef = useRef<HTMLElement | null>(null);
   const pendingClickTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -61,23 +60,13 @@ export function ConversationFilesPanel(props: {
 
   useEffect(() => {
     if (!props.open) return;
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (panelRef.current?.contains(target)) return;
-      props.onClose();
-    };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         props.onClose();
       }
     };
-    document.addEventListener("pointerdown", closeOnOutsidePointer);
     document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsidePointer);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
+    return () => document.removeEventListener("keydown", closeOnEscape);
   }, [props.onClose, props.open]);
 
   const normalizedQuery = query.trim().toLowerCase();
@@ -174,16 +163,15 @@ export function ConversationFilesPanel(props: {
 
   return (
     <aside
-      ref={panelRef}
-      className={"[position:absolute] [top:56px] [right:0] [bottom:0] [z-index:36] [display:grid] [width:min(360px,_calc(100vw_-_24px))] [grid-template-rows:auto_auto_auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border)] [background:var(--panel)] [box-shadow:-18px_0_40px_rgb(0_0_0_/_8%)]"}
+      className={"[grid-column:2] [grid-row:2_/_4] [display:grid] [min-width:0] [min-height:0] [grid-template-rows:auto_auto_auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border-1)] [background:var(--background-panel)] max-[760px]:[grid-column:1] max-[760px]:[grid-row:2_/_4]"}
     >
-      <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [padding:14px] [border-bottom:1px_solid_var(--border)]"}>
-        <div className={"[min-width:0] [&_h3]:[margin:0] [&_h3]:[font-size:15px] [&_h3]:[font-weight:720] [&_h3]:[line-height:1.2] [&_span]:[display:block] [&_span]:[margin-top:3px] [&_span]:[color:var(--muted)] [&_span]:[font-size:12px]"}>
+      <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [padding:14px] [border-bottom:1px_solid_var(--border-1)]"}>
+        <div className={"[display:flex] [min-width:0] [align-items:baseline] [gap:8px] [&_h3]:[margin:0] [&_h3]:[font-size:15px] [&_h3]:[font-weight:720] [&_h3]:[line-height:1.2] [&_span]:[color:var(--text-secondary)] [&_span]:[font-size:11px] [&_span]:[line-height:1.2]"}>
           <h3>{t("files.title")}</h3>
           <span>{t("files.count", { count: filteredArtifacts.length })}</span>
         </div>
         <button
-          className={"[display:inline-grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [&:focus-visible]:[outline:none]"}
+          className={"dialog-close-button [display:inline-grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--text-secondary)] [background:transparent] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)] [&:focus-visible]:[outline:none] [&:focus-visible]:[background:var(--transparency-hover)]"}
           type="button"
           aria-label={t("files.close")}
           title={t("common.close")}
@@ -200,7 +188,7 @@ export function ConversationFilesPanel(props: {
             <button
               key={tab.id}
               type="button"
-              className={`[display:inline-flex] [height:32px] [flex:0_0_auto] [align-items:center] [border:0] [border-radius:999px] [padding:0_14px] [font-size:13px] [font-weight:650] [transition:background-color_0.12s_ease,_color_0.12s_ease] ${active ? "[color:#ffffff] [background:#171717]" : "[color:var(--muted)] [background:#f2f3f5] hover:[color:var(--text)] hover:[background:#eceef1]"}`}
+              className={`[display:inline-flex] [height:32px] [flex:0_0_auto] [align-items:center] [border:0] [border-radius:999px] [padding:0_14px] [font-size:13px] [font-weight:650] [transition:background-color_0.12s_ease,_color_0.12s_ease] ${active ? "[color:var(--white-stationary)] [background:var(--black-stationary)]" : "[color:var(--text-secondary)] [background:var(--transparency-block)] hover:[color:var(--text-primary)] hover:[background:var(--transparency-hover)]"}`}
               aria-pressed={active}
               onClick={() => setCategory(tab.id)}
             >
@@ -211,7 +199,7 @@ export function ConversationFilesPanel(props: {
       </div>
 
       <div className={"[padding:12px_12px_0]"}>
-        <label className={"[display:flex] [height:38px] [align-items:center] [gap:8px] [border-radius:12px] [padding:0_12px] [color:var(--muted)] [background:#f2f3f5] [&_input]:[width:100%] [&_input]:[min-width:0] [&_input]:[border:0] [&_input]:[color:var(--text)] [&_input]:[background:transparent] [&_input]:[font-size:13px] [&_input]:[outline:none] [&_input::placeholder]:[color:#7a7d82]"}>
+        <label className={"[display:flex] [height:38px] [align-items:center] [gap:8px] [border-radius:12px] [padding:0_12px] [color:var(--text-secondary)] [background:var(--transparency-block)] [&_input]:[width:100%] [&_input]:[min-width:0] [&_input]:[border:0] [&_input]:[color:var(--text-primary)] [&_input]:[background:transparent] [&_input]:[font-size:13px] [&_input]:[outline:none] [&_input::placeholder]:[color:var(--text-placeholder)]"}>
           <Search size={15} />
           <input
             value={query}
@@ -232,7 +220,7 @@ export function ConversationFilesPanel(props: {
         }}
       >
         {visibleArtifacts.length === 0 ? (
-          <div className={"[padding:28px_12px] [color:var(--muted)] [font-size:13px] [line-height:1.5] [text-align:center]"}>
+          <div className={"[padding:28px_12px] [color:var(--text-secondary)] [font-size:13px] [line-height:1.5] [text-align:center]"}>
             {emptyLabel}
           </div>
         ) : null}
@@ -246,7 +234,7 @@ export function ConversationFilesPanel(props: {
           return (
             <article
               key={artifact.id}
-              className={"[display:grid] [grid-template-columns:40px_minmax(0,_1fr)_auto] [align-items:center] [gap:8px] [border:1px_solid_var(--border)] [border-radius:12px] [padding:8px] [background:#ffffff] [transition:border-color_0.12s_ease,_background-color_0.12s_ease] hover:[border-color:#d4d4d8] hover:[background:#fbfbfc]"}
+              className={"[display:grid] [grid-template-columns:40px_minmax(0,_1fr)_auto] [align-items:center] [gap:8px] [border:1px_solid_var(--border-1)] [border-radius:12px] [padding:8px] [background:var(--white-stationary)] [transition:border-color_0.12s_ease,_background-color_0.12s_ease] hover:[border-color:var(--line-focus-window)] hover:[background:var(--background-panel)]"}
             >
               <button
                 type="button"
@@ -255,7 +243,7 @@ export function ConversationFilesPanel(props: {
                 onClick={() => handleFileRowClick(artifact)}
                 onDoubleClick={(event) => handleFileRowDoubleClick(artifact, event)}
               >
-                <span className={"[display:grid] [width:40px] [height:40px] [place-items:center] [overflow:hidden] [border-radius:8px] [background:#f3f4f6]"}>
+                <span className={"[display:grid] [width:40px] [height:40px] [place-items:center] [overflow:hidden] [border-radius:8px] [background:var(--background-panel)]"}>
                   {artifactCategory === "image" ? (
                     <img
                       src={artifact.publicUrl}
@@ -263,7 +251,7 @@ export function ConversationFilesPanel(props: {
                       className={"[width:100%] [height:100%] [object-fit:cover]"}
                     />
                   ) : (
-                    <span className={"[display:grid] [width:30px] [height:34px] [place-items:center] [border-radius:6px] [color:#ffffff] [background:#8d96a3]"}>
+                    <span className={"[display:grid] [width:30px] [height:34px] [place-items:center] [border-radius:6px] [color:var(--white-stationary)] [background:var(--text-secondary)]"}>
                       {artifactCategory === "video" ? <Video size={16} /> : <FileText size={16} />}
                     </span>
                   )}
@@ -272,7 +260,7 @@ export function ConversationFilesPanel(props: {
                   <strong className={"[overflow:hidden] [font-size:13px] [font-weight:650] [line-height:1.25] [text-overflow:ellipsis] [white-space:nowrap]"}>
                     {artifact.filename}
                   </strong>
-                  <span className={"[overflow:hidden] [color:var(--muted)] [font-size:11px] [line-height:1.3] [text-overflow:ellipsis] [white-space:nowrap]"}>
+                  <span className={"[overflow:hidden] [color:var(--text-secondary)] [font-size:11px] [line-height:1.3] [text-overflow:ellipsis] [white-space:nowrap]"}>
                     {formatFileCreatorMeta(artifact, message, {
                       participants: props.participants,
                       identities: props.identities,
@@ -284,7 +272,7 @@ export function ConversationFilesPanel(props: {
               <div className={"[display:flex] [align-items:center] [gap:2px]"}>
                 <button
                   type="button"
-                  className={"[display:inline-grid] [width:28px] [height:28px] [place-items:center] [border:0] [border-radius:8px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [&:focus-visible]:[outline:none]"}
+                  className={"[display:inline-grid] [width:28px] [height:28px] [place-items:center] [border:0] [border-radius:8px] [color:var(--text-secondary)] [background:transparent] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)] [&:focus-visible]:[outline:none] [&:focus-visible]:[background:var(--transparency-hover)]"}
                   aria-label={t("files.revealFile", { filename: artifact.filename })}
                   title={t("files.revealInFileManager")}
                   onPointerDown={stopPanelPointerBubble}
@@ -294,7 +282,7 @@ export function ConversationFilesPanel(props: {
                 </button>
                 <button
                   type="button"
-                  className={"[display:inline-grid] [width:28px] [height:28px] [place-items:center] [border:0] [border-radius:8px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [&:focus-visible]:[outline:none]"}
+                  className={"[display:inline-grid] [width:28px] [height:28px] [place-items:center] [border:0] [border-radius:8px] [color:var(--text-secondary)] [background:transparent] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)] [&:focus-visible]:[outline:none] [&:focus-visible]:[background:var(--transparency-hover)]"}
                   aria-label={t("files.downloadFile", { filename: artifact.filename })}
                   title={t("files.download")}
                   onPointerDown={stopPanelPointerBubble}
@@ -307,7 +295,7 @@ export function ConversationFilesPanel(props: {
           );
         })}
         {hasMore ? (
-          <div className={"[padding:8px_0_4px] [color:var(--muted)] [font-size:12px] [text-align:center]"}>
+          <div className={"[padding:8px_0_4px] [color:var(--text-secondary)] [font-size:11px] [text-align:center]"}>
             {t("files.loadMore")}
           </div>
         ) : null}

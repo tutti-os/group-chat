@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Braces, BrainCircuit, CheckSquare, ChevronDown, ChevronRight, ChevronsDown, Copy, Edit3, Ear, FileText, MoreHorizontal, Reply, RotateCcw, SendHorizontal, Terminal, Trash2, Wrench, X } from "lucide-react";
+import { Button } from "@tutti-os/ui-system";
 import type { Artifact, AgentRun, AgentRunEvent, Conversation, Identity, Message, MessageBlock, Participant, Room, RuntimeProfile } from "@group-chat/shared";
 import { isLocalUserMessage, resolveMessageVisibility, enrichAssistantContentWithWorkspaceResourceLinks, resolveTriggerUserMentions, stripAssistantSkillDetails } from "@group-chat/shared";
 import { getArtifactCategory, revealArtifactInTuttiFileManager } from "../../artifact-actions.js";
@@ -13,6 +14,7 @@ import type { LocalUserProfile } from "../../user-profile.js";
 import { UserAvatar, type UserAvatarSize } from "../ui/UserAvatar.js";
 import { getRuntimeProviderAvatarStyle, resolveAgentAvatarFromContext } from "../../identity-avatar.js";
 import { AgentAvatar } from "../ui/AgentAvatar.js";
+import { HoverTooltip } from "../ui/HoverTooltip.js";
 import { WHISPER_FEATURE_ENABLED } from "../../feature-flags.js";
 import type { BackgroundTask } from "../../background-tasks.js";
 import type { TuttiAgentGuiProvider } from "../../agent-gui-dispatch.js";
@@ -291,6 +293,7 @@ export function MessageTimeline(props: {
   onOpenMessageLink: (messageId: string) => void;
   onOpenSummaryLink: (taskId: string) => void;
   onInsertSummaryLink?: (taskId: string) => void;
+  onInsertSuggestion?: (content: string) => void;
   onEnsureSummaryTask: (taskId: string) => Promise<BackgroundTask | null>;
   summaryTasks: BackgroundTask[];
   onQuoteMessages: (messages: Message[], mode?: "quote" | "summary" | "send-to-app" | "send-to-agent") => void;
@@ -880,13 +883,14 @@ export function MessageTimeline(props: {
   return (
     <section
       ref={scrollRef}
-      className={`[position:relative] [min-height:0] [overflow-y:auto] [background:var(--panel)] [padding:26px_18px_8px_14px] [&_article:last-of-type]:[margin-bottom:0] max-[1080px]:[padding-inline:14px_18px] max-[760px]:[padding:18px_18px_8px_14px]`}
+      className={`[position:relative] [min-height:0] [overflow-y:auto] [background:var(--background-panel)] [padding:26px_18px_8px_14px] [&_article:last-of-type]:[margin-bottom:0] max-[1080px]:[padding-inline:14px_18px] max-[760px]:[padding:18px_18px_8px_14px]`}
       onScroll={handleTimelineScroll}
     >
       {!hasAnyTimelineMessages ? (
         <EmptyTimelineState
           participantsCount={props.participantsCount}
           onOpenMembers={props.onOpenMembers}
+          onInsertSuggestion={props.onInsertSuggestion}
         />
       ) : null}
       {visibleMessages.map((message) => {
@@ -1004,7 +1008,7 @@ export function MessageTimeline(props: {
       {showJumpToBottom ? (
         <button
           type="button"
-          className={"[position:fixed] [z-index:40] [right:28px] [bottom:112px] [display:grid] [width:52px] [height:52px] [place-items:center] [border:1px_solid_var(--border)] [border-radius:999px] [color:var(--text)] [background:#fffffff2] [box-shadow:0_12px_34px_rgb(0_0_0_/_14%)] [backdrop-filter:blur(10px)] [cursor:pointer] hover:[background:#ffffff] focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:2px] max-[760px]:[right:18px] max-[760px]:[bottom:96px]"}
+          className={"[position:fixed] [z-index:40] [right:28px] [bottom:112px] [display:grid] [width:52px] [height:52px] [place-items:center] [border:1px_solid_var(--border-1)] [border-radius:999px] [color:var(--text-primary)] [background:color-mix(in_srgb,var(--white-stationary)_95%,transparent)] [box-shadow:0_12px_34px_color-mix(in_srgb,var(--black-stationary)_14%,transparent)] [backdrop-filter:blur(10px)] [cursor:pointer] hover:[background:var(--white-stationary)] focus-visible:[outline:2px_solid_var(--accent-codex)] focus-visible:[outline-offset:2px] max-[760px]:[right:18px] max-[760px]:[bottom:96px]"}
           aria-label={t("messageActions.jumpToLatest")}
           title={t("messageActions.jumpToLatest")}
           onClick={scrollToBottom}
@@ -1087,7 +1091,7 @@ export function MessageTimeline(props: {
       ) : null}
       {copyTipPosition ? (
         <div
-          className={"[position:fixed] [z-index:80] [width:max-content] [white-space:nowrap] [border-radius:999px] [padding:7px_12px] [color:#ffffff] [background:rgb(17_24_39_/_88%)] [box-shadow:0_10px_30px_rgb(0_0_0_/_18%)] [font-size:12px] [font-weight:650] [pointer-events:none]"}
+          className={"[position:fixed] [z-index:80] [width:max-content] [white-space:nowrap] [border-radius:999px] [padding:7px_12px] [color:var(--white-stationary)] [background:color-mix(in_srgb,var(--toast-neutral-bg)_88%,transparent)] [box-shadow:0_10px_30px_color-mix(in_srgb,var(--black-stationary)_18%,transparent)] [font-size:11px] [font-weight:650] [pointer-events:none]"}
           style={{
             left: copyTipPosition.x,
             top: copyTipPosition.y - COPY_TIP_OFFSET_PX,
@@ -1101,7 +1105,11 @@ export function MessageTimeline(props: {
   );
 }
 
-function EmptyTimelineState(props: { participantsCount: number; onOpenMembers: (options?: { startAdding?: boolean }) => void }) {
+function EmptyTimelineState(props: {
+  participantsCount: number;
+  onOpenMembers: (options?: { startAdding?: boolean }) => void;
+  onInsertSuggestion?: (content: string) => void;
+}) {
   const noAgents = props.participantsCount === 0;
   const title = (noAgents ? t("timeline.emptyNoAgentsTitle") : t("timeline.emptyStartTitle")).trim();
   const hint = (noAgents ? t("timeline.emptyNoAgentsHint") : t("timeline.emptyStartHint")).trim();
@@ -1113,23 +1121,32 @@ function EmptyTimelineState(props: { participantsCount: number; onOpenMembers: (
 
   return (
     <div className={"[display:grid] [min-height:100%] [place-items:center] [padding:28px] [text-align:center]"}>
-      <div className={"[display:grid] [max-width:460px] [gap:14px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:28px] [background:#ffffff99] [&_h3]:[margin:0] [&_h3]:[color:var(--text)] [&_h3]:[font-size:18px] [&_h3]:[font-weight:700] [&_p]:[margin:0] [&_p]:[color:var(--muted)] [&_p]:[font-size:13px] [&_p]:[line-height:1.6]"}>
+      <div className={"[display:grid] [max-width:520px] [gap:14px] [&_h3]:[margin:0] [&_h3]:[color:var(--text-primary)] [&_h3]:[font-size:15px] [&_h3]:[font-weight:700] [&_p]:[margin:0] [&_p]:[color:var(--text-secondary)] [&_p]:[font-size:13px] [&_p]:[line-height:1.6]"}>
         {title ? <h3>{title}</h3> : null}
         {hint ? <p>{hint}</p> : null}
         {suggestions.length > 0 ? (
-          <div className={"[display:flex] [flex-wrap:wrap] [justify-content:center] [gap:8px] [&_span]:[border:1px_solid_var(--border)] [&_span]:[border-radius:999px] [&_span]:[padding:5px_10px] [&_span]:[color:var(--tag-agent-text)] [&_span]:[background:#ffffff] [&_span]:[font-size:12px]"}>
+          <div className={"[display:flex] [flex-wrap:wrap] [justify-content:center] [gap:8px]"}>
             {suggestions.map((suggestion) => (
-              <span key={suggestion}>{suggestion}</span>
+              <button
+                key={suggestion}
+                type="button"
+                className={"[border:1px_solid_var(--border-1)] [border-radius:999px] [padding:5px_10px] [color:var(--tutti-purple)] [background:var(--white-stationary)] [font-size:11px] [line-height:1.2] [cursor:pointer] [transition:background-color_0.12s_ease] hover:[background:var(--tutti-purple-bg)] focus-visible:[outline:none] focus-visible:[border-color:var(--border-1)]"}
+                onClick={() => props.onInsertSuggestion?.(suggestion)}
+              >
+                {suggestion}
+              </button>
             ))}
           </div>
         ) : null}
-        <button
+        <Button
           type="button"
-          className={"[justify-self:center] [height:36px] [border:0] [border-radius:6px] [padding:0_14px] [color:#ffffff] [background:var(--primary)] [font-size:13px] [font-weight:650] [&:hover]:[background:var(--accent)]"}
+          variant="default"
+          size="default"
+          className={"[justify-self:center]"}
           onClick={() => props.onOpenMembers(noAgents ? { startAdding: true } : undefined)}
         >
           {noAgents ? t("timeline.addAgent") : t("timeline.manageAgents")}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -1329,7 +1346,7 @@ function WhisperMessageFooter(props: { label: string }) {
   return (
     <div
       data-slot="whisper-footer"
-      className={"[display:flex] [align-items:center] [gap:4px] [padding-left:4px] [color:#8f959e] [font-size:11px] [line-height:16px]"}
+      className={"[display:flex] [align-items:center] [gap:4px] [padding-left:4px] [color:var(--text-secondary)] [font-size:11px] [line-height:16px]"}
     >
       <Ear size={12} strokeWidth={1.75} className={"[flex:0_0_auto]"} aria-hidden />
       <span>{props.label}</span>
@@ -1355,7 +1372,7 @@ function SystemNoticeRow(props: {
       data-role="system"
       className={"[display:flex] [justify-content:center] [margin:6px_0_14px] [padding:0_20px]"}
     >
-      <span className={`[inline-flex] [max-width:min(560px,_100%)] [align-items:center] [justify-content:center] [border-radius:999px] [padding:4px_12px] [background:#00000008] [font-size:12px] [line-height:18px] [text-align:center] ${props.message.status === "error" ? "[color:#dc2626]" : "[color:var(--muted)]"}`}>
+      <span className={`[inline-flex] [max-width:min(560px,_100%)] [align-items:center] [justify-content:center] [border-radius:999px] [padding:4px_12px] [background:var(--transparency-hover)] [font-size:11px] [line-height:18px] [text-align:center] ${props.message.status === "error" ? "[color:var(--state-danger)]" : "[color:var(--text-secondary)]"}`}>
         <MessageReferenceContent
           content={translated}
           mentions={props.message.mentions}
@@ -1372,12 +1389,12 @@ function SystemNoticeRow(props: {
 }
 
 const messageRoleContentClassName =
-  "[&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[background:#f2f3f5] "
+  "[&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[background:var(--transparency-block)] "
   + "[&[data-role=assistant]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[border-radius:8px] "
   + "[&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[border-color:transparent] "
-  + "[&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[background:#d6e9ff] "
+  + "[&[data-role=user]:not([data-whisper=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[background:var(--accent-bg)] "
   + "[&[data-role=user]:not([data-whisper=true])_[data-slot=message-composite-block]]:[border-color:transparent] "
-  + "[&[data-role=user]:not([data-whisper=true])_[data-slot=message-composite-block]]:[background:#d6e9ff]";
+  + "[&[data-role=user]:not([data-whisper=true])_[data-slot=message-composite-block]]:[background:var(--accent-bg)]";
 
 function MessageRow(props: {
   message: Message;
@@ -1506,7 +1523,7 @@ function MessageRow(props: {
       data-slot="message-avatar"
       data-profile-trigger="message-avatar"
       type="button"
-      className={"[position:relative] [display:inline-grid] [flex:0_0_auto] [width:34px] [height:34px] [overflow:hidden] [border:0] [border-radius:999px] [padding:0] [background:transparent] [cursor:pointer] [transition:transform_0.12s_ease] [&:hover]:[transform:translateY(-1px)] [&:focus-visible]:[outline:2px_solid_var(--accent)] [&:focus-visible]:[outline-offset:2px]"}
+      className={"[position:relative] [display:inline-grid] [flex:0_0_auto] [width:34px] [height:34px] [overflow:hidden] [border:0] [border-radius:999px] [padding:0] [background:transparent] [cursor:pointer] [transition:transform_0.12s_ease] [&:hover]:[transform:translateY(-1px)] [&:focus-visible]:[outline:2px_solid_var(--accent-codex)] [&:focus-visible]:[outline-offset:2px]"}
       title={t("messageActions.viewProfile")}
       aria-label={t("messageActions.viewProfile")}
       onMouseDown={(event) => {
@@ -1532,7 +1549,7 @@ function MessageRow(props: {
     <button
       data-slot="message-avatar"
       type="button"
-      className={"[position:relative] [display:inline-flex] [flex:0_0_auto] [align-items:center] [justify-content:center] [width:34px] [height:34px] [border:0] [padding:0] [background:transparent] [cursor:pointer] [transition:transform_0.12s_ease] [&:hover]:[transform:translateY(-1px)] [&:focus-visible]:[outline:2px_solid_var(--accent)] [&:focus-visible]:[outline-offset:2px]"}
+      className={"[position:relative] [display:inline-flex] [flex:0_0_auto] [align-items:center] [justify-content:center] [width:34px] [height:34px] [border:0] [padding:0] [background:transparent] [cursor:pointer] [transition:transform_0.12s_ease] [&:hover]:[transform:translateY(-1px)] [&:focus-visible]:[outline:2px_solid_var(--accent-codex)] [&:focus-visible]:[outline-offset:2px]"}
       title={t("messageActions.viewParticipant", { name: props.participant.displayName })}
       aria-label={t("messageActions.viewAgentInfo", { name: props.participant.displayName })}
       onClick={() => props.onOpenAgentProfile(props.participant!)}
@@ -1594,13 +1611,13 @@ function MessageRow(props: {
           />
         ) : null}
         {props.showHeader ? (
-        <div data-slot="message-meta" className={"[user-select:none] [min-width:0] [max-width:100%] [&_span:not([data-message-status=error])]:[color:var(--muted)] [&_span[data-message-status=error]]:[color:#dc2626] [&_span]:[font-size:12px] [display:flex] [align-items:center] [gap:7px] [overflow:hidden] [min-height:20px] [margin-bottom:4px] [&_strong]:[color:var(--muted)] [&_strong]:[font-size:12px] [&_strong]:[font-weight:550]"}>
+        <div data-slot="message-meta" className={"[user-select:none] [min-width:0] [max-width:100%] [&_span:not([data-message-status=error])]:[color:var(--text-secondary)] [&_span[data-message-status=error]]:[color:var(--state-danger)] [&_span]:[font-size:11px] [display:flex] [align-items:center] [gap:7px] [overflow:hidden] [min-height:20px] [margin-bottom:4px] [&_strong]:[color:var(--text-secondary)] [&_strong]:[font-size:11px] [&_strong]:[font-weight:550]"}>
             {isUserMessage ? (
               <strong className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{senderLabel}</strong>
             ) : props.participant && props.participant.status !== "removed" ? (
                 <button
                   type="button"
-                  className={"group [display:inline-flex] [min-width:0] [align-items:center] [overflow:hidden] [border:0] [padding:0] [color:var(--muted)] [background:transparent] [font-size:12px] [font-weight:550] [line-height:20px] [cursor:pointer] [transition:color_0.12s_ease] hover:![color:#2563eb] focus-visible:![color:#2563eb] focus-visible:[outline:none]"}
+                  className={"group [display:inline-flex] [min-width:0] [align-items:center] [overflow:hidden] [border:0] [padding:0] [color:var(--text-secondary)] [background:transparent] [font-size:11px] [font-weight:550] [line-height:20px] [cursor:pointer] [transition:color_0.12s_ease] hover:![color:var(--accent-codex)] focus-visible:![color:var(--accent-codex)] focus-visible:[outline:none]"}
                   title={`@${props.participant.displayName}`}
                   aria-label={t("messageActions.mentionInComposer", { name: props.participant.displayName })}
                   onMouseDown={(event) => event.preventDefault()}
@@ -1627,7 +1644,7 @@ function MessageRow(props: {
             {shouldRenderCompositeConversationBlocks ? (
               <div
                 data-slot="message-composite-block"
-                className={"message-prose [box-sizing:border-box] [display:grid] [width:fit-content] [min-width:0] [max-width:100%] [gap:6px] [overflow-wrap:break-word] [word-break:normal] [white-space:pre-wrap] [border:0] [border-radius:4px_6px_6px_4px] [padding:10px_13px] [color:var(--text)] [&_[data-slot=artifact-block]]:[margin-top:0] [&_[data-slot=message-block]]:[max-width:100%]"}
+                className={"message-prose [box-sizing:border-box] [display:grid] [width:fit-content] [min-width:0] [max-width:100%] [gap:6px] [overflow-wrap:break-word] [word-break:normal] [white-space:pre-wrap] [border:0] [border-radius:4px_6px_6px_4px] [padding:10px_13px] [color:var(--text-primary)] [&_[data-slot=artifact-block]]:[margin-top:0] [&_[data-slot=message-block]]:[max-width:100%]"}
               >
                 {visibleConversationBlocks.map((block, index) => renderConversationBlock(block, index, { compositeChild: true }))}
               </div>
@@ -1681,7 +1698,7 @@ function MessageRow(props: {
       data-failed={props.message.status === "error" || undefined}
       data-selected={props.selected || undefined}
       data-group-continuation={!props.showHeader || undefined}
-      className={`group/message [position:relative] [display:grid] ${props.selectionMode ? "[grid-template-columns:22px_34px_minmax(0,_1fr)]" : "[grid-template-columns:34px_minmax(0,_1fr)]"} [gap:8px] [align-items:start] [border-radius:18px] [transition:background-color_0.2s_ease,_box-shadow_0.2s_ease] ${props.isLastInGroup ? "[margin-bottom:18px]" : "[margin-bottom:4px]"} ${props.selectionMode && !isRemoved ? "[cursor:pointer]" : ""} [&_[data-slot=message-avatar]]:[user-select:none] [&[data-selected=true]]:[background:#eaf2ff66] [&[data-flash=true]]:[background:#fef3c7] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-whisper=true]:not([data-failed=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[border:1px_dashed_#d0d3d6] [&[data-whisper=true][data-failed=true]_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[border:1px_dashed_#f59e0b] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[border-radius:8px] [&[data-whisper=true][data-role=assistant]_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[background:#f8f9fb] [&[data-role=user][data-whisper=true]_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[background:#eef6ff] ${messageRoleContentClassName}`}
+      className={`group/message [position:relative] [display:grid] ${props.selectionMode ? "[grid-template-columns:22px_34px_minmax(0,_1fr)]" : "[grid-template-columns:34px_minmax(0,_1fr)]"} [gap:8px] [align-items:start] [border-radius:18px] [transition:background-color_0.2s_ease,_box-shadow_0.2s_ease] ${props.isLastInGroup ? "[margin-bottom:18px]" : "[margin-bottom:4px]"} ${props.selectionMode && !isRemoved ? "[cursor:pointer]" : ""} [&_[data-slot=message-avatar]]:[user-select:none] [&[data-selected=true]]:[background:color-mix(in_srgb,var(--accent-codex)_12%,transparent)] [&[data-flash=true]]:[background:color-mix(in_srgb,var(--state-warning)_20%,var(--background-fronted))] [&[data-flash=true]]:[box-shadow:0_0_0_2px_var(--state-warning)] [&[data-whisper=true]:not([data-failed=true])_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[border:1px_dashed_var(--line-focus-window)] [&[data-whisper=true][data-failed=true]_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[border:1px_dashed_var(--state-warning)] [&[data-whisper=true]_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[border-radius:8px] [&[data-whisper=true][data-role=assistant]_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[background:var(--background-panel)] [&[data-role=user][data-whisper=true]_[data-slot=message-block]:not([data-link-only]):not([data-composite-child=true])]:[background:var(--accent-bg)] ${messageRoleContentClassName}`}
       onClickCapture={(event) => {
         if (!props.selectionMode || isRemoved) return;
         if (event.target instanceof Element && event.target.closest('[data-slot="message-select"]')) return;
@@ -1697,7 +1714,7 @@ function MessageRow(props: {
       >
         {!isRemoved ? (
           <label className={"[display:grid] [width:22px] [height:34px] [place-items:center] [cursor:pointer]"}>
-            <input className={"[width:16px] [height:16px] [accent-color:var(--primary)] [cursor:pointer]"} type="checkbox" checked={props.selected} onChange={props.onToggleSelected} aria-label={t("messageActions.selectMessage")} />
+            <input className={"[width:16px] [height:16px] [accent-color:var(--black-stationary)] [cursor:pointer]"} type="checkbox" checked={props.selected} onChange={props.onToggleSelected} aria-label={t("messageActions.selectMessage")} />
           </label>
         ) : null}
       </div>
@@ -1750,99 +1767,10 @@ function computeMessageMoreMenuPosition(anchorRect: DOMRect, menuWidth: number, 
 }
 
 const MESSAGE_ACTION_BAR_BUTTON_CLASS =
-  "group/icon [position:relative] [display:inline-grid] [width:24px] [height:24px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000008]";
-
-const MESSAGE_ACTION_BAR_TOOLTIP_GAP_PX = 6;
-const MESSAGE_ACTION_BAR_TOOLTIP_VIEWPORT_PADDING_PX = 8;
+  "group/icon [position:relative] [display:inline-grid] [width:24px] [height:24px] [place-items:center] [border:0] [border-radius:4px] [color:var(--text-secondary)] [background:transparent] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)]";
 
 function clampNumber(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
-}
-
-function ViewportActionTooltip(props: {
-  anchorRef: { current: HTMLElement | null };
-  visible: boolean;
-  children: ReactNode;
-}) {
-  const tooltipRef = useRef<HTMLSpanElement | null>(null);
-  const [layout, setLayout] = useState<{
-    arrowLeft: number;
-    placement: "above" | "below";
-    ready: boolean;
-    style: CSSProperties;
-  }>({
-    arrowLeft: 0,
-    placement: "above",
-    ready: false,
-    style: { left: -9999, top: -9999 },
-  });
-
-  const updateLayout = useCallback(() => {
-    const anchor = props.anchorRef.current;
-    const tooltip = tooltipRef.current;
-    if (!anchor || !tooltip) return;
-    const anchorRect = anchor.getBoundingClientRect();
-    const tooltipRect = tooltip.getBoundingClientRect();
-    const padding = MESSAGE_ACTION_BAR_TOOLTIP_VIEWPORT_PADDING_PX;
-    const gap = MESSAGE_ACTION_BAR_TOOLTIP_GAP_PX;
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    const anchorCenterX = anchorRect.left + anchorRect.width / 2;
-    const spaceAbove = anchorRect.top - padding;
-    const spaceBelow = viewportHeight - anchorRect.bottom - padding;
-    const placement = spaceAbove >= tooltipRect.height + gap || spaceAbove >= spaceBelow ? "above" : "below";
-    const unclampedTop = placement === "above"
-      ? anchorRect.top - tooltipRect.height - gap
-      : anchorRect.bottom + gap;
-    const top = clampNumber(unclampedTop, padding, Math.max(padding, viewportHeight - tooltipRect.height - padding));
-    const left = clampNumber(
-      anchorCenterX - tooltipRect.width / 2,
-      padding,
-      Math.max(padding, viewportWidth - tooltipRect.width - padding),
-    );
-    setLayout({
-      arrowLeft: clampNumber(anchorCenterX - left, 8, Math.max(8, tooltipRect.width - 8)),
-      placement,
-      ready: true,
-      style: { left, top, zIndex: MESSAGE_ACTION_BAR_Z_INDEX + 2 },
-    });
-  }, [props.anchorRef]);
-
-  useLayoutEffect(() => {
-    if (!props.visible) return;
-    updateLayout();
-  }, [props.children, props.visible, updateLayout]);
-
-  useEffect(() => {
-    if (!props.visible) return;
-    const handleMove = () => updateLayout();
-    window.addEventListener("resize", handleMove);
-    window.addEventListener("scroll", handleMove, true);
-    return () => {
-      window.removeEventListener("resize", handleMove);
-      window.removeEventListener("scroll", handleMove, true);
-    };
-  }, [props.visible, updateLayout]);
-
-  if (!props.visible) return null;
-  return createPortal(
-    <span
-      ref={tooltipRef}
-      role="tooltip"
-      className={"[position:fixed] [border-radius:5px] [padding:3px_6px] [color:#ffffff] [background:#1f2329] [font-size:11px] [font-weight:500] [line-height:16px] [white-space:nowrap] [pointer-events:none]"}
-      style={{ ...layout.style, visibility: layout.ready ? "visible" : "hidden" }}
-    >
-      {props.children}
-      <span
-        aria-hidden
-        className={`[position:absolute] [width:0] [height:0] [border-left:5px_solid_transparent] [border-right:5px_solid_transparent] ${layout.placement === "above"
-          ? "[top:100%] [border-top:5px_solid_#1f2329]"
-          : "[bottom:100%] [border-bottom:5px_solid_#1f2329]"}`}
-        style={{ left: layout.arrowLeft, transform: "translateX(-50%)" }}
-      />
-    </span>,
-    document.body,
-  );
 }
 
 function MessageActionBar(props: {
@@ -1860,7 +1788,7 @@ function MessageActionBar(props: {
   return (
     <div
       data-slot="message-actions"
-      className={`[user-select:none] [position:absolute] [z-index:30] [display:flex] [align-items:center] [gap:1px] [overflow:visible] [border:1px_solid_var(--border)] [border-radius:4px] [padding:2px] [background:#fffffff2] [box-shadow:0_8px_24px_rgb(0_0_0_/_10%)] [transition:opacity_0.12s_ease] before:[content:''] before:[position:absolute] before:[top:0] before:[right:100%] before:[width:4px] before:[height:100%] before:[pointer-events:auto] ${props.visible && props.position ? "[opacity:1] [pointer-events:auto]" : "[opacity:0] [pointer-events:none]"} ${props.menuOpen ? "![opacity:1] ![pointer-events:auto]" : ""}`}
+      className={`[user-select:none] [position:absolute] [z-index:30] [display:flex] [align-items:center] [gap:1px] [overflow:visible] [border:1px_solid_var(--border-1)] [border-radius:8px] [padding:2px] [background:color-mix(in_srgb,var(--white-stationary)_95%,transparent)] [box-shadow:0_8px_24px_color-mix(in_srgb,var(--black-stationary)_10%,transparent)] [transition:opacity_0.12s_ease] before:[content:''] before:[position:absolute] before:[top:0] before:[right:100%] before:[width:4px] before:[height:100%] before:[pointer-events:auto] ${props.visible && props.position ? "[opacity:1] [pointer-events:auto]" : "[opacity:0] [pointer-events:none]"} ${props.menuOpen ? "![opacity:1] ![pointer-events:auto]" : ""}`}
       style={{
         ...(props.position
           ? { top: props.position.top, left: props.position.left, right: "auto", transform: "none" }
@@ -1915,7 +1843,6 @@ function ForwardToAgentAction(props: {
   onDismissActions: () => void;
 }) {
   const { anchorRef, closeMenu, open, toggleMenu } = useForwardSubmenuHover(props.onDismissActions);
-  const [tooltipVisible, setTooltipVisible] = useState(false);
 
   useEffect(() => {
     if (!props.active) closeMenu();
@@ -1930,30 +1857,24 @@ function ForwardToAgentAction(props: {
       ref={anchorRef}
       className={"[position:relative] [display:inline-grid]"}
     >
-      <button
-        type="button"
-        className={MESSAGE_ACTION_BAR_BUTTON_CLASS}
-        aria-label={t("messageActions.forwardTo")}
-        aria-expanded={open}
-        onMouseEnter={() => setTooltipVisible(true)}
-        onMouseLeave={() => setTooltipVisible(false)}
-        onFocus={() => setTooltipVisible(true)}
-        onBlur={() => setTooltipVisible(false)}
-        onClick={() => {
-          props.onCloseMenu();
-          setTooltipVisible(false);
-          toggleMenu();
-        }}
-      >
-        <SendHorizontal
-          size={13}
-          className={"[transition:transform_0.14s_ease]"}
-          style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
-        />
-      </button>
-      <ViewportActionTooltip anchorRef={anchorRef} visible={tooltipVisible && props.active && !props.moreMenuOpen && !open}>
-        {t("messageActions.forwardTo")}
-      </ViewportActionTooltip>
+      <HoverTooltip label={t("messageActions.forwardTo")} side="top" sideOffset={8}>
+        <button
+          type="button"
+          className={MESSAGE_ACTION_BAR_BUTTON_CLASS}
+          aria-label={t("messageActions.forwardTo")}
+          aria-expanded={open}
+          onClick={() => {
+            props.onCloseMenu();
+            toggleMenu();
+          }}
+        >
+          <SendHorizontal
+            size={13}
+            className={"[transition:transform_0.14s_ease]"}
+            style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
+          />
+        </button>
+      </HoverTooltip>
       {open ? (
         <div
           className={"[position:absolute] [left:50%] [top:100%] [z-index:40] [transform:translateX(-50%)] before:[content:''] before:[position:absolute] before:[bottom:100%] before:[left:0] before:[right:0] before:[height:8px]"}
@@ -2055,7 +1976,7 @@ function MessageMoreMenu(props: {
     <div
       ref={menuRef}
       data-slot="message-more-menu"
-      className={"[user-select:none] [display:grid] [min-width:196px] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:4px] [padding:6px] [background:#ffffff] [box-shadow:0_18px_46px_rgb(0_0_0_/_14%)]"}
+      className={"[user-select:none] [display:grid] [min-width:196px] [overflow:hidden] [border:1px_solid_var(--border-1)] [border-radius:8px] [padding:6px] [background:var(--white-stationary)] [box-shadow:0_18px_46px_color-mix(in_srgb,var(--black-stationary)_14%,transparent)]"}
       style={{
         position: "fixed",
         top: -9999,
@@ -2083,7 +2004,10 @@ function MessageMoreMenu(props: {
       <MenuButton icon={<Copy size={14} />} label={t("messageActions.copyLink")} onClick={(event) => void run(() => props.onCopyLink({ x: event.clientX, y: event.clientY }))} />
       {canRecallMessage ? <MenuButton icon={<Edit3 size={14} />} label={t("messageActions.editResend")} onClick={() => void run(props.onEdit)} /> : null}
       {canRecallMessage && !props.selectionMode ? <MenuButton icon={<RotateCcw size={14} />} label={t("messageActions.recall")} danger onClick={() => void run(props.onRecall)} /> : null}
-      {!props.selectionMode ? <MenuButton icon={<Trash2 size={14} />} label={t("common.delete")} danger onClick={() => void run(props.onDelete)} /> : null}
+      {!props.selectionMode ? <MenuButton icon={<Trash2 size={14} />} label={t("common.delete")} danger onClick={() => {
+        props.onClose();
+        void props.onDelete();
+      }} /> : null}
     </div>,
     document.body,
   );
@@ -2186,7 +2110,7 @@ function ForwardToAgentMenuItem(props: {
     >
       <button
         type="button"
-        className={`[display:grid] [width:100%] [min-width:0] [height:34px] [grid-template-columns:14px_max-content_14px] [align-items:center] [column-gap:8px] [border:0] [padding:0_9px] [color:var(--text)] [font-size:12px] [font-weight:650] [text-align:left] [&:hover]:[background:#00000008] ${open ? "[border-radius:8px_8px_0_0] [background:#00000006]" : "[border-radius:8px] [background:transparent]"}`}
+        className={`[display:grid] [width:100%] [min-width:0] [height:34px] [grid-template-columns:14px_max-content_14px] [align-items:center] [column-gap:8px] [border:0] [padding:0_9px] [color:var(--text-primary)] [font-size:11px] [font-weight:650] [text-align:left] [&:hover]:[background:var(--transparency-hover)] ${open ? "[border-radius:8px_8px_0_0] [background:var(--transparency-block)]" : "[border-radius:8px] [background:transparent]"}`}
         role="menuitem"
         aria-expanded={open}
         onClick={(event) => {
@@ -2197,7 +2121,7 @@ function ForwardToAgentMenuItem(props: {
       >
         <SendHorizontal size={14} />
         <span className={"[min-width:max-content] [white-space:nowrap]"}>{t("messageActions.forwardTo")}</span>
-        {open ? <ChevronDown size={14} className={"[justify-self:end] [color:var(--muted)]"} /> : <ChevronRight size={14} className={"[justify-self:end] [color:var(--muted)]"} />}
+        {open ? <ChevronDown size={14} className={"[justify-self:end] [color:var(--text-secondary)]"} /> : <ChevronRight size={14} className={"[justify-self:end] [color:var(--text-secondary)]"} />}
       </button>
       {open ? (
         <AgentForwardSubmenu
@@ -2273,21 +2197,21 @@ function AgentForwardSubmenu(props: {
   const attachBelow = props.attach === "below";
   const shellClass = isInline
     ? attachBelow
-      ? "[display:grid] [gap:0] [min-width:180px] [width:max-content] [overflow:hidden] [padding:2px] [border:1px_solid_var(--border)] [border-radius:8px] [background:#ffffff] [box-shadow:0_12px_32px_rgb(0_0_0_/_12%)]"
-      : "[display:grid] [gap:0] [min-width:0] [overflow:hidden] [padding:0_2px_2px] [border:0] [border-radius:0_0_8px_8px] [background:#00000006]"
-    : "[min-width:230px] [gap:0] [padding:3px] [border:1px_solid_var(--border)] [border-radius:10px] [background:#ffffff] [box-shadow:0_18px_46px_rgb(0_0_0_/_14%)] [display:grid]";
+      ? "[display:grid] [gap:0] [min-width:180px] [width:max-content] [overflow:hidden] [padding:2px] [border:1px_solid_var(--border-1)] [border-radius:8px] [background:var(--white-stationary)] [box-shadow:0_12px_32px_color-mix(in_srgb,var(--black-stationary)_12%,transparent)]"
+      : "[display:grid] [gap:0] [min-width:0] [overflow:hidden] [padding:0_2px_2px] [border:0] [border-radius:0_0_8px_8px] [background:var(--transparency-block)]"
+    : "[min-width:230px] [gap:0] [padding:3px] [border:1px_solid_var(--border-1)] [border-radius:10px] [background:var(--white-stationary)] [box-shadow:0_18px_46px_color-mix(in_srgb,var(--black-stationary)_14%,transparent)] [display:grid]";
   const inlineItemClass = (index: number) => [
     "[display:flex] [width:100%] [min-width:0] [height:34px] [align-items:center] [gap:8px]",
-    "[border:0] [border-radius:6px] [padding:0_8px] [color:var(--text)] [background:transparent]",
-    "[font-size:12px] [font-weight:650] [text-align:left]",
-    "hover:[background:#00000008] disabled:[opacity:0.45] disabled:[cursor:not-allowed]",
-    index > 0 ? "[border-top:1px_solid_rgb(0_0_0_/_6%)]" : "",
+    "[border:0] [border-radius:6px] [padding:0_8px] [color:var(--text-primary)] [background:transparent]",
+    "[font-size:11px] [font-weight:650] [text-align:left]",
+    "hover:[background:var(--transparency-hover)] disabled:[opacity:0.45] disabled:[cursor:not-allowed]",
+    index > 0 ? "[border-top:1px_solid_color-mix(in_srgb,var(--black-stationary)_6%,transparent)]" : "",
   ].join(" ");
   const floatingItemClass = (index: number) => [
     "[display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:9px]",
-    "[min-height:40px] [border:0] [border-radius:9px] [padding:5px_8px] [color:var(--text)] [background:transparent]",
-    "[text-align:left] hover:[background:#f3f6fa] disabled:[opacity:0.45] disabled:[cursor:not-allowed]",
-    index > 0 ? "[border-top:1px_solid_#cfd7e3]" : "",
+    "[min-height:40px] [border:0] [border-radius:9px] [padding:5px_8px] [color:var(--text-primary)] [background:transparent]",
+    "[text-align:left] hover:[background:var(--background-panel)] disabled:[opacity:0.45] disabled:[cursor:not-allowed]",
+    index > 0 ? "[border-top:1px_solid_var(--line-focus-window)]" : "",
   ].join(" ");
   return (
     <div
@@ -2315,17 +2239,17 @@ function AgentForwardSubmenu(props: {
             </span>
           ) : (
             <span className={"[display:grid] [min-width:0] [gap:1px]"}>
-              <strong className={"[overflow:hidden] [font-size:12px] [font-weight:650] [line-height:16px] [text-overflow:ellipsis] [white-space:nowrap]"}>
+              <strong className={"[overflow:hidden] [font-size:11px] [font-weight:650] [line-height:16px] [text-overflow:ellipsis] [white-space:nowrap]"}>
                 {target.label}
               </strong>
-              <span className={"[overflow:hidden] [color:var(--muted)] [font-size:11px] [line-height:14px] [text-overflow:ellipsis] [white-space:nowrap]"}>
+              <span className={"[overflow:hidden] [color:var(--text-secondary)] [font-size:11px] [line-height:14px] [text-overflow:ellipsis] [white-space:nowrap]"}>
                 {target.subtitle}
               </span>
             </span>
           )}
         </button>
       )) : (
-        <p className={`[margin:0] [color:var(--muted)] [font-size:12px] [line-height:18px] ${isInline ? "[padding:0_9px] [height:34px] [display:flex] [align-items:center]" : "[padding:8px]"}`}>
+        <p className={`[margin:0] [color:var(--text-secondary)] [font-size:11px] [line-height:18px] ${isInline ? "[padding:0_9px] [height:34px] [display:flex] [align-items:center]" : "[padding:8px]"}`}>
           {t("messageActions.noTuttiAgentsAvailable")}
         </p>
       )}
@@ -2336,14 +2260,15 @@ function AgentForwardSubmenu(props: {
 function AgentForwardAvatar(props: { target: AgentForwardTarget; compact?: boolean }) {
   const size = props.compact ? 18 : 32;
   const radius = props.compact ? 6 : 10;
+  const contentSize = size + 2;
   const style = getRuntimeProviderAvatarStyle(props.target.runtimeProvider);
   if (style?.iconUrl) {
     return (
       <span
-        className={"[display:grid] [overflow:hidden] [place-items:center] [flex-shrink:0] [background:#f3f4f6]"}
+        className={"[display:grid] [overflow:hidden] [place-items:center] [flex-shrink:0] [background:var(--background-panel)]"}
         style={{ width: size, height: size, borderRadius: radius }}
       >
-        <img src={style.iconUrl} alt="" className={"[object-fit:cover]"} style={{ width: size, height: size }} />
+        <img src={style.iconUrl} alt="" className={"[object-fit:cover]"} style={{ width: contentSize, height: contentSize }} />
       </span>
     );
   }
@@ -2354,9 +2279,9 @@ function AgentForwardAvatar(props: { target: AgentForwardTarget; compact?: boole
         width: size,
         height: size,
         borderRadius: radius,
-        fontSize: props.compact ? 9 : 11,
-        background: style?.background ?? "#374151",
-        color: style?.color ?? "#ffffff",
+        fontSize: (props.compact ? 9 : 11) + 2,
+        background: style?.background ?? "var(--text-primary)",
+        color: style?.color ?? "var(--white-stationary)",
       }}
     >
       {style?.label ?? "AI"}
@@ -2377,27 +2302,27 @@ function BulkMessageToolbar(props: {
 }) {
   return (
     <div
-      className={"[position:absolute] [inset:0] [z-index:20] [display:flex] [align-items:center] [padding:10px_16px] [background:linear-gradient(180deg,_rgb(248_250_252_/_86%),_rgb(255_255_255_/_96%))] [backdrop-filter:blur(18px)] [border-top:1px_solid_rgb(226_232_240_/_82%)] [box-shadow:0_-18px_50px_rgb(15_23_42_/_10%)] max-[760px]:[padding:8px_10px]"}
+      className={"[position:absolute] [inset:0] [z-index:20] [display:flex] [align-items:center] [padding:10px_16px] [background:linear-gradient(180deg,_color-mix(in_srgb,var(--background-panel)_86%,transparent),_color-mix(in_srgb,var(--white-stationary)_96%,transparent))] [backdrop-filter:blur(18px)] [border-top:1px_solid_color-mix(in_srgb,var(--border-1)_82%,transparent)] [box-shadow:0_-18px_50px_color-mix(in_srgb,var(--black-stationary)_10%,transparent)] max-[760px]:[padding:8px_10px]"}
       role="toolbar"
       aria-label={t("messageActions.bulkToolbar")}
     >
-      <div className={"[display:flex] [width:100%] [min-width:0] [align-items:center] [gap:10px] [overflow-x:auto] [border:1px_solid_rgb(226_232_240_/_92%)] [border-radius:22px] [padding:8px_10px] [background:rgb(255_255_255_/_86%)] [box-shadow:0_18px_54px_rgb(15_23_42_/_13%),_inset_0_1px_0_rgb(255_255_255_/_92%)] max-[760px]:[gap:7px] max-[760px]:[border-radius:18px] max-[760px]:[padding:7px]"}>
+      <div className={"[display:flex] [width:100%] [min-width:0] [align-items:center] [gap:10px] [overflow-x:auto] [border:1px_solid_color-mix(in_srgb,var(--border-1)_92%,transparent)] [border-radius:22px] [padding:8px_10px] [background:color-mix(in_srgb,var(--white-stationary)_86%,transparent)] [box-shadow:0_18px_54px_color-mix(in_srgb,var(--black-stationary)_13%,transparent),_inset_0_1px_0_color-mix(in_srgb,var(--white-stationary)_92%,transparent)] max-[760px]:[gap:7px] max-[760px]:[border-radius:18px] max-[760px]:[padding:7px]"}>
         <span className={"[display:flex] [flex-shrink:0] [align-items:center] [gap:7px]"}>
           <ToolbarButton icon={<Copy size={14} />} label={t("common.copy")} onClick={(event) => props.onCopy({ position: { x: event.clientX, y: event.clientY } })} />
           <ToolbarButton icon={<FileText size={14} />} label={t("messageActions.copyLink")} onClick={(event) => props.onCopyMessageLink({ x: event.clientX, y: event.clientY })} />
           <ToolbarButton icon={<Reply size={14} />} label={t("messageActions.quote")} onClick={props.onQuote} />
         </span>
-        <span className={"[display:flex] [flex-shrink:0] [align-items:center] [gap:7px] [border-left:1px_solid_rgb(226_232_240)] [padding-left:10px] max-[760px]:[padding-left:7px]"}>
+        <span className={"[display:flex] [flex-shrink:0] [align-items:center] [gap:7px] [border-left:1px_solid_var(--border-1)] [padding-left:10px] max-[760px]:[padding-left:7px]"}>
           <ForwardToAgentToolbarItem targets={props.agentForwardTargets} onForward={props.onForwardToAgent} />
           <ToolbarButton icon={<BrainCircuit size={14} />} label={t("messageActions.summarize")} onClick={props.onSummarize} />
         </span>
-        <span className={"[display:flex] [flex-shrink:0] [align-items:center] [gap:7px] [border-left:1px_solid_rgb(226_232_240)] [padding-left:10px] max-[760px]:[padding-left:7px]"}>
+        <span className={"[display:flex] [flex-shrink:0] [align-items:center] [gap:7px] [border-left:1px_solid_var(--border-1)] [padding-left:10px] max-[760px]:[padding-left:7px]"}>
           <ToolbarButton icon={<Trash2 size={14} />} label={t("common.delete")} danger onClick={props.onDelete} />
         </span>
         <div className={"[flex:1_0_10px]"} />
         <button
           type="button"
-          className={"[display:grid] [flex:0_0_auto] [width:34px] [height:34px] [place-items:center] [border:1px_solid_rgb(226_232_240)] [border-radius:999px] [color:#64748b] [background:#ffffff] [box-shadow:0_8px_20px_rgb(15_23_42_/_8%)] [transition:transform_0.12s_ease,_background_0.12s_ease,_color_0.12s_ease] hover:[transform:translateY(-1px)] hover:[color:#0f172a] hover:[background:#f8fafc] focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:2px]"}
+          className={"[display:grid] [flex:0_0_auto] [width:34px] [height:34px] [place-items:center] [border:1px_solid_var(--border-1)] [border-radius:999px] [color:var(--text-secondary)] [background:var(--white-stationary)] [box-shadow:0_8px_20px_color-mix(in_srgb,var(--black-stationary)_8%,transparent)] [transition:transform_0.12s_ease,_background_0.12s_ease,_color_0.12s_ease] hover:[transform:translateY(-1px)] hover:[color:var(--text-primary)] hover:[background:var(--background-panel)] focus-visible:[outline:2px_solid_var(--accent-codex)] focus-visible:[outline-offset:2px]"}
           aria-label={t("messageActions.exitSelection")}
           title={t("messageActions.exitSelection")}
           onClick={props.onClose}
@@ -2428,14 +2353,14 @@ function SummaryAgentPicker(props: {
     ? t("messageActions.quotePreview", { count: props.messages.length, preview: compactInline(props.messages[0]?.content || attachmentLabel()) })
     : compactInline(props.messages[0]?.content || attachmentLabel());
   return (
-    <div className={"[position:fixed] [inset:0] [z-index:90] [display:grid] [place-items:center] [padding:24px] [background:rgb(15_23_42_/_34%)]"} role="dialog" aria-modal="true" aria-label={t("messageActions.pickSummaryAgent")}>
-      <div className={"[display:grid] [width:min(420px,_calc(100vw_-_40px))] [gap:12px] [border:1px_solid_var(--border)] [border-radius:18px] [padding:16px] [background:var(--panel)] [box-shadow:0_24px_70px_rgb(0_0_0_/_22%)]"}>
+    <div className={"[position:fixed] [inset:0] [z-index:90] [display:grid] [place-items:center] [padding:24px] [background:color-mix(in_srgb,var(--black-stationary)_34%,transparent)]"} role="dialog" aria-modal="true" aria-label={t("messageActions.pickSummaryAgent")}>
+      <div className={"[display:grid] [width:min(420px,_calc(100vw_-_40px))] [gap:12px] [border:1px_solid_var(--border-1)] [border-radius:18px] [padding:16px] [background:var(--background-fronted)] [box-shadow:0_24px_70px_color-mix(in_srgb,var(--black-stationary)_22%,transparent)]"}>
         <header className={"[display:grid] [grid-template-columns:minmax(0,_1fr)_30px] [align-items:center] [gap:10px]"}>
           <span className={"[display:grid] [gap:3px]"}>
-            <strong className={"[font-size:15px] [font-weight:750] [color:var(--text)]"}>{t("messageActions.pickAgentTitle")}</strong>
-            <small className={"[color:var(--muted)] [font-size:12px]"}>{preview}</small>
+            <strong className={"[font-size:15px] [font-weight:750] [color:var(--text-primary)]"}>{t("messageActions.pickAgentTitle")}</strong>
+            <small className={"[color:var(--text-secondary)] [font-size:11px]"}>{preview}</small>
           </span>
-          <button type="button" className={"[display:grid] [width:30px] [height:30px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:#00000008]"} aria-label={t("common.close")} onClick={props.onClose}>
+          <button type="button" className={"dialog-close-button [display:grid] [width:30px] [height:30px] [place-items:center] [border:0] [border-radius:999px] [color:var(--text-secondary)] [background:var(--transparency-hover)]"} aria-label={t("common.close")} onClick={props.onClose}>
             <X size={15} />
           </button>
         </header>
@@ -2454,7 +2379,7 @@ function SummaryAgentPicker(props: {
             <button
               key={participant.id}
               type="button"
-              className={"[display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:10px] [border:1px_solid_var(--border)] [border-radius:12px] [padding:9px] [color:var(--text)] [background:#ffffff] [text-align:left] hover:[background:#f8fafc]"}
+              className={"[display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:10px] [border:1px_solid_var(--border-1)] [border-radius:12px] [padding:9px] [color:var(--text-primary)] [background:var(--white-stationary)] [text-align:left] hover:[background:var(--background-panel)]"}
               onClick={() => props.onSelect(participant)}
             >
               <AgentAvatar title={participant.displayName} avatar={resolvedAvatar.avatar} provider={resolvedAvatar.provider} size={32} />
@@ -2462,7 +2387,7 @@ function SummaryAgentPicker(props: {
             </button>
             );
           }) : (
-            <p className={"[margin:0] [color:var(--muted)] [font-size:13px]"}>{t("messageActions.noAgentsAvailable")}</p>
+            <p className={"[margin:0] [color:var(--text-secondary)] [font-size:13px]"}>{t("messageActions.noAgentsAvailable")}</p>
           )}
         </div>
       </div>
@@ -2520,28 +2445,28 @@ function SummaryPanel(props: {
         if (event.target === event.currentTarget) props.onClose();
       }}
     >
-      <aside className={"[display:grid] [width:min(420px,_calc(100vw_-_28px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border)] [background:var(--panel)] [box-shadow:-18px_0_50px_rgb(0_0_0_/_14%)]"} aria-label={t("messageActions.summarySidebar")}>
-        <header className={"[display:grid] [grid-template-columns:minmax(0,_1fr)_auto] [align-items:center] [gap:8px] [border-bottom:1px_solid_var(--border)] [padding:14px] [background:#ffffff]"}>
+      <aside className={"[display:grid] [width:min(420px,_calc(100vw_-_28px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border-1)] [background:var(--background-fronted)] [box-shadow:-18px_0_50px_color-mix(in_srgb,var(--black-stationary)_14%,transparent)]"} aria-label={t("messageActions.summarySidebar")}>
+        <header className={"[display:grid] [grid-template-columns:minmax(0,_1fr)_auto] [align-items:center] [gap:8px] [border-bottom:1px_solid_var(--border-1)] [padding:14px] [background:var(--white-stationary)]"}>
           <span className={"[display:grid] [gap:2px] [min-width:0]"}>
-            <strong className={"[color:var(--text)] [font-size:15px] [font-weight:750]"}>{t("messageActions.messageSummary")}</strong>
-            <small className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap] [color:var(--muted)] [font-size:12px]"}>
+            <strong className={"[color:var(--text-primary)] [font-size:15px] [font-weight:750]"}>{t("messageActions.messageSummary")}</strong>
+            <small className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap] [color:var(--text-secondary)] [font-size:11px]"}>
               {isMultiSource
                 ? t("messageActions.summaryByMulti", { name: props.task.participantName, count: props.task.sourceMessageIds.length })
                 : t("messageActions.summaryBySingle", { name: props.task.participantName })}
             </small>
           </span>
-          <button type="button" className={"[display:grid] [width:30px] [height:30px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:#00000008]"} aria-label={t("messageActions.closeSummary")} onClick={props.onClose}>
+          <button type="button" className={"dialog-close-button [display:grid] [width:30px] [height:30px] [place-items:center] [border:0] [border-radius:999px] [color:var(--text-secondary)] [background:var(--transparency-hover)]"} aria-label={t("messageActions.closeSummary")} onClick={props.onClose}>
             <X size={15} />
           </button>
         </header>
         <div className={"[min-height:0] [overflow:auto] [padding:14px] [display:grid] [align-content:start] [gap:12px]"}>
-          <section className={"[display:grid] [gap:8px] [border:1px_solid_var(--border)] [border-radius:12px] [padding:10px] [background:#f8fafc]"}>
+          <section className={"[display:grid] [gap:8px] [border:1px_solid_var(--border-1)] [border-radius:12px] [padding:10px] [background:var(--background-panel)]"}>
             <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:8px]"}>
-              <strong className={"[font-size:12px] [font-weight:750] [color:var(--muted)]"}>{t("summary.htmlSource")}</strong>
+              <strong className={"[font-size:11px] [font-weight:750] [color:var(--text-secondary)]"}>{t("summary.htmlSource")}</strong>
               {props.task.sourceMessageId ? (
                 <button
                   type="button"
-                  className={"[height:28px] [border:0] [border-radius:8px] [padding:0_10px] [color:#ffffff] [background:#111827] [font-size:12px] [font-weight:700] [white-space:nowrap]"}
+                  className={"[height:28px] [border:0] [border-radius:8px] [padding:0_10px] [color:var(--white-stationary)] [background:var(--black-stationary)] [font-size:11px] [font-weight:700] [white-space:nowrap]"}
                   onClick={props.onBackToSource}
                 >
                   {t("messageActions.backToSource")}
@@ -2573,14 +2498,14 @@ function SummaryPanel(props: {
                 ))}
               </div>
             ) : (
-              <p className={"[margin:0] [color:var(--text)] [font-size:13px] [line-height:1.55]"}>
+              <p className={"[margin:0] [color:var(--text-primary)] [font-size:13px] [line-height:1.55]"}>
                 {compactInline(props.task.sourcePreview || attachmentLabel())}
               </p>
             )}
           </section>
           <section className={"[display:grid] [gap:8px]"}>
             <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:8px]"}>
-              <strong className={"[font-size:12px] [font-weight:750] [color:var(--muted)]"}>{loading ? t("messageActions.summarizing") : t("messageActions.summaryResult")}</strong>
+              <strong className={"[font-size:11px] [font-weight:750] [color:var(--text-secondary)]"}>{loading ? t("messageActions.summarizing") : t("messageActions.summaryResult")}</strong>
               {!loading && summaryContent ? (
                 <span className={"[display:flex] [align-items:center] [gap:6px]"}>
                   <ForwardToAgentToolbarItem
@@ -2589,7 +2514,7 @@ function SummaryPanel(props: {
                   />
                   <button
                     type="button"
-                    className={"[height:28px] [border:0] [border-radius:8px] [padding:0_10px] [color:var(--text)] [background:#00000008] [font-size:12px] [font-weight:650]"}
+                    className={"[height:28px] [border:0] [border-radius:8px] [padding:0_10px] [color:var(--text-primary)] [background:var(--transparency-hover)] [font-size:11px] [font-weight:650]"}
                     onClick={(event) => props.onCopy({ x: event.clientX, y: event.clientY })}
                   >
                     {t("common.copy")}
@@ -2599,10 +2524,10 @@ function SummaryPanel(props: {
             </div>
             <div
               data-role="assistant"
-              className={`[display:grid] [min-height:160px] [align-content:start] [justify-items:start] [gap:2px] [border:1px_solid_var(--border)] [border-radius:12px] [padding:12px] [background:#ffffff] [color:var(--text)] [font-size:13px] [line-height:1.65] ${messageRoleContentClassName}`}
+              className={`[display:grid] [min-height:160px] [align-content:start] [justify-items:start] [gap:2px] [border:1px_solid_var(--border-1)] [border-radius:12px] [padding:12px] [background:var(--white-stationary)] [color:var(--text-primary)] [font-size:13px] [line-height:1.65] ${messageRoleContentClassName}`}
             >
               {props.task.status === "failed" ? (
-                <p className={"[margin:0] [color:var(--danger)]"}>{props.task.error ? translateAgentError(props.task.error) : t("messageActions.summaryFailed")}</p>
+                <p className={"[margin:0] [color:var(--state-danger)]"}>{props.task.error ? translateAgentError(props.task.error) : t("messageActions.summaryFailed")}</p>
               ) : summaryContent ? (
                 <>
                   <MessageBlockRenderer
@@ -2655,9 +2580,9 @@ function SummaryPanel(props: {
                   ))}
                 </>
               ) : props.task.status === "completed" ? (
-                <p className={"[margin:0] [color:var(--muted)]"}>{t("messageActions.summaryEmpty")}</p>
+                <p className={"[margin:0] [color:var(--text-secondary)]"}>{t("messageActions.summaryEmpty")}</p>
               ) : (
-                <p className={"[margin:0] [color:var(--muted)]"}>{t("messageActions.waitingSummary")}</p>
+                <p className={"[margin:0] [color:var(--text-secondary)]"}>{t("messageActions.waitingSummary")}</p>
               )}
             </div>
           </section>
@@ -2724,7 +2649,7 @@ function SummarySourceMessage(props: {
 
   return (
     <article data-role={props.message.role} className={`[min-width:0] ${messageRoleContentClassName}`}>
-      <div className={"[margin-bottom:3px] [color:var(--muted)] [font-size:12px] [line-height:18px]"}>
+      <div className={"[margin-bottom:3px] [color:var(--text-secondary)] [font-size:11px] [line-height:18px]"}>
         <strong>{senderLabel}</strong>
         <span className={"[margin-left:6px]"}>{formatMessageTime(props.message.createdAt)}</span>
       </div>
@@ -2759,7 +2684,7 @@ function SummarySourceMessage(props: {
 
 function DeletedMessageBubble(props: { status: Message["status"] }) {
   return (
-    <div data-slot="message-block" className={"[width:fit-content] [max-width:100%] [border:1px_dashed_var(--border)] [border-radius:4px_6px_6px_4px] [padding:9px_12px] [color:var(--muted)] [background:#00000004] [font-size:13px] [font-style:italic]"}>
+    <div data-slot="message-block" className={"[width:fit-content] [max-width:100%] [border:1px_dashed_var(--border-1)] [border-radius:4px_6px_6px_4px] [padding:9px_12px] [color:var(--text-secondary)] [background:var(--transparency-block)] [font-size:13px] [font-style:italic]"}>
       {props.status === "recalled" ? t("messageActions.messageRecalled") : t("messageActions.messageDeleted")}
     </div>
   );
@@ -2774,7 +2699,7 @@ function ReferencedMessagePreview(props: {
   return (
     <button
       type="button"
-      className={"[display:block] [width:fit-content] [max-width:100%] [margin-bottom:6px] [border:0] [border-left:3px_solid_#c6d1e3] [border-radius:4px] [padding:3px_8px] [color:#7b8494] [background:#00000006] [font-size:13px] [line-height:20px] [text-align:left] [cursor:pointer] hover:[background:#0000000a]"}
+      className={"[display:block] [width:fit-content] [max-width:100%] [margin-bottom:6px] [border:0] [border-left:3px_solid_var(--line-focus-window)] [border-radius:4px] [padding:3px_8px] [color:var(--text-secondary)] [background:var(--transparency-block)] [font-size:13px] [line-height:20px] [text-align:left] [cursor:pointer] hover:[background:var(--transparency-hover)]"}
       title={t("messageActions.viewQuotedOriginal")}
       onMouseDown={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
@@ -2805,14 +2730,14 @@ function ReferencedMessagePanel(props: {
   onOpenArtifact: (artifact: Artifact) => void;
 }) {
   return (
-    <div className={"[position:fixed] [inset:0] [z-index:80] [background:rgb(15_23_42_/_18%)]"} onMouseDown={props.onClose}>
+    <div className={"[position:fixed] [inset:0] [z-index:80] [background:color-mix(in_srgb,var(--black-stationary)_18%,transparent)]"} onMouseDown={props.onClose}>
       <aside
-        className={"[position:absolute] [inset:0_0_0_auto] [display:grid] [width:min(430px,_calc(100vw_-_36px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border)] [background:#f8fafc] [box-shadow:-18px_0_42px_rgb(0_0_0_/_14%)]"}
+        className={"[position:absolute] [inset:0_0_0_auto] [display:grid] [width:min(430px,_calc(100vw_-_36px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border-1)] [background:var(--background-panel)] [box-shadow:-18px_0_42px_color-mix(in_srgb,var(--black-stationary)_14%,transparent)]"}
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <header className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [border-bottom:1px_solid_var(--border)] [padding:16px_18px] [background:#ffffff]"}>
-          <strong className={"[font-size:15px] [font-weight:760] [color:var(--text)]"}>{t("messageActions.detailPanel")}</strong>
-          <button type="button" className={"[display:grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--muted)] [background:#00000008] hover:[color:var(--text)]"} aria-label={t("messageActions.closeDetail")} onClick={props.onClose}>
+        <header className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [border-bottom:1px_solid_var(--border-1)] [padding:16px_18px] [background:var(--white-stationary)]"}>
+          <strong className={"[font-size:15px] [font-weight:760] [color:var(--text-primary)]"}>{t("messageActions.detailPanel")}</strong>
+          <button type="button" className={"dialog-close-button [display:grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--text-secondary)] [background:var(--transparency-hover)] hover:[color:var(--text-primary)]"} aria-label={t("messageActions.closeDetail")} onClick={props.onClose}>
             <X size={15} />
           </button>
         </header>
@@ -2861,7 +2786,7 @@ function DetailMessageCard(props: {
     props.userProfile.displayName,
   );
   return (
-    <article className={"[display:grid] [min-width:0] [overflow:hidden] [gap:10px] [border-radius:16px] [padding:16px] [background:#eef0f3]"}>
+    <article className={"[display:grid] [min-width:0] [overflow:hidden] [gap:10px] [border-radius:16px] [padding:16px] [background:var(--background-panel)]"}>
       <div className={"[display:grid] [grid-template-columns:38px_minmax(0,_1fr)_auto] [gap:10px] [align-items:center]"}>
         <span className={isUserMessage
           ? "[display:grid] [width:38px] [height:38px] [overflow:hidden] [border-radius:999px]"
@@ -2876,12 +2801,12 @@ function DetailMessageCard(props: {
           />
         </span>
         <span className={"[display:grid] [min-width:0]"}>
-          <strong className={"[overflow:hidden] [font-size:13px] [font-weight:750] [color:var(--text)] [text-overflow:ellipsis] [white-space:nowrap]"}>{senderLabel}</strong>
-          <small className={"[color:var(--muted)] [font-size:12px]"}>{formatMessageTime(props.message.createdAt)}</small>
+          <strong className={"[overflow:hidden] [font-size:13px] [font-weight:750] [color:var(--text-primary)] [text-overflow:ellipsis] [white-space:nowrap]"}>{senderLabel}</strong>
+          <small className={"[color:var(--text-secondary)] [font-size:11px]"}>{formatMessageTime(props.message.createdAt)}</small>
         </span>
         <button
           type="button"
-          className={"[height:30px] [border:0] [border-radius:9px] [padding:0_10px] [color:#ffffff] [background:#111827] [font-size:12px] [font-weight:700] [white-space:nowrap]"}
+          className={"[height:30px] [border:0] [border-radius:9px] [padding:0_10px] [color:var(--white-stationary)] [background:var(--black-stationary)] [font-size:11px] [font-weight:700] [white-space:nowrap]"}
           onClick={props.onBackToMessage}
         >
           {t("messageActions.backToSource")}
@@ -2903,37 +2828,23 @@ function IconAction(props: {
   onClick: (event: MouseEvent<HTMLButtonElement>) => void;
   children: ReactNode;
 }) {
-  const buttonRef = useRef<HTMLButtonElement | null>(null);
-  const [tooltipVisible, setTooltipVisible] = useState(false);
-
   return (
-    <>
+    <HoverTooltip label={props.title} side="top" sideOffset={8}>
       <button
-        ref={buttonRef}
         type="button"
         className={MESSAGE_ACTION_BAR_BUTTON_CLASS}
         aria-label={props.title}
-        onMouseEnter={() => setTooltipVisible(true)}
-        onMouseLeave={() => setTooltipVisible(false)}
-        onFocus={() => setTooltipVisible(true)}
-        onBlur={() => setTooltipVisible(false)}
-        onClick={(event) => {
-          setTooltipVisible(false);
-          props.onClick(event);
-        }}
+        onClick={props.onClick}
       >
         {props.children}
       </button>
-      <ViewportActionTooltip anchorRef={buttonRef} visible={tooltipVisible}>
-        {props.title}
-      </ViewportActionTooltip>
-    </>
+    </HoverTooltip>
   );
 }
 
 function MenuButton(props: { icon: ReactNode; label: string; danger?: boolean; onClick: (event: MouseEvent<HTMLButtonElement>) => void }) {
   return (
-    <button type="button" className={`[display:flex] [width:100%] [min-width:0] [height:34px] [align-items:center] [gap:8px] [border:0] [border-radius:10px] [padding:0_9px] [background:transparent] [font-size:12px] [font-weight:650] [text-align:left] [&:hover]:[background:#00000008] ${props.danger ? "[color:var(--danger)]" : "[color:var(--text)]"}`} role="menuitem" onClick={props.onClick}>
+    <button type="button" className={`[display:flex] [width:100%] [min-width:0] [height:34px] [align-items:center] [gap:8px] [border:0] [border-radius:10px] [padding:0_9px] [background:transparent] [font-size:11px] [font-weight:650] [text-align:left] [&:hover]:[background:var(--transparency-hover)] ${props.danger ? "[color:var(--state-danger)]" : "[color:var(--text-primary)]"}`} role="menuitem" onClick={props.onClick}>
       {props.icon}
       <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{props.label}</span>
     </button>
@@ -2949,7 +2860,7 @@ function ToolbarButton(props: {
   return (
     <button
       type="button"
-      className={`[display:inline-flex] [min-width:82px] [height:68px] [flex-direction:column] [align-items:center] [justify-content:center] [gap:5px] [border:1px_solid_transparent] [border-radius:14px] [padding:7px_9px] [font-size:12px] [font-weight:720] [line-height:15px] [text-align:center] [transition:transform_0.12s_ease,_box-shadow_0.12s_ease,_background_0.12s_ease,_border-color_0.12s_ease] hover:[transform:translateY(-1px)] focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:2px] ${props.danger ? "[border-color:#fecdd3] [color:#be123c] [background:#fff1f2] hover:[background:#ffe4e6] hover:[box-shadow:0_8px_20px_rgb(190_18_60_/_14%)]" : "[color:#111827] [background:#f8fafc] hover:[border-color:#d5dde8] hover:[background:#ffffff] hover:[box-shadow:0_8px_20px_rgb(15_23_42_/_10%)]"}`}
+      className={`[display:inline-flex] [min-width:82px] [height:68px] [flex-direction:column] [align-items:center] [justify-content:center] [gap:5px] [border:1px_solid_transparent] [border-radius:14px] [padding:7px_9px] [font-size:11px] [font-weight:720] [line-height:15px] [text-align:center] [transition:transform_0.12s_ease,_box-shadow_0.12s_ease,_background_0.12s_ease,_border-color_0.12s_ease] hover:[transform:translateY(-1px)] focus-visible:[outline:2px_solid_var(--accent-codex)] focus-visible:[outline-offset:2px] ${props.danger ? "[border-color:color-mix(in_srgb,var(--state-danger)_20%,transparent)] [color:var(--state-danger)] [background:var(--on-danger)] hover:[background:color-mix(in_srgb,var(--state-danger)_12%,var(--background-fronted))] hover:[box-shadow:0_8px_20px_color-mix(in_srgb,var(--state-danger)_14%,transparent)]" : "[color:var(--black-stationary)] [background:var(--background-panel)] hover:[border-color:var(--line-focus-window)] hover:[background:var(--white-stationary)] hover:[box-shadow:0_8px_20px_color-mix(in_srgb,var(--black-stationary)_10%,transparent)]"}`}
       onClick={props.onClick}
     >
       {props.icon ? <span className={"[display:grid] [width:22px] [height:22px] [place-items:center] [color:currentColor]"}>{props.icon}</span> : null}
@@ -2997,6 +2908,7 @@ export function MessageSenderAvatar(props: {
       avatar={resolvedAvatar.avatar}
       provider={resolvedAvatar.provider}
       size={avatarSize}
+      hideProviderBadge
     />
   );
 }
@@ -3049,7 +2961,7 @@ function RuntimeEventGroup(props: { blocks: MessageBlock[]; artifacts: Artifact[
     ? t("messageActions.runtimeDetailsFailed", { count: props.blocks.length, failed: failedCount })
     : t("messageActions.runtimeDetails", { count: props.blocks.length });
   return (
-    <details className={"[width:fit-content] [max-width:100%] [margin-top:6px] [color:var(--muted)] [&_summary]:[display:inline-flex] [&_summary]:[height:28px] [&_summary]:[align-items:center] [&_summary]:[gap:7px] [&_summary]:[border-radius:999px] [&_summary]:[padding:0_10px] [&_summary]:[background:#00000008] [&_summary]:[cursor:pointer] [&_summary]:[list-style:none] [&_summary]:[font-size:12px] [&_summary]:[font-weight:650] [&_summary::-webkit-details-marker]:[display:none] [&[open]_summary]:[margin-bottom:6px]"}>
+    <details className={"[width:fit-content] [max-width:100%] [margin-top:6px] [color:var(--text-secondary)] [&_summary]:[display:inline-flex] [&_summary]:[height:28px] [&_summary]:[align-items:center] [&_summary]:[gap:7px] [&_summary]:[border-radius:999px] [&_summary]:[padding:0_10px] [&_summary]:[background:var(--transparency-hover)] [&_summary]:[cursor:pointer] [&_summary]:[list-style:none] [&_summary]:[font-size:11px] [&_summary]:[font-weight:650] [&_summary::-webkit-details-marker]:[display:none] [&[open]_summary]:[margin-bottom:6px]"}>
       <summary>
         <Terminal size={14} />
         <span>{label}</span>
@@ -3126,7 +3038,7 @@ function MessageHoverTime(props: { createdAt: string; position: { top: number; l
     <time
       dateTime={props.createdAt}
       data-slot="message-hover-time"
-      className={"[user-select:none] [position:absolute] [z-index:2] [white-space:nowrap] [color:var(--muted)] [font-size:12px] [line-height:20px] [opacity:0] [pointer-events:none] [transition:opacity_0.12s_ease] group-hover/message:opacity-100 group-focus-within/message:opacity-100"}
+      className={"[user-select:none] [position:absolute] [z-index:2] [white-space:nowrap] [color:var(--text-secondary)] [font-size:11px] [line-height:20px] [opacity:0] [pointer-events:none] [transition:opacity_0.12s_ease] group-hover/message:opacity-100 group-focus-within/message:opacity-100"}
       style={
         props.position
           ? { top: props.position.top, left: props.position.left, transform: "translate(-100%, -50%)" }
@@ -3298,7 +3210,7 @@ function MessageBodyShell(props: {
     <div
       ref={bodyRef}
       data-slot="message-body"
-      className={"group/body [user-select:none] [position:relative] [min-width:0] [max-width:min(760px,_70%,_calc(100%_-_132px))] [overflow:visible] max-[1080px]:[max-width:min(720px,_calc(100%_-_132px))] max-[760px]:[max-width:calc(100%_-_120px)]"}
+      className={"group/body [user-select:none] [position:relative] [min-width:0] [max-width:calc(100%_-_16px)] [overflow:visible]"}
       onMouseEnter={() => {
         syncActionAnchorFromBody();
         props.onShowActions();
@@ -3379,7 +3291,7 @@ export function MessageBlockRenderer(props: {
   }
   if (props.block.type === "reasoning") {
     return (
-      <details data-slot="event-block" className={`[&_pre]:[overflow-x:auto] [&_pre]:[border-radius:10px] [&_pre]:[padding:10px] [&_pre]:[white-space:pre-wrap] [width:fit-content] [max-width:100%] [margin-top:6px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:8px_10px] [color:var(--muted)] [background:var(--panel-2)] [font-size:12px] [&_summary]:[display:flex] [&_summary]:[align-items:center] [&_summary]:[gap:6px] [&_summary]:[cursor:pointer] [&_summary]:[font-weight:650] [&_summary_span]:[color:inherit] [&_pre]:[max-width:100%] [&_pre]:[max-height:180px] [&_pre]:[margin:8px_0_0] [&_pre]:[overflow:auto] [&_pre]:[color:#404040] [&_pre]:[background:#ffffff] [&_p]:[margin:8px_0_0] [background:#f8fafc] ${props.block.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""}`} open={props.block.status === "streaming"}>
+      <details data-slot="event-block" className={`[&_pre]:[overflow-x:auto] [&_pre]:[border-radius:10px] [&_pre]:[padding:10px] [&_pre]:[white-space:pre-wrap] [width:fit-content] [max-width:100%] [margin-top:6px] [border:1px_solid_var(--border-1)] [border-radius:14px] [padding:8px_10px] [color:var(--text-secondary)] [background:var(--background-panel)] [font-size:11px] [&_summary]:[display:flex] [&_summary]:[align-items:center] [&_summary]:[gap:6px] [&_summary]:[cursor:pointer] [&_summary]:[font-weight:650] [&_summary_span]:[color:inherit] [&_pre]:[max-width:100%] [&_pre]:[max-height:180px] [&_pre]:[margin:8px_0_0] [&_pre]:[overflow:auto] [&_pre]:[color:var(--text-primary)] [&_pre]:[background:var(--white-stationary)] [&_p]:[margin:8px_0_0] [background:var(--background-panel)] ${props.block.status === "streaming" ? "[border-color:color-mix(in_srgb,var(--accent-codex)_18%,transparent)]" : ""}`} open={props.block.status === "streaming"}>
         <summary>
           <BrainCircuit size={15} />
           <span>{props.block.status === "streaming" ? "Thinking" : "Reasoning"}</span>
@@ -3392,7 +3304,7 @@ export function MessageBlockRenderer(props: {
     const toolName = typeof props.block.metadata?.toolName === "string" ? props.block.metadata.toolName : "tool";
     const isResult = props.block.type === "tool_result";
     return (
-      <div data-slot="event-block" className={`[&_pre]:[overflow-x:auto] [&_pre]:[border-radius:10px] [&_pre]:[padding:10px] [&_pre]:[white-space:pre-wrap] [width:fit-content] [max-width:100%] [margin-top:6px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:8px_10px] [color:var(--muted)] [background:var(--panel-2)] [font-size:12px] [&_summary]:[display:flex] [&_summary]:[align-items:center] [&_summary]:[gap:6px] [&_summary]:[cursor:pointer] [&_summary]:[font-weight:650] [&_summary_span]:[color:inherit] [&_pre]:[max-width:100%] [&_pre]:[max-height:180px] [&_pre]:[margin:8px_0_0] [&_pre]:[overflow:auto] [&_pre]:[color:#404040] [&_pre]:[background:#ffffff] [&_p]:[margin:8px_0_0] ${props.block.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${props.block.status === "error" ? "[border-color:#dc26262e] [color:var(--danger)] [background:#fef2f2]" : ""}`}>
+      <div data-slot="event-block" className={`[&_pre]:[overflow-x:auto] [&_pre]:[border-radius:10px] [&_pre]:[padding:10px] [&_pre]:[white-space:pre-wrap] [width:fit-content] [max-width:100%] [margin-top:6px] [border:1px_solid_var(--border-1)] [border-radius:14px] [padding:8px_10px] [color:var(--text-secondary)] [background:var(--background-panel)] [font-size:11px] [&_summary]:[display:flex] [&_summary]:[align-items:center] [&_summary]:[gap:6px] [&_summary]:[cursor:pointer] [&_summary]:[font-weight:650] [&_summary_span]:[color:inherit] [&_pre]:[max-width:100%] [&_pre]:[max-height:180px] [&_pre]:[margin:8px_0_0] [&_pre]:[overflow:auto] [&_pre]:[color:var(--text-primary)] [&_pre]:[background:var(--white-stationary)] [&_p]:[margin:8px_0_0] ${props.block.status === "streaming" ? "[border-color:color-mix(in_srgb,var(--accent-codex)_18%,transparent)]" : ""} ${props.block.status === "error" ? "[border-color:color-mix(in_srgb,var(--state-danger)_18%,transparent)] [color:var(--state-danger)] [background:var(--on-danger)]" : ""}`}>
         <div className={"[display:flex] [align-items:center] [gap:6px] [cursor:pointer] [font-weight:650] [&_span]:[color:inherit]"}>
           {isResult ? <Braces size={15} /> : <Wrench size={15} />}
           <strong>{toolName}</strong>
@@ -3404,7 +3316,7 @@ export function MessageBlockRenderer(props: {
   }
   if (props.block.type === "artifact" || props.block.type === "error") {
     return (
-      <div data-slot="event-block" className={`[&_pre]:[overflow-x:auto] [&_pre]:[border-radius:10px] [&_pre]:[padding:10px] [&_pre]:[white-space:pre-wrap] [width:fit-content] [max-width:100%] [margin-top:6px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:8px_10px] [color:var(--muted)] [background:var(--panel-2)] [font-size:12px] [&_summary]:[display:flex] [&_summary]:[align-items:center] [&_summary]:[gap:6px] [&_summary]:[cursor:pointer] [&_summary]:[font-weight:650] [&_summary_span]:[color:inherit] [&_pre]:[max-width:100%] [&_pre]:[max-height:180px] [&_pre]:[margin:8px_0_0] [&_pre]:[overflow:auto] [&_pre]:[color:#404040] [&_pre]:[background:#ffffff] [&_p]:[margin:8px_0_0] ${props.block.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${props.block.type === "error" || props.block.status === "error" ? "[border-color:#dc26262e] [color:var(--danger)] [background:#fef2f2]" : ""}`}>
+      <div data-slot="event-block" className={`[&_pre]:[overflow-x:auto] [&_pre]:[border-radius:10px] [&_pre]:[padding:10px] [&_pre]:[white-space:pre-wrap] [width:fit-content] [max-width:100%] [margin-top:6px] [border:1px_solid_var(--border-1)] [border-radius:14px] [padding:8px_10px] [color:var(--text-secondary)] [background:var(--background-panel)] [font-size:11px] [&_summary]:[display:flex] [&_summary]:[align-items:center] [&_summary]:[gap:6px] [&_summary]:[cursor:pointer] [&_summary]:[font-weight:650] [&_summary_span]:[color:inherit] [&_pre]:[max-width:100%] [&_pre]:[max-height:180px] [&_pre]:[margin:8px_0_0] [&_pre]:[overflow:auto] [&_pre]:[color:var(--text-primary)] [&_pre]:[background:var(--white-stationary)] [&_p]:[margin:8px_0_0] ${props.block.status === "streaming" ? "[border-color:color-mix(in_srgb,var(--accent-codex)_18%,transparent)]" : ""} ${props.block.type === "error" || props.block.status === "error" ? "[border-color:color-mix(in_srgb,var(--state-danger)_18%,transparent)] [color:var(--state-danger)] [background:var(--on-danger)]" : ""}`}>
         <div className={"[display:flex] [align-items:center] [gap:6px] [cursor:pointer] [font-weight:650] [&_span]:[color:inherit]"}>
           <FileText size={15} />
           <strong>{props.block.type === "error" ? "Runtime event" : "Artifact"}</strong>
@@ -3465,7 +3377,7 @@ export function MessageBlockRenderer(props: {
       data-block-id={props.block.id}
       data-link-only={isLinkOnly || undefined}
       data-composite-child={props.compositeChild || undefined}
-      className={`message-prose [box-sizing:border-box] [width:fit-content] [min-width:0] [max-width:100%] [overflow-wrap:break-word] [word-break:normal] [white-space:pre-wrap] [border:0] [color:var(--text)] ${props.compositeChild ? "[padding:0] [background:transparent] [border-radius:0]" : isLinkOnly ? "[display:grid] [gap:6px] [padding:0] [background:transparent] [border-radius:0]" : hasWhisperFooter ? "[display:flex] [flex-direction:column] [gap:4px] [padding:10px_12px] [border-radius:8px]" : "[padding:10px_13px] [border-radius:4px_6px_6px_4px]"} ${props.block.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${props.block.status === "error" && !hasWhisperFooter ? "[border:1px_solid_#fecaca] [color:var(--danger)] [background:#fef2f2]" : ""}`}
+      className={`message-prose [box-sizing:border-box] [width:max-content] [min-width:0] [max-width:100%] [overflow-wrap:break-word] [word-break:normal] [white-space:pre-wrap] [border:0] [color:var(--text-primary)] ${props.compositeChild ? "[padding:0] [background:transparent] [border-radius:0]" : isLinkOnly ? "[display:grid] [gap:6px] [padding:0] [background:transparent] [border-radius:0]" : hasWhisperFooter ? "[display:flex] [flex-direction:column] [gap:4px] [padding:10px_12px] [border-radius:8px]" : "[padding:10px_13px] [border-radius:4px_6px_6px_4px]"} ${props.block.status === "streaming" ? "[border-color:color-mix(in_srgb,var(--accent-codex)_18%,transparent)]" : ""} ${props.block.status === "error" && !hasWhisperFooter ? "[border:1px_solid_color-mix(in_srgb,var(--state-danger)_18%,transparent)] [color:var(--state-danger)] [background:var(--on-danger)]" : ""}`}
     >
       {props.quotedMessage ? (
         <ReferencedMessagePreview
@@ -3540,7 +3452,7 @@ export function MessageBlockRenderer(props: {
           tightSpacing={hasWhisperFooter}
         />
       ) : canRenderEmbeddedCards && (messageLinks.length || summaryLinks.length) ? null : hiddenNestedLinkOnly ? (
-        <span className={"[display:inline-flex] [max-width:100%] [align-items:center] [gap:5px] [overflow:hidden] [color:#2563eb] [font-size:13px] [font-weight:650] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>
+        <span className={"[display:inline-flex] [max-width:100%] [align-items:center] [gap:5px] [overflow:hidden] [color:var(--accent-codex)] [font-size:13px] [font-weight:650] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>
           {messageLinks.length ? <TuttiMessageLinkIcon /> : <BrainCircuit size={13} />}
           <span>{messageLinks.length ? t("composer.messageLink") : t("summary.title")}</span>
         </span>
@@ -3567,7 +3479,7 @@ function ReplyQuotePreview(props: { quotes: Array<{ sender: string; content: str
   const firstQuote = props.quotes[0];
   if (!firstQuote) return null;
   return (
-    <div className={"[display:block] [max-width:100%] [margin-bottom:8px] [border-left:3px_solid_#c6d1e3] [padding-left:10px] [color:#7b8494] [font-size:13px] [line-height:20px] [white-space:nowrap] [overflow:hidden] [text-overflow:ellipsis]"}>
+    <div className={"[display:block] [max-width:100%] [margin-bottom:8px] [border-left:3px_solid_var(--line-focus-window)] [padding-left:10px] [color:var(--text-secondary)] [font-size:13px] [line-height:20px] [white-space:nowrap] [overflow:hidden] [text-overflow:ellipsis]"}>
       {props.quotes.length > 1
         ? t("messageActions.quotePreview", { count: props.quotes.length, preview: `${firstQuote.sender}: ${firstQuote.content}` })
         : t("messageActions.replyTo", { sender: firstQuote.sender, content: firstQuote.content })}
@@ -3576,7 +3488,7 @@ function ReplyQuotePreview(props: { quotes: Array<{ sender: string; content: str
 }
 
 const embeddedLinkCardClassName =
-  "[display:grid] [width:300px] [min-width:0] [max-width:100%] [overflow:hidden] [gap:3px] [border:1px_solid_var(--border)] [border-radius:10px] [padding:7px_9px] [color:var(--text)] [background:#ffffff] [text-align:left] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] hover:[border-color:#cbd5e1] hover:[background:#f8fafc]";
+  "[display:grid] [width:300px] [min-width:0] [max-width:100%] [overflow:hidden] [gap:3px] [border:1px_solid_var(--border-1)] [border-radius:10px] [padding:7px_9px] [color:var(--text-primary)] [background:var(--white-stationary)] [text-align:left] [box-shadow:0_1px_2px_color-mix(in_srgb,var(--black-stationary)_4%,transparent)] [cursor:pointer] hover:[border-color:var(--line-focus-window)] hover:[background:var(--background-panel)]";
 
 function SummaryLinkCard(props: {
   taskId: string;
@@ -3613,20 +3525,20 @@ function SummaryLinkCard(props: {
       className={SUMMARY_LINK_CARD_CLASS}
       onClick={props.onOpen}
     >
-      <span className={"[display:flex] [min-width:0] [align-items:center] [gap:5px] [overflow:hidden] [color:#2563eb] [font-size:12px] [font-weight:700] [line-height:1.3]"}>
+      <span className={"[display:flex] [min-width:0] [align-items:center] [gap:5px] [overflow:hidden] [color:var(--accent-codex)] [font-size:11px] [font-weight:700] [line-height:1.3]"}>
         <BrainCircuit size={13} className={"[flex:0_0_auto]"} />
         <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{presentation.title}</span>
       </span>
       {presentation.meta ? (
-        <span className={"[display:block] [overflow:hidden] [color:var(--muted)] [font-size:11px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>
+        <span className={"[display:block] [overflow:hidden] [color:var(--text-secondary)] [font-size:11px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>
           {presentation.meta}
         </span>
       ) : null}
-      <span className={"[display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] [overflow:hidden] [color:var(--text)] [font-size:13px] [font-weight:500] [line-height:1.45]"}>
+      <span className={"[display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] [overflow:hidden] [color:var(--text-primary)] [font-size:13px] [font-weight:500] [line-height:1.45]"}>
         {presentation.body}
       </span>
       {task ? (
-        <span className={"[display:flex] [min-width:0] [align-items:center] [gap:6px] [overflow:hidden] [color:var(--muted)] [font-size:11px] [line-height:1.3]"}>
+        <span className={"[display:flex] [min-width:0] [align-items:center] [gap:6px] [overflow:hidden] [color:var(--text-secondary)] [font-size:11px] [line-height:1.3]"}>
           <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{room?.title || conversation?.title || t("common.unknownConversation")}</span>
           <span className={"[flex:0_0_auto]"}>{formatMessageTime(task.updatedAt)}</span>
         </span>
@@ -3687,11 +3599,11 @@ function MessageLinkCard(props: {
       aria-label={cardLabel}
       onClick={props.onOpen}
     >
-      <span className={"[display:flex] [min-width:0] [align-items:center] [gap:5px] [overflow:hidden] [color:#2563eb] [font-size:12px] [font-weight:700] [line-height:1.3]"}>
+      <span className={"[display:flex] [min-width:0] [align-items:center] [gap:5px] [overflow:hidden] [color:var(--accent-codex)] [font-size:11px] [font-weight:700] [line-height:1.3]"}>
         <TuttiMessageLinkIcon />
         <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{cardLabel}</span>
       </span>
-      <span className={"[display:flex] [min-width:0] [align-items:center] [gap:6px] [overflow:hidden] [color:var(--muted)] [font-size:11px] [line-height:1.3]"}>
+      <span className={"[display:flex] [min-width:0] [align-items:center] [gap:6px] [overflow:hidden] [color:var(--text-secondary)] [font-size:11px] [line-height:1.3]"}>
         <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{room?.title || conversation?.title || t("common.unknownConversation")}</span>
         {message ? <span className={"[flex:0_0_auto]"}>{formatMessageTime(message.createdAt)}</span> : null}
       </span>
@@ -3722,7 +3634,7 @@ function LinkedMessageCardBody(props: {
 }) {
   if (!props.message) {
     return (
-      <span className={"[display:block] [overflow:hidden] [color:var(--text)] [font-size:13px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>
+      <span className={"[display:block] [overflow:hidden] [color:var(--text-primary)] [font-size:13px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>
         {t("messageActions.messageNotInSnapshot")}
       </span>
     );
@@ -3800,7 +3712,7 @@ function CollapsibleMessageContent(props: {
       {needsCollapse ? (
         <button
           type="button"
-          className={"[justify-self:start] [border:0] [padding:0] [color:#2563eb] [background:transparent] [font-size:12px] [font-weight:650] [cursor:pointer] hover:[text-decoration:underline]"}
+          className={"[justify-self:start] [border:0] [padding:0] [color:var(--accent-codex)] [background:transparent] [font-size:11px] [font-weight:650] [cursor:pointer] hover:[text-decoration:underline]"}
           onClick={() => setExpanded((current) => !current)}
         >
           {expanded ? t("common.collapse") : t("common.expand")}
@@ -3893,7 +3805,7 @@ export function ArtifactBlock(props: { artifact: Artifact; onOpen: () => void })
         type="button"
         data-slot="artifact-block"
         data-artifact-id={props.artifact.id}
-        className={"[position:relative] [display:block] [width:min(180px,_100%)] [height:120px] [margin-top:6px] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:10px] [padding:0] [background:var(--panel)] [cursor:pointer] [transition:box-shadow_0.2s_ease] after:[content:''] after:[position:absolute] after:[inset:0] after:[background:transparent] after:[pointer-events:none] [&[data-copy-selected]]:[box-shadow:0_0_0_2px_#2563eb] [&[data-copy-selected]]:after:[background:rgb(37_99_235_/_22%)] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15]"}
+        className={"[position:relative] [display:block] [width:min(180px,_100%)] [height:120px] [margin-top:6px] [overflow:hidden] [border:1px_solid_var(--border-1)] [border-radius:10px] [padding:0] [background:var(--background-fronted)] [cursor:pointer] [transition:box-shadow_0.2s_ease] after:[content:''] after:[position:absolute] after:[inset:0] after:[background:transparent] after:[pointer-events:none] [&[data-copy-selected]]:[box-shadow:0_0_0_2px_var(--accent-codex)] [&[data-copy-selected]]:after:[background:color-mix(in_srgb,var(--accent-codex)_22%,transparent)] [&[data-flash=true]]:[box-shadow:0_0_0_2px_var(--state-warning)]"}
         onClick={props.onOpen}
         aria-label={props.artifact.filename}
         title={t("messageActions.revealInFileManager")}
@@ -3913,10 +3825,10 @@ export function ArtifactBlock(props: { artifact: Artifact; onOpen: () => void })
       <div
         data-slot="artifact-block"
         data-artifact-id={props.artifact.id}
-        className={"[position:relative] [display:block] [width:min(320px,_100%)] [margin-top:6px] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:12px] [background:#101114] [box-shadow:0_1px_3px_rgb(0_0_0_/_8%)] [transition:box-shadow_0.12s_ease] after:[content:''] after:[position:absolute] after:[inset:0] after:[background:transparent] after:[pointer-events:none] [&[data-copy-selected]]:[box-shadow:0_0_0_2px_#2563eb] [&[data-copy-selected]]:after:[background:rgb(37_99_235_/_22%)] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15]"}
+        className={"[position:relative] [display:block] [width:min(320px,_100%)] [margin-top:6px] [overflow:hidden] [border:1px_solid_var(--border-1)] [border-radius:12px] [background:var(--black-stationary)] [box-shadow:0_1px_3px_color-mix(in_srgb,var(--black-stationary)_8%,transparent)] [transition:box-shadow_0.12s_ease] after:[content:''] after:[position:absolute] after:[inset:0] after:[background:transparent] after:[pointer-events:none] [&[data-copy-selected]]:[box-shadow:0_0_0_2px_var(--accent-codex)] [&[data-copy-selected]]:after:[background:color-mix(in_srgb,var(--accent-codex)_22%,transparent)] [&[data-flash=true]]:[box-shadow:0_0_0_2px_var(--state-warning)]"}
       >
         <video
-          className={"[display:block] [width:100%] [max-height:240px] [aspect-ratio:16/9] [object-fit:contain] [background:#101114]"}
+          className={"[display:block] [width:100%] [max-height:240px] [aspect-ratio:16/9] [object-fit:contain] [background:var(--black-stationary)]"}
           src={props.artifact.publicUrl}
           controls
           playsInline
@@ -3933,18 +3845,18 @@ export function ArtifactBlock(props: { artifact: Artifact; onOpen: () => void })
       type="button"
       data-slot="artifact-block"
       data-artifact-id={props.artifact.id}
-      className={"[display:grid] [width:min(300px,_100%)] [min-width:0] [min-height:40px] [overflow:hidden] [grid-template-columns:28px_minmax(0,_1fr)] [align-items:center] [gap:9px] [margin-top:6px] [border:1px_solid_var(--border)] [border-radius:10px] [padding:6px_10px] [color:var(--text)] [background:#ffffff] [cursor:pointer] [box-shadow:0_1px_2px_rgb(0_0_0_/_3%)] [transition:border-color_0.12s_ease,_background-color_0.12s_ease,_box-shadow_0.12s_ease] hover:[border-color:#d4d4d8] hover:[background:#fbfbfc] hover:[box-shadow:0_3px_10px_rgb(0_0_0_/_5%)] focus-visible:[outline:none] focus-visible:[border-color:var(--border-strong)] [&[data-copy-selected]]:[border-color:#2563eb] [&[data-copy-selected]]:[background:#dbeafe] [&[data-copy-selected]]:[box-shadow:0_0_0_2px_rgb(37_99_235_/_22%)] [&[data-flash=true]]:[box-shadow:0_0_0_2px_#facc15] [&[data-flash=true]]:[border-color:#facc15]"}
+      className={"[display:grid] [width:min(300px,_100%)] [min-width:0] [min-height:40px] [overflow:hidden] [grid-template-columns:28px_minmax(0,_1fr)] [align-items:center] [gap:9px] [margin-top:6px] [border:1px_solid_var(--border-1)] [border-radius:10px] [padding:6px_10px] [color:var(--text-primary)] [background:var(--white-stationary)] [cursor:pointer] [box-shadow:0_1px_2px_color-mix(in_srgb,var(--black-stationary)_3%,transparent)] [transition:border-color_0.12s_ease,_background-color_0.12s_ease,_box-shadow_0.12s_ease] hover:[border-color:var(--line-focus-window)] hover:[background:var(--background-panel)] hover:[box-shadow:0_3px_10px_color-mix(in_srgb,var(--black-stationary)_5%,transparent)] focus-visible:[outline:none] focus-visible:[border-color:var(--line-focus-window)] [&[data-copy-selected]]:[border-color:var(--accent-codex)] [&[data-copy-selected]]:[background:var(--accent-bg)] [&[data-copy-selected]]:[box-shadow:0_0_0_2px_color-mix(in_srgb,var(--accent-codex)_22%,transparent)] [&[data-flash=true]]:[box-shadow:0_0_0_2px_var(--state-warning)] [&[data-flash=true]]:[border-color:var(--state-warning)]"}
       onClick={props.onOpen}
       title={t("messageActions.revealInFileManager")}
     >
-      <span className={"[position:relative] [display:grid] [width:28px] [height:28px] [place-items:center] [border-radius:7px] [color:#ffffff] [background:#8d96a3] [box-shadow:inset_0_0_0_1px_rgb(255_255_255_/_20%)] before:[content:''] before:[position:absolute] before:[right:0] before:[top:0] before:[width:9px] before:[height:9px] before:[clip-path:polygon(0_0,_100%_100%,_100%_0)] before:[background:#c8ced6]"}>
+      <span className={"[position:relative] [display:grid] [width:28px] [height:28px] [place-items:center] [border-radius:4px] [color:var(--white-stationary)] [background:var(--text-secondary)] before:[content:''] before:[position:absolute] before:[right:0] before:[top:0] before:[width:9px] before:[height:9px] before:[clip-path:polygon(0_0,_100%_100%,_100%_0)] before:[background:var(--line-focus-window)]"}>
         <FileText size={15} strokeWidth={2.1} />
       </span>
       <span className={"[display:flex] [min-width:0] [align-items:baseline] [gap:7px] [text-align:left]"}>
-        <strong className={"[min-width:0] [overflow:hidden] [color:#171717] [font-size:13px] [font-weight:650] [line-height:18px] [text-overflow:ellipsis] [white-space:nowrap]"}>
+        <strong className={"[min-width:0] [overflow:hidden] [color:var(--black-stationary)] [font-size:13px] [font-weight:650] [line-height:18px] [text-overflow:ellipsis] [white-space:nowrap]"}>
           {props.artifact.filename}
         </strong>
-        <small className={"[flex:0_0_auto] [color:#8a8f98] [font-size:12px] [font-weight:450] [line-height:16px]"}>
+        <small className={"[flex:0_0_auto] [color:var(--text-secondary)] [font-size:11px] [font-weight:450] [line-height:16px]"}>
           {formatBytes(props.artifact.sizeBytes)}
         </small>
       </span>

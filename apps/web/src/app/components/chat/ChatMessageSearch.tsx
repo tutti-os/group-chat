@@ -35,7 +35,6 @@ export function ChatMessageSearch(props: {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const panelRef = useRef<HTMLDivElement | null>(null);
   const normalizedQuery = normalizeSearchQuery(query);
 
   useEffect(() => {
@@ -48,21 +47,11 @@ export function ChatMessageSearch(props: {
 
   useEffect(() => {
     if (!props.open) return;
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (panelRef.current?.contains(target)) return;
-      props.onClose();
-    };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") props.onClose();
     };
-    document.addEventListener("pointerdown", closeOnOutsidePointer);
     document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsidePointer);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
+    return () => document.removeEventListener("keydown", closeOnEscape);
   }, [props.onClose, props.open]);
 
   const results = useMemo(() => {
@@ -81,35 +70,53 @@ export function ChatMessageSearch(props: {
   if (!props.open) return null;
 
   return (
-    <div
-      ref={panelRef}
-      className={"[position:absolute] [top:62px] [left:16px] [right:16px] [z-index:19] [display:grid] [gap:10px] [border:1px_solid_var(--border)] [border-radius:18px] [padding:12px] [background:var(--panel)] [box-shadow:0_18px_54px_rgb(0_0_0_/_12%)] max-[760px]:[left:12px] max-[760px]:[right:12px]"}
+    <aside
+      className={"[grid-column:2] [grid-row:2_/_4] [display:grid] [min-width:0] [min-height:0] [grid-template-rows:auto_auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border-1)] [background:var(--background-panel)] max-[760px]:[grid-column:1] max-[760px]:[grid-row:2_/_4]"}
     >
-      <div className={"[display:flex] [align-items:center] [gap:8px] [height:38px] [border:1px_solid_var(--border)] [border-radius:12px] [padding:0_10px] [background:#f7f7f8] [&_input]:[flex:1_1_auto] [&_input]:[min-width:0] [&_input]:[border:0] [&_input]:[padding:0] [&_input]:[color:var(--text)] [&_input]:[background:transparent] [&_input]:[outline:none] [&_input]:[font-size:13px] [&_input::placeholder]:[color:#17171755]"}>
-        <Search size={16} className={"[color:var(--muted)] [flex:0_0_auto]"} />
-        <input
-          ref={inputRef}
-          value={query}
-          aria-label={t("messageSearch.aria")}
-          placeholder={t("messageSearch.placeholder")}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        {query ? (
-          <button
-            type="button"
-            className={"[display:inline-grid] [width:24px] [height:24px] [place-items:center] [border:0] [border-radius:999px] [color:var(--muted)] [background:transparent] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000008]"}
-            aria-label={t("messageSearch.clear")}
-            onClick={() => setQuery("")}
-          >
-            <X size={14} />
-          </button>
-        ) : null}
+      <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [padding:14px] [border-bottom:1px_solid_var(--border-1)]"}>
+        <div className={"[min-width:0] [&_h3]:[margin:0] [&_h3]:[font-size:15px] [&_h3]:[font-weight:720] [&_h3]:[line-height:1.2] [&_span]:[display:block] [&_span]:[margin-top:3px] [&_span]:[color:var(--text-secondary)] [&_span]:[font-size:11px]"}>
+          <h3>{t("chatHeader.searchMessages")}</h3>
+          {normalizedQuery ? <span>{t("messageSearch.resultCount", { count: results.length })}</span> : null}
+        </div>
+        <button
+          className={"dialog-close-button [display:inline-grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--text-secondary)] [background:transparent] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)] [&:focus-visible]:[outline:none] [&:focus-visible]:[background:var(--transparency-hover)]"}
+          type="button"
+          aria-label={t("common.close")}
+          title={t("common.close")}
+          onClick={props.onClose}
+        >
+          <X size={16} />
+        </button>
       </div>
-      <div className={"[max-height:min(360px,_calc(100vh_-_180px))] [overflow-y:auto] [display:grid] [gap:4px]"}>
+
+      <div className={"[padding:12px_12px_0]"}>
+        <label className={"[display:flex] [height:38px] [align-items:center] [gap:8px] [border-radius:12px] [padding:0_12px] [color:var(--text-secondary)] [background:var(--transparency-block)] [&_input]:[width:100%] [&_input]:[min-width:0] [&_input]:[border:0] [&_input]:[color:var(--text-primary)] [&_input]:[background:transparent] [&_input]:[font-size:13px] [&_input]:[outline:none] [&_input::placeholder]:[color:var(--text-placeholder)]"}>
+          <Search size={15} className={"[flex:0_0_auto]"} />
+          <input
+            ref={inputRef}
+            value={query}
+            aria-label={t("messageSearch.aria")}
+            placeholder={t("messageSearch.placeholder")}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          {query ? (
+            <button
+              type="button"
+              className={"[display:inline-grid] [width:24px] [height:24px] [place-items:center] [border:0] [border-radius:999px] [color:var(--text-secondary)] [background:transparent] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)]"}
+              aria-label={t("messageSearch.clear")}
+              onClick={() => setQuery("")}
+            >
+              <X size={14} />
+            </button>
+          ) : null}
+        </label>
+      </div>
+
+      <div className={"[min-height:0] [overflow-y:auto] [padding:12px] [display:grid] [align-content:start] [gap:4px]"}>
         {!normalizedQuery ? (
-          <div className={"[padding:18px_8px] [color:var(--muted)] [font-size:12px] [text-align:center]"}>{t("messageSearch.hint")}</div>
+          <div className={"[padding:28px_12px] [color:var(--text-secondary)] [font-size:13px] [line-height:1.5] [text-align:center]"}>{t("messageSearch.hint")}</div>
         ) : results.length === 0 ? (
-          <div className={"[padding:18px_8px] [color:var(--muted)] [font-size:12px] [text-align:center]"}>{t("messageSearch.noResults")}</div>
+          <div className={"[padding:28px_12px] [color:var(--text-secondary)] [font-size:13px] [line-height:1.5] [text-align:center]"}>{t("messageSearch.noResults")}</div>
         ) : (
           results.map((message) => (
             <SearchResultRow
@@ -137,7 +144,7 @@ export function ChatMessageSearch(props: {
           ))
         )}
       </div>
-    </div>
+    </aside>
   );
 }
 
@@ -175,7 +182,7 @@ function SearchResultRow(props: {
     <div
       role="button"
       tabIndex={0}
-      className={"[display:grid] [gap:6px] [width:100%] [border:0] [border-radius:12px] [padding:10px_12px] [text-align:left] [color:var(--text)] [background:transparent] [cursor:pointer] [transition:background-color_0.12s_ease] [&:hover]:[background:#00000008] [&:focus-visible]:[outline:none] [&:focus-visible]:[background:#0000000d] [&_.search-result-card]:[width:min(260px,_100%)] [&_.search-result-card]:[padding:6px_8px] [&_.search-result-card]:[border-radius:8px]"}
+      className={"[display:grid] [gap:6px] [width:100%] [border:0] [border-radius:12px] [padding:10px_12px] [text-align:left] [color:var(--text-primary)] [background:transparent] [cursor:pointer] [transition:background-color_0.12s_ease] [&:hover]:[background:var(--transparency-hover)] [&:focus-visible]:[outline:none] [&:focus-visible]:[background:var(--transparency-hover)] [&_.search-result-card]:[width:min(260px,_100%)] [&_.search-result-card]:[padding:6px_8px] [&_.search-result-card]:[border-radius:8px]"}
       onClick={focusSource}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
@@ -184,13 +191,13 @@ function SearchResultRow(props: {
       }}
     >
       <span className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:8px]"}>
-        <strong className={"[overflow:hidden] [font-size:12px] [font-weight:700] [text-overflow:ellipsis] [white-space:nowrap]"}>
+        <strong className={"[overflow:hidden] [font-size:11px] [font-weight:700] [text-overflow:ellipsis] [white-space:nowrap]"}>
           {highlightText(messageSenderLabel(props.message, props.participants, props.identities, props.userDisplayName), props.query)}
         </strong>
-        <span className={"[flex:0_0_auto] [color:var(--muted)] [font-size:11px]"}>{formatShortDate(props.message.createdAt)}</span>
+        <span className={"[flex:0_0_auto] [color:var(--text-secondary)] [font-size:11px]"}>{formatShortDate(props.message.createdAt)}</span>
       </span>
       <span
-        className={"message-prose [display:block] [max-height:180px] [overflow-y:auto] [overscroll-behavior:contain] [padding-right:4px] [color:var(--muted)] [font-size:12px] [line-height:1.45] [&_.reference-mention-chip]:[max-width:220px]"}
+        className={"message-prose [display:block] [max-height:180px] [overflow-y:auto] [overscroll-behavior:contain] [padding-right:4px] [color:var(--text-secondary)] [font-size:11px] [line-height:1.45] [&_.reference-mention-chip]:[max-width:220px]"}
         onClick={(event) => {
           const target = event.target;
           if (target instanceof Element && target.closest("a,button,[role='button']")) {
@@ -322,7 +329,7 @@ function renderSearchText(text: string, query: string): ReactNode {
         href={href}
         target="_blank"
         rel="noreferrer"
-        className={"[color:#2563eb] [text-decoration:underline]"}
+        className={"[color:var(--accent-codex)] [text-decoration:underline]"}
       >
         {highlightText(label, query)}
       </a>,
@@ -350,13 +357,13 @@ function CompactMessageLinkCard(props: {
   return (
     <button
       type="button"
-      className={"search-result-card [display:grid] [gap:2px] [margin:2px_0_4px] [border:1px_solid_var(--border)] [background:#ffffff] [color:var(--text)] [text-align:left] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] hover:[background:#f8fafc]"}
+      className={"search-result-card [display:grid] [gap:2px] [margin:2px_0_4px] [border:1px_solid_var(--border-1)] [background:var(--white-stationary)] [color:var(--text-primary)] [text-align:left] [box-shadow:0_1px_2px_color-mix(in_srgb,var(--black-stationary)_4%,transparent)] hover:[background:var(--background-panel)]"}
       onClick={(event) => {
         event.stopPropagation();
         props.onOpen();
       }}
     >
-      <span className={"[display:flex] [align-items:center] [gap:5px] [overflow:hidden] [color:#2563eb] [font-size:11px] [font-weight:700]"}>
+      <span className={"[display:flex] [align-items:center] [gap:5px] [overflow:hidden] [color:var(--accent-codex)] [font-size:11px] [font-weight:700]"}>
         <MessageSquare size={12} />
         <span className={"[overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{highlightText(label, props.query)}</span>
       </span>
@@ -405,13 +412,13 @@ function CompactSummaryLinkCard(props: {
   return (
     <button
       type="button"
-      className={"search-result-card [display:grid] [gap:2px] [margin:2px_0_4px] [border:1px_solid_var(--border)] [background:#ffffff] [color:var(--text)] [text-align:left] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] hover:[background:#f8fafc]"}
+      className={"search-result-card [display:grid] [gap:2px] [margin:2px_0_4px] [border:1px_solid_var(--border-1)] [background:var(--white-stationary)] [color:var(--text-primary)] [text-align:left] [box-shadow:0_1px_2px_color-mix(in_srgb,var(--black-stationary)_4%,transparent)] hover:[background:var(--background-panel)]"}
       onClick={(event) => {
         event.stopPropagation();
         props.onOpen();
       }}
     >
-      <span className={"[display:flex] [align-items:center] [gap:5px] [overflow:hidden] [color:#2563eb] [font-size:11px] [font-weight:700]"}>
+      <span className={"[display:flex] [align-items:center] [gap:5px] [overflow:hidden] [color:var(--accent-codex)] [font-size:11px] [font-weight:700]"}>
         <BrainCircuit size={12} />
         <span className={"[overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{highlightText(presentation.title, props.query)}</span>
       </span>
@@ -433,7 +440,7 @@ function highlightText(text: string, query: string): ReactNode {
     parts.push(
       <mark
         key={`${match.start}-${match.end}`}
-        className={"[color:inherit] [background:#fef08a] [padding:0_2px] [border-radius:3px]"}
+        className={"[color:inherit] [background:color-mix(in_srgb,var(--state-warning)_28%,var(--background-fronted))] [padding:0_2px] [border-radius:3px]"}
       >
         {text.slice(match.start, match.end)}
       </mark>,

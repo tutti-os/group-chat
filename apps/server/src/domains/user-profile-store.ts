@@ -24,7 +24,7 @@ export function readUserProfile(): StoredUserProfile | null {
       displayName: parsed.displayName.trim(),
       avatarPreset: typeof parsed.avatarPreset === "string" && parsed.avatarPreset.trim()
         ? parsed.avatarPreset.trim()
-        : "saiyan-01",
+        : "avatar-01",
       customAvatarUrl:
         typeof parsed.customAvatarUrl === "string" && parsed.customAvatarUrl.startsWith("data:image/")
           ? parsed.customAvatarUrl
@@ -40,7 +40,7 @@ export function writeUserProfile(profile: StoredUserProfile): StoredUserProfile 
   ensureBaseDirs();
   const normalized: StoredUserProfile = {
     displayName: profile.displayName.trim(),
-    avatarPreset: profile.avatarPreset.trim() || "saiyan-01",
+    avatarPreset: profile.avatarPreset.trim() || "avatar-01",
     customAvatarUrl:
       profile.customAvatarUrl && profile.customAvatarUrl.startsWith("data:image/")
         ? profile.customAvatarUrl

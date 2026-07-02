@@ -4,6 +4,7 @@ import { App } from "./app/App.js";
 import { I18nProvider } from "./app/i18n/index.js";
 import { AppContextMenu } from "./app/components/ui/AppContextMenu.js";
 import "@tutti-os/ui-rich-text/at-panel/index.css";
+import "@tutti-os/ui-system/styles.css";
 import "./styles/index.css";
 
 async function bootstrap() {

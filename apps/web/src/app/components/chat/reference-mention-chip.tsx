@@ -4,11 +4,11 @@ import { formatAgentLauncherMentionLabel } from "../../agent-launcher-mentions.j
 import { getRuntimeProviderAvatarIconUrl } from "../../identity-avatar.js";
 import { TuttiReferenceIcon } from "../../tutti-reference-icons.js";
 
-export const REFERENCE_MENTION_COLOR = "#2563eb";
+export const REFERENCE_MENTION_COLOR = "var(--accent-codex)";
 
 export const PARTICIPANT_MENTION_CLASS = [
   "[display:inline]",
-  "[color:#2563eb]",
+  "[color:var(--accent-codex)]",
   "[font-size:13px]",
   "[font-weight:400]",
   "[line-height:20px]",
@@ -22,7 +22,7 @@ export const REFERENCE_MENTION_CHIP_CLASS = [
   "[border:0]",
   "[border-radius:0]",
   "[padding:0]",
-  "[color:#2563eb]",
+  "[color:var(--accent-codex)]",
   "[background:transparent]",
   "[box-shadow:none]",
   "[font-size:13px]",
@@ -103,7 +103,7 @@ export function AgentLauncherMentionChip(props: {
       data-mention-display-mode="agent-launcher"
       data-composer-paste-markdown={props.pasteMarkdown}
       className={REFERENCE_MENTION_CHIP_CLASS}
-      style={{ color: "var(--accent)" }}
+      style={{ color: "var(--accent-codex)" }}
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -122,7 +122,7 @@ export function AgentLauncherMentionChip(props: {
       <span className={displayLabel ? AGENT_LAUNCHER_MENTION_ICON_CLASS : REFERENCE_MENTION_ICON_AFTER_CLASS}>
         <AgentLauncherMentionIcon runtimeProvider={props.runtimeProvider} />
       </span>
-      <span className={REFERENCE_MENTION_LABEL_CLASS} style={{ color: "var(--accent)" }}>
+      <span className={REFERENCE_MENTION_LABEL_CLASS} style={{ color: "var(--accent-codex)" }}>
         {displayLabel ? displayLabel.name : props.label}
       </span>
     </span>
@@ -161,7 +161,7 @@ export function ReferenceMentionChip(props: {
           iconUrl={props.iconUrl}
         />
       </span>
-      <span className={REFERENCE_MENTION_LABEL_CLASS} style={{ color: "var(--accent)" }}>
+      <span className={REFERENCE_MENTION_LABEL_CLASS} style={{ color: "var(--accent-codex)" }}>
         {props.label}
       </span>
     </>
@@ -175,7 +175,7 @@ export function ReferenceMentionChip(props: {
         rel="noreferrer"
         data-mention-display-mode="reference-link"
         className={REFERENCE_MENTION_CHIP_CLASS}
-        style={{ color: "var(--accent)" }}
+        style={{ color: "var(--accent-codex)" }}
         onClick={(event) => {
           event.preventDefault();
           props.onClick?.();
@@ -193,7 +193,7 @@ export function ReferenceMentionChip(props: {
       data-mention-display-mode="reference-link"
       data-composer-paste-markdown={props.pasteMarkdown}
       className={REFERENCE_MENTION_CHIP_CLASS}
-      style={{ color: "var(--accent)" }}
+      style={{ color: "var(--accent-codex)" }}
       onClick={props.onClick}
       onKeyDown={props.onClick ? (event) => {
         if (event.key === "Enter" || event.key === " ") {

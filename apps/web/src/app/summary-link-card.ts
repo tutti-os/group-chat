@@ -8,7 +8,7 @@ export type SummaryCardPresentation = {
 };
 
 export const SUMMARY_LINK_CARD_CLASS =
-  "[display:grid] [width:min(300px,_100%)] [min-width:0] [max-width:100%] [overflow:hidden] [gap:4px] [border:1px_solid_var(--border)] [border-radius:10px] [padding:8px_10px] [color:var(--text)] [background:#ffffff] [text-align:left] [box-shadow:0_1px_2px_rgb(0_0_0_/_4%)] [cursor:pointer] hover:[border-color:#cbd5e1] hover:[background:#f8fafc]";
+  "[display:grid] [width:min(300px,_100%)] [min-width:0] [max-width:100%] [overflow:hidden] [gap:4px] [border:1px_solid_var(--border-1)] [border-radius:10px] [padding:8px_10px] [color:var(--text-primary)] [background:var(--white-stationary)] [text-align:left] [box-shadow:0_1px_2px_color-mix(in_srgb,var(--black-stationary)_4%,transparent)] [cursor:pointer] hover:[border-color:var(--line-focus-window)] hover:[background:var(--background-panel)]";
 
 export const SUMMARY_LINK_CARD_COMPOSER_CLASS =
   `${SUMMARY_LINK_CARD_CLASS} [margin:4px_0] [vertical-align:top]`;
@@ -48,15 +48,15 @@ export function createSummaryLinkChipElement(
   chip.className = SUMMARY_LINK_CARD_COMPOSER_CLASS;
 
   const titleRow = document.createElement("span");
-  titleRow.className = "[display:block] [min-width:0] [overflow:hidden] [color:#2563eb] [font-size:12px] [font-weight:700] [line-height:1.3] [text-overflow:ellipsis] [white-space:nowrap]";
+  titleRow.className = "[display:block] [min-width:0] [overflow:hidden] [color:var(--accent-codex)] [font-size:11px] [font-weight:700] [line-height:1.3] [text-overflow:ellipsis] [white-space:nowrap]";
   titleRow.textContent = presentation.title;
 
   const metaRow = document.createElement("span");
-  metaRow.className = "[display:block] [overflow:hidden] [color:var(--muted)] [font-size:11px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]";
+  metaRow.className = "[display:block] [overflow:hidden] [color:var(--text-secondary)] [font-size:11px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]";
   metaRow.textContent = presentation.meta;
 
   const bodyRow = document.createElement("span");
-  bodyRow.className = "[display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] [overflow:hidden] [color:var(--text)] [font-size:13px] [font-weight:500] [line-height:1.45]";
+  bodyRow.className = "[display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] [overflow:hidden] [color:var(--text-primary)] [font-size:13px] [font-weight:500] [line-height:1.45]";
   bodyRow.textContent = presentation.body;
 
   chip.append(titleRow);

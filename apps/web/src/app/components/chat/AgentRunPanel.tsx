@@ -72,26 +72,26 @@ export function AgentRunPanel(props: {
   return (
     <aside
       ref={panelRef}
-      className={"[position:absolute] [top:56px] [right:0] [bottom:0] [z-index:37] [display:grid] [width:min(400px,_calc(100vw_-_24px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border)] [background:var(--panel)] [box-shadow:-18px_0_40px_rgb(0_0_0_/_8%)]"}
+      className={"[position:absolute] [top:56px] [right:0] [bottom:0] [z-index:37] [display:grid] [width:min(400px,_calc(100vw_-_24px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border-1)] [background:var(--background-fronted)] [box-shadow:-18px_0_40px_color-mix(in_srgb,var(--black-stationary)_8%,transparent)]"}
       aria-label={t("runPanel.aria")}
     >
-      <header className={"[display:grid] [grid-template-columns:minmax(0,_1fr)_auto] [align-items:center] [gap:8px] [border-bottom:1px_solid_var(--border)] [padding:14px] [background:#ffffff]"}>
+      <header className={"[display:grid] [grid-template-columns:minmax(0,_1fr)_auto] [align-items:center] [gap:8px] [border-bottom:1px_solid_var(--border-1)] [padding:14px] [background:var(--white-stationary)]"}>
         <span className={"[display:grid] [gap:3px] [min-width:0]"}>
-          <strong className={"[display:flex] [align-items:center] [gap:6px] [min-width:0] [color:var(--text)] [font-size:15px] [font-weight:750]"}>
+          <strong className={"[display:flex] [align-items:center] [gap:6px] [min-width:0] [color:var(--text-primary)] [font-size:15px] [font-weight:750]"}>
             {props.running ? (
               <LoaderCircle size={16} className={"[flex:0_0_auto] animate-spin"} />
             ) : (
-              <CheckCircle2 size={16} className={"[flex:0_0_auto] [color:#16a34a]"} />
+              <CheckCircle2 size={16} className={"[flex:0_0_auto] [color:var(--state-success)]"} />
             )}
             <span className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{participantName}</span>
           </strong>
-          <small className={"[color:var(--muted)] [font-size:12px]"}>
+          <small className={"[color:var(--text-secondary)] [font-size:11px]"}>
             {props.running ? t("runPanel.running") : t("runPanel.completed")}
           </small>
         </span>
         <button
           type="button"
-          className={"[display:grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012] [&:focus-visible]:[outline:none]"}
+          className={"dialog-close-button [display:grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--text-secondary)] [background:var(--transparency-hover)] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--line-focus-window)] [&:focus-visible]:[outline:none]"}
           aria-label={t("runPanel.close")}
           onClick={props.onClose}
         >
@@ -110,7 +110,7 @@ export function AgentRunPanel(props: {
         {props.run.assistantMessageId ? (
           <button
             type="button"
-            className={"[justify-self:start] [height:30px] [border:0] [border-radius:8px] [padding:0_12px] [color:#ffffff] [background:#111827] [font-size:12px] [font-weight:700] [&:hover]:[background:#1f2937]"}
+            className={"[justify-self:start] [height:30px] [border:0] [border-radius:8px] [padding:0_12px] [color:var(--white-stationary)] [background:var(--black-stationary)] [font-size:11px] [font-weight:700] [&:hover]:[background:color-mix(in_srgb,var(--black-stationary)_88%,transparent)]"}
             onClick={() => props.onFocusMessage?.(props.run!.assistantMessageId!)}
           >
             {t("runPanel.jumpToReply")}
@@ -118,7 +118,7 @@ export function AgentRunPanel(props: {
         ) : null}
 
         {displayItems.length === 0 ? (
-          <div className={"[display:grid] [place-items:center] [gap:10px] [padding:40px_12px] [color:var(--muted)] [font-size:13px] [text-align:center]"}>
+          <div className={"[display:grid] [place-items:center] [gap:10px] [padding:40px_12px] [color:var(--text-secondary)] [font-size:13px] [text-align:center]"}>
             {props.running ? (
               <>
                 <LoaderCircle size={22} className={"animate-spin"} />
@@ -138,13 +138,13 @@ export function AgentRunPanel(props: {
             return (
               <section
                 key={`thinking-${index}`}
-                className={`[display:grid] [gap:8px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:10px_12px] [background:#f8fafc] [font-size:12px] ${item.streaming ? "[border-color:var(--accent-hover)]" : ""}`}
+                className={`[display:grid] [gap:8px] [border:1px_solid_var(--border-1)] [border-radius:14px] [padding:10px_12px] [background:var(--background-panel)] [font-size:11px] ${item.streaming ? "[border-color:color-mix(in_srgb,var(--accent-codex)_18%,transparent)]" : ""}`}
               >
-                <div className={"[display:flex] [align-items:center] [gap:6px] [color:var(--muted)] [font-size:12px] [font-weight:700]"}>
+                <div className={"[display:flex] [align-items:center] [gap:6px] [color:var(--text-secondary)] [font-size:11px] [font-weight:700]"}>
                   <BrainCircuit size={15} />
                   <span>{item.streaming ? t("thinkingPanel.thinkingInProgress") : t("thinkingPanel.thinkingProcess")}</span>
                 </div>
-                <div className={"message-prose [max-height:280px] [overflow:auto] [color:#404040] [font-size:12px] [line-height:1.6]"}>
+                <div className={"message-prose [max-height:280px] [overflow:auto] [color:var(--text-primary)] [font-size:11px] [line-height:1.6]"}>
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.content || " "}</ReactMarkdown>
                 </div>
               </section>
@@ -158,14 +158,14 @@ export function AgentRunPanel(props: {
             return (
               <section
                 key={event.id}
-                className={`[display:grid] [min-width:0] [overflow:hidden] [gap:8px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:10px_12px] [background:#ffffff] [font-size:12px] ${event.status === "streaming" ? "[border-color:var(--accent-hover)]" : ""} ${event.status === "error" ? "[border-color:#dc26262e] [background:#fef2f2]" : ""}`}
+                className={`[display:grid] [min-width:0] [overflow:hidden] [gap:8px] [border:1px_solid_var(--border-1)] [border-radius:14px] [padding:10px_12px] [background:var(--white-stationary)] [font-size:11px] ${event.status === "streaming" ? "[border-color:color-mix(in_srgb,var(--accent-codex)_18%,transparent)]" : ""} ${event.status === "error" ? "[border-color:color-mix(in_srgb,var(--state-danger)_18%,transparent)] [background:var(--on-danger)]" : ""}`}
               >
-                <div className={"[display:flex] [min-width:0] [align-items:center] [gap:6px] [overflow:hidden] [font-weight:700] [color:var(--text)]"}>
+                <div className={"[display:flex] [min-width:0] [align-items:center] [gap:6px] [overflow:hidden] [font-weight:700] [color:var(--text-primary)]"}>
                   {isResult ? <Braces size={15} /> : <Wrench size={15} />}
                   <strong className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{toolName}</strong>
-                  <span className={"[flex:0_0_auto] [color:var(--muted)] [font-size:11px] [font-weight:650]"}>{formatRunEventStatus(event)}</span>
+                  <span className={"[flex:0_0_auto] [color:var(--text-secondary)] [font-size:11px] [font-weight:650]"}>{formatRunEventStatus(event)}</span>
                 </div>
-                {event.content ? <pre className={"[margin:0] [max-height:220px] [overflow:auto] [border-radius:10px] [padding:10px] [white-space:pre-wrap] [color:#404040] [background:#f8fafc] [font-size:11px] [line-height:1.5]"}>{event.content}</pre> : null}
+                {event.content ? <pre className={"[margin:0] [max-height:220px] [overflow:auto] [border-radius:10px] [padding:10px] [white-space:pre-wrap] [color:var(--text-primary)] [background:var(--background-panel)] [font-size:11px] [line-height:1.5]"}>{event.content}</pre> : null}
               </section>
             );
           }
@@ -173,19 +173,19 @@ export function AgentRunPanel(props: {
           if (event.type === "file_write") {
             const path = typeof event.metadata?.path === "string" ? event.metadata.path : event.content;
             return (
-              <section key={event.id} className={"[display:grid] [min-width:0] [overflow:hidden] [gap:6px] [border:1px_solid_var(--border)] [border-radius:14px] [padding:10px_12px] [background:#ffffff] [font-size:12px]"}>
-                <div className={"[display:flex] [min-width:0] [align-items:center] [gap:6px] [overflow:hidden] [font-weight:700] [color:var(--text)]"}>
+              <section key={event.id} className={"[display:grid] [min-width:0] [overflow:hidden] [gap:6px] [border:1px_solid_var(--border-1)] [border-radius:14px] [padding:10px_12px] [background:var(--white-stationary)] [font-size:11px]"}>
+                <div className={"[display:flex] [min-width:0] [align-items:center] [gap:6px] [overflow:hidden] [font-weight:700] [color:var(--text-primary)]"}>
                   <FileText size={15} />
                   <strong className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{t("runPanel.writeFile")}</strong>
                 </div>
-                <pre className={"[margin:0] [overflow:auto] [white-space:pre-wrap] [color:#404040] [font-size:11px] [line-height:1.5]"}>{path}</pre>
+                <pre className={"[margin:0] [overflow:auto] [white-space:pre-wrap] [color:var(--text-primary)] [font-size:11px] [line-height:1.5]"}>{path}</pre>
               </section>
             );
           }
 
           if (event.type === "status") {
             return (
-              <p key={event.id} className={"[margin:0] [color:var(--muted)] [font-size:12px] [line-height:1.5]"}>
+              <p key={event.id} className={"[margin:0] [color:var(--text-secondary)] [font-size:11px] [line-height:1.5]"}>
                 {event.content || t("runPanel.statusUpdate")}
               </p>
             );
@@ -194,7 +194,7 @@ export function AgentRunPanel(props: {
           return (
             <section
               key={event.id}
-              className={"[display:grid] [gap:6px] [border:1px_solid_#dc26262e] [border-radius:14px] [padding:10px_12px] [color:var(--danger)] [background:#fef2f2] [font-size:12px]"}
+              className={"[display:grid] [gap:6px] [border:1px_solid_color-mix(in_srgb,var(--state-danger)_18%,transparent)] [border-radius:14px] [padding:10px_12px] [color:var(--state-danger)] [background:var(--on-danger)] [font-size:11px]"}
             >
               <div className={"[display:flex] [align-items:center] [gap:6px] [font-weight:700]"}>
                 <AlertCircle size={15} />

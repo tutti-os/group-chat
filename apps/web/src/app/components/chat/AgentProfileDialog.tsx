@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Mic, MicOff, X } from "lucide-react";
+import { CircleOff, Power, X } from "lucide-react";
 import type {
   AddParticipantRequest,
   CreateIdentityRequest,
@@ -47,6 +47,7 @@ export function AgentProfileDialog(props: {
 }) {
   const { t } = useTranslation();
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const [footerHost, setFooterHost] = useState<HTMLDivElement | null>(null);
   const participant = props.participant;
   const setupIdentity = props.setupIdentity ?? null;
   const isAddMode = Boolean(setupIdentity && !participant);
@@ -62,16 +63,21 @@ export function AgentProfileDialog(props: {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [mutePending, setMutePending] = useState(false);
   const [previewDisplayName, setPreviewDisplayName] = useState(formParticipant?.displayName ?? setupIdentity?.name ?? "");
+  const [previewRuntimeProfileId, setPreviewRuntimeProfileId] = useState(
+    formParticipant?.runtimeProfileId ?? setupIdentity?.defaultRuntimeProfileId ?? null,
+  );
 
   useEffect(() => {
     if (!formParticipant && !setupIdentity) return;
     setAvatar(formParticipant?.avatar ?? setupIdentity?.icon ?? null);
     setUploadError(null);
     setPreviewDisplayName(formParticipant?.displayName ?? setupIdentity?.name ?? "");
+    setPreviewRuntimeProfileId(formParticipant?.runtimeProfileId ?? setupIdentity?.defaultRuntimeProfileId ?? null);
   }, [
     formParticipant?.avatar,
     formParticipant?.displayName,
     formParticipant?.id,
+    formParticipant?.runtimeProfileId,
     setupIdentity,
   ]);
 
@@ -108,7 +114,9 @@ export function AgentProfileDialog(props: {
   const activeIdentity = props.identity ?? setupIdentity;
 
   const selectedRuntime =
-    props.runtimeProfiles.find((profile) => profile.id === formParticipant.runtimeProfileId) ?? props.runtimeProfile;
+    props.runtimeProfiles.find((profile) => profile.id === previewRuntimeProfileId)
+    ?? props.runtimeProfiles.find((profile) => profile.id === formParticipant.runtimeProfileId)
+    ?? props.runtimeProfile;
   const displayAvatar = avatar ?? activeIdentity?.icon ?? null;
   const headerAvatar = resolveAgentAvatar({
     avatar: displayAvatar,
@@ -132,7 +140,7 @@ export function AgentProfileDialog(props: {
 
   return (
     <div
-      className={"[position:fixed] [inset:0] [z-index:80] [display:grid] [place-items:center] [padding:24px] [background:rgb(15_23_42_/_52%)] max-[760px]:[padding:14px]"}
+      className={"[position:fixed] [inset:0] [z-index:80] [display:grid] [place-items:center] [padding:24px] [background:color-mix(in_srgb,var(--black-stationary)_52%,transparent)] max-[760px]:[padding:14px]"}
       role="presentation"
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) props.onClose();
@@ -143,13 +151,13 @@ export function AgentProfileDialog(props: {
         role="dialog"
         aria-modal="true"
         aria-label={t("agentProfile.settingsAria", { name: displayName })}
-        className={"[display:flex] [width:min(680px,_calc(100vw_-_32px))] [max-height:min(720px,_calc(100vh_-_32px))] [flex-direction:column] [overflow:hidden] [border:1px_solid_var(--border)] [border-radius:20px] [background:var(--panel)] [box-shadow:0_24px_80px_rgb(0_0_0_/_24%)] max-[760px]:[width:calc(100vw_-_28px)] max-[760px]:[max-height:calc(100vh_-_28px)]"}
+        className={"[display:flex] [width:min(680px,_calc(100vw_-_32px))] [max-height:min(720px,_calc(100vh_-_32px))] [flex-direction:column] [overflow:hidden] [border:1px_solid_var(--border-1)] [border-radius:20px] [background:var(--background-fronted)] [box-shadow:0_24px_80px_color-mix(in_srgb,var(--black-stationary)_24%,transparent)] max-[760px]:[width:calc(100vw_-_28px)] max-[760px]:[max-height:calc(100vh_-_28px)]"}
         onPointerDown={(event) => event.stopPropagation()}
       >
-        <div className={"[display:flex] [flex:0_0_auto] [align-items:center] [justify-content:space-between] [gap:12px] [padding:16px_18px] [border-bottom:1px_solid_var(--border)]"}>
+        <div className={"[display:flex] [flex:0_0_auto] [align-items:center] [justify-content:space-between] [gap:12px] [padding:16px_18px] [border-bottom:1px_solid_var(--border-1)]"}>
           <div className={"[display:flex] [min-width:0] [flex:1_1_auto] [align-items:center] [gap:10px]"}>
             {removed ? (
-              <AgentAvatar title={displayName} avatar={headerAvatar.avatar} provider={headerAvatar.provider} size={40} />
+              <AgentAvatar title={displayName} avatar={headerAvatar.avatar} provider={headerAvatar.provider} size={40} hideProviderBadge />
             ) : (
               <RoomAvatarUploadButton
                 title={displayName}
@@ -157,6 +165,7 @@ export function AgentProfileDialog(props: {
                 provider={headerAvatar.provider}
                 size={40}
                 agent
+                hideProviderBadge
                 onUpload={(dataUrl) => {
                   setAvatar(dataUrl);
                   setUploadError(null);
@@ -165,38 +174,28 @@ export function AgentProfileDialog(props: {
               />
             )}
             <div className={"[min-width:0]"}>
-              <h3 className={"[margin:0] [overflow:hidden] [font-size:16px] [font-weight:720] [line-height:1.2] [text-overflow:ellipsis] [white-space:nowrap]"}>
+              <h3 className={"[margin:0] [overflow:hidden] [font-size:15px] [font-weight:720] [line-height:1.2] [text-overflow:ellipsis] [white-space:nowrap]"}>
                 {displayName}
               </h3>
               {isAddMode ? (
-                <p className={"[margin:3px_0_0] [color:var(--muted)] [font-size:12px] [line-height:1.35]"}>
+                <p className={"[margin:3px_0_0] [color:var(--text-secondary)] [font-size:11px] [line-height:1.35]"}>
                   {t("agentProfile.saveToJoin")}
                 </p>
               ) : (
-                <p className={"[margin:3px_0_0] [color:var(--muted)] [font-size:12px] [line-height:1.35]"}>
+                <p className={"[margin:3px_0_0] [color:var(--text-secondary)] [font-size:11px] [line-height:1.35]"}>
                   {runtimeStatusSummary(selectedRuntime, props.localAgentProviders)}
                 </p>
               )}
               {uploadError ? (
-                <p className={"[margin:4px_0_0] [color:var(--danger)] [font-size:11px] [line-height:1.35]"}>{uploadError}</p>
+                <p className={"[margin:4px_0_0] [color:var(--state-danger)] [font-size:11px] [line-height:1.35]"}>{uploadError}</p>
               ) : null}
-              <div className={"[display:flex] [flex-wrap:wrap] [gap:6px] [margin-top:6px]"}>
-                {isAddMode ? (
-                  <span className={"[display:inline-flex] [height:20px] [align-items:center] [border-radius:999px] [padding:0_7px] [color:#2563eb] [background:#eff6ff] [font-size:10px] [font-weight:700]"}>
-                    {t("agentProfile.pendingAdd")}
-                  </span>
-                ) : null}
-                {removed ? (
-                  <span className={"[display:inline-flex] [height:20px] [align-items:center] [border-radius:999px] [padding:0_7px] [color:#6b7280] [background:#f3f4f6] [font-size:10px] [font-weight:700]"}>
+              {removed ? (
+                <div className={"[display:flex] [flex-wrap:wrap] [gap:6px] [margin-top:6px]"}>
+                  <span className={"[display:inline-flex] [height:20px] [align-items:center] [border-radius:999px] [padding:0_7px] [color:var(--text-secondary)] [background:var(--background-panel)] [font-size:11px] [font-weight:700]"}>
                     {t("agentProfile.removedFromRoom")}
                   </span>
-                ) : null}
-                {muted ? (
-                  <span className={"[display:inline-flex] [height:20px] [align-items:center] [border-radius:999px] [padding:0_7px] [color:#b45309] [background:#fef3c7] [font-size:10px] [font-weight:700]"}>
-                    {t("composer.muted")}
-                  </span>
-                ) : null}
-              </div>
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -204,17 +203,17 @@ export function AgentProfileDialog(props: {
             {!removed && !isAddMode ? (
               <button
                 type="button"
-                className={"[display:inline-flex] [height:32px] [align-items:center] [gap:5px] [border:1px_solid_var(--border)] [border-radius:10px] [padding:0_12px] [color:var(--text)] [background:#ffffff] [font-size:12px] [font-weight:650] [&:hover:not(:disabled)]:[background:#f7f7f8] [&:disabled]:[opacity:0.55]"}
+                className={"[display:inline-flex] [height:32px] [align-items:center] [gap:5px] [border:1px_solid_var(--border-1)] [border-radius:10px] [padding:0_12px] [color:var(--text-primary)] [background:var(--white-stationary)] [font-size:11px] [font-weight:650] [&:hover:not(:disabled)]:[background:var(--background-panel)] [&:disabled]:[opacity:0.55]"}
                 disabled={mutePending}
                 onClick={() => void toggleMute()}
               >
-                {muted ? <Mic size={14} /> : <MicOff size={14} />}
+                {muted ? <Power size={14} /> : <CircleOff size={14} />}
                 {muted ? t("agentProfile.unmute") : t("agentProfile.mute")}
               </button>
             ) : null}
             <button
               type="button"
-              className={"[display:inline-grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--muted)] [background:#00000008] [&:hover]:[color:var(--text)] [&:hover]:[background:#00000012]"}
+              className={"dialog-close-button [display:inline-grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--text-secondary)] [background:var(--transparency-hover)] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--line-focus-window)]"}
               aria-label={t("common.close")}
               onClick={props.onClose}
             >
@@ -234,10 +233,12 @@ export function AgentProfileDialog(props: {
             localAgentProviders={props.localAgentProviders}
             showRemove={props.showRemove}
             readOnly={removed}
+            footerHost={footerHost}
             avatar={avatar}
             conversationId={props.conversationId ?? undefined}
             roomParticipants={props.roomParticipants}
             onDisplayNameChange={setPreviewDisplayName}
+            onRuntimeProfileChange={setPreviewRuntimeProfileId}
             onCreateIdentity={props.onCreateIdentity}
             onUpdateIdentity={props.onUpdateIdentity}
             onAddParticipant={props.onAddParticipant}
@@ -247,6 +248,12 @@ export function AgentProfileDialog(props: {
             onRemoved={props.onRemoved ?? props.onClose}
           />
         </div>
+        {!removed ? (
+          <div
+            ref={setFooterHost}
+            className={"[display:flex] [min-height:56px] [flex:0_0_auto] [align-items:center] [justify-content:space-between] [gap:8px] [border-top:1px_solid_var(--border-1)] [padding:12px_20px] [background:var(--background-fronted)]"}
+          />
+        ) : null}
       </div>
     </div>
   );

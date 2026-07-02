@@ -65,7 +65,7 @@ export function AppContextMenu() {
     <div
       ref={menuRef}
       role="menu"
-      className="[position:fixed] [z-index:200] [min-width:136px] [border:1px_solid_var(--border)] [border-radius:10px] [padding:4px] [background:#fff] [box-shadow:0_12px_40px_rgb(0_0_0_/_14%)]"
+      className="[position:fixed] [z-index:200] [min-width:136px] [border:1px_solid_var(--border-1)] [border-radius:10px] [padding:4px] [background:var(--white-stationary)] [box-shadow:0_12px_40px_color-mix(in_srgb,var(--black-stationary)_14%,transparent)]"
       style={{
         left: Math.max(8, Math.min(menu.x, window.innerWidth - 152)),
         top: Math.max(8, Math.min(menu.y, window.innerHeight - 52)),
@@ -75,7 +75,7 @@ export function AppContextMenu() {
       <button
         type="button"
         role="menuitem"
-        className="[display:flex] [width:100%] [align-items:center] [gap:8px] [border:0] [border-radius:7px] [padding:8px_10px] [color:var(--text)] [background:transparent] [font-size:13px] [text-align:left] [&:hover]:[background:#f3f4f6]"
+        className="[display:flex] [width:100%] [align-items:center] [gap:8px] [border:0] [border-radius:7px] [padding:8px_10px] [color:var(--text-primary)] [background:transparent] [font-size:13px] [text-align:left] [&:hover]:[background:var(--background-panel)]"
         onClick={() => {
           const target = menu.target;
           setMenu(null);
