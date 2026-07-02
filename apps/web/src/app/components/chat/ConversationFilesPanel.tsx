@@ -165,7 +165,7 @@ export function ConversationFilesPanel(props: {
     <aside
       className={"[grid-column:2] [grid-row:2_/_4] [display:grid] [min-width:0] [min-height:0] [grid-template-rows:auto_auto_auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border-1)] [background:var(--background-panel)] max-[760px]:[grid-column:1] max-[760px]:[grid-row:2_/_4]"}
     >
-      <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [padding:14px] [border-bottom:1px_solid_var(--border-1)]"}>
+      <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [padding:8px_14px] [border-bottom:1px_solid_var(--border-1)]"}>
         <div className={"[display:flex] [min-width:0] [align-items:baseline] [gap:8px] [&_h3]:[margin:0] [&_h3]:[font-size:15px] [&_h3]:[font-weight:720] [&_h3]:[line-height:1.2] [&_span]:[color:var(--text-secondary)] [&_span]:[font-size:11px] [&_span]:[line-height:1.2]"}>
           <h3>{t("files.title")}</h3>
           <span>{t("files.count", { count: filteredArtifacts.length })}</span>
