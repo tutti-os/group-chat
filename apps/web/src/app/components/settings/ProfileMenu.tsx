@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { X } from "lucide-react";
-import { Button } from "@tutti-os/ui-system";
+import { Button, Input } from "@tutti-os/ui-system";
 import type { LocalUserProfile } from "../../user-profile.js";
 import { useTranslation } from "../../i18n/index.js";
 import { AvatarPicker } from "../ui/AvatarPicker.js";
@@ -126,9 +126,10 @@ export function ProfileMenu(props: {
           <label className={"[color:var(--text-secondary)] [font-size:11px] [font-weight:650] [line-height:1]"} htmlFor="profile-display-name">
             {t("profileMenu.name")}
           </label>
-          <input
+          <Input
             id="profile-display-name"
-            className={"[width:100%] [height:38px] [border:1px_solid_var(--border-1)] [border-radius:11px] [padding:0_11px] [color:var(--text-primary)] [background:var(--white-stationary)] [font-size:13px] [font-weight:620] [outline:none] focus:[border-color:var(--line-focus-window)] focus:[box-shadow:0_0_0_3px_var(--transparency-hover)]"}
+            variant="md"
+            className={"[font-weight:620]"}
             value={draft.displayName}
             maxLength={32}
             placeholder={t("profileMenu.namePlaceholder")}
