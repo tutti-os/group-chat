@@ -26,12 +26,12 @@ export function resolveMentionThumbnailUrl(url: string | null | undefined): stri
   if (
     trimmed.startsWith("http://")
     || trimmed.startsWith("https://")
-    || trimmed.startsWith("blob:")
+    || trimmed.startsWith("tutti://workspace-apps/")
+    || trimmed.startsWith("tutti-asset://")
     || trimmed.startsWith("data:")
   ) {
     return trimmed;
   }
-  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return null;
   return resolveArtifactPublicUrl(trimmed);
 }
 
