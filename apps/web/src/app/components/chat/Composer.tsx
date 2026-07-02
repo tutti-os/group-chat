@@ -2024,7 +2024,7 @@ export function Composer(props: {
         }}
       >
         <label
-          className={"[display:inline-grid] [place-items:center] [border:0] [width:28px] [height:28px] [border-radius:999px] [color:var(--text-tertiary)] [background:transparent] [cursor:pointer] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)] [&_input]:[display:none]"}
+          className={"[display:inline-grid] [align-self:end] [place-items:center] [border:0] [width:28px] [height:28px] [border-radius:999px] [color:var(--text-tertiary)] [background:transparent] [cursor:pointer] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)] [&_input]:[display:none]"}
           title={t("composer.attachFiles")}
           onMouseDown={() => {
             const editor = editorRef.current;
@@ -2292,7 +2292,7 @@ export function Composer(props: {
             </div>
           </div>
         </div>
-        <button className={"[display:inline-grid] [place-items:center] [border:0] [width:28px] [height:28px] [padding:0] [border-radius:999px] [color:var(--white-stationary)] [background:var(--text-primary)] [&:disabled]:[color:var(--text-secondary)] [&:disabled]:[background:var(--transparency-hover)]"} aria-label={t("composer.sendMessage")} onClick={send} disabled={sending}>
+        <button className={"[display:inline-grid] [align-self:end] [place-items:center] [border:0] [width:28px] [height:28px] [padding:0] [border-radius:999px] [color:var(--white-stationary)] [background:var(--text-primary)] [&:disabled]:[color:var(--text-secondary)] [&:disabled]:[background:var(--transparency-hover)]"} aria-label={t("composer.sendMessage")} onClick={send} disabled={sending}>
           {sending ? <Square size={16} /> : <SendFilledIcon size={16} />}
         </button>
       </div>
