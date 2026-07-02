@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { Button } from "@tutti-os/ui-system";
 import type {
   AddParticipantRequest,
@@ -526,7 +526,7 @@ function AgentSelect(props: {
           ref={menuRef}
           role="listbox"
           aria-label={props.ariaLabel}
-          className={"[position:fixed] [z-index:10000] [display:grid] [max-height:220px] [overflow:auto] [border:1px_solid_var(--border-1)] [border-radius:6px] [padding:4px] [color:var(--text-primary)] [background:var(--background-fronted)] [font-size:11px] [font-weight:600] [line-height:1.2] [box-shadow:0_14px_34px_color-mix(in_srgb,var(--black-stationary)_20%,transparent)]"}
+          className={"[position:fixed] [z-index:10000] [display:grid] [gap:2px] [max-height:220px] [overflow:auto] [border:1px_solid_var(--border-1)] [border-radius:8px] [padding:4px] [color:var(--text-primary)] [background:var(--background-fronted)] [font-size:13px] [font-weight:400] [line-height:1.2] [box-shadow:var(--shadow-panel)]"}
           style={{ top: position.top, left: position.left, width: position.width }}
         >
           {props.options.map((option) => {
@@ -537,18 +537,18 @@ function AgentSelect(props: {
                 type="button"
                 role="option"
                 aria-selected={active}
-                className={`[display:grid] [grid-template-columns:18px_minmax(0,_1fr)] [align-items:center] [gap:6px] [min-height:30px] [border:0] [border-radius:6px] [padding:0_8px] [color:inherit] [background:transparent] [font:inherit] [line-height:1.2] [text-align:left] [cursor:pointer] hover:[background:color-mix(in_srgb,var(--white-stationary)_12%,transparent)] focus-visible:[outline:none] focus-visible:[background:color-mix(in_srgb,var(--white-stationary)_17%,transparent)] ${active ? "[background:var(--accent-codex)]" : ""}`}
+                className={"[position:relative] [display:grid] [grid-template-columns:minmax(0,_1fr)_18px] [align-items:center] [gap:6px] [min-height:30px] [border:0] [border-radius:4px] [padding:4px_8px] [color:var(--text-primary)] [background:transparent] [font:inherit] [line-height:1.2] [text-align:left] [cursor:pointer] [transition:background-color_0.2s_ease,_color_0.2s_ease] hover:[background:var(--transparency-hover)] focus-visible:[outline:none] focus-visible:[background:var(--transparency-hover)]"}
                 onClick={() => {
                   props.onChange(option.value);
                   props.onOpenChange(false);
                   buttonRef.current?.focus();
                 }}
               >
-                <span className={"[width:16px] [color:var(--white-stationary)]"}>
-                  {active ? "✓" : ""}
-                </span>
                 <span className={"[min-width:0] [white-space:nowrap]"}>
                   {option.label}
+                </span>
+                <span className={"[display:grid] [width:16px] [place-items:center] [color:var(--tutti-purple)]"}>
+                  {active ? <Check size={15} /> : null}
                 </span>
               </button>
             );

@@ -13,7 +13,8 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AgentRun, AgentRunEvent, Participant } from "@group-chat/shared";
-import { formatRunEventStatus, useTranslation } from "../../i18n/index.js";
+import { formatRunEventStatus, formatRunEventTypeLabel, useTranslation } from "../../i18n/index.js";
+import type { TranslateParams } from "../../i18n/translate.js";
 
 type DisplayItem =
   | { kind: "thinking"; content: string; streaming: boolean }
@@ -72,7 +73,7 @@ export function AgentRunPanel(props: {
   return (
     <aside
       ref={panelRef}
-      className={"[position:absolute] [top:56px] [right:0] [bottom:0] [z-index:37] [display:grid] [width:min(400px,_calc(100vw_-_24px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border-1)] [background:var(--background-fronted)] [box-shadow:-18px_0_40px_color-mix(in_srgb,var(--black-stationary)_8%,transparent)]"}
+      className={"[position:absolute] [top:56px] [right:0] [bottom:0] [z-index:37] [display:grid] [width:min(400px,_calc(100vw_-_24px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border-1)] [background:var(--background-panel)] [box-shadow:-18px_0_40px_color-mix(in_srgb,var(--black-stationary)_8%,transparent)]"}
       aria-label={t("runPanel.aria")}
     >
       <header className={"[display:grid] [grid-template-columns:minmax(0,_1fr)_auto] [align-items:center] [gap:8px] [border-bottom:1px_solid_var(--border-1)] [padding:14px] [background:var(--white-stationary)]"}>
@@ -101,7 +102,7 @@ export function AgentRunPanel(props: {
 
       <div
         ref={scrollRef}
-        className={"[min-height:0] [overflow-y:auto] [padding:14px] [display:grid] [align-content:start] [gap:10px]"}
+        className={"[min-height:0] [overflow-y:auto] [padding:14px] [display:grid] [align-content:start] [gap:10px] [background:var(--background-panel)]"}
         onScroll={(event) => {
           const element = event.currentTarget;
           stickToBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48;
@@ -153,19 +154,32 @@ export function AgentRunPanel(props: {
 
           const event = item.event;
           if (event.type === "tool_call" || event.type === "tool_result") {
-            const toolName = typeof event.metadata?.toolName === "string" ? event.metadata.toolName : "tool";
-            const isResult = event.type === "tool_result";
+            const toolName = typeof event.metadata?.toolName === "string" ? event.metadata.toolName : null;
+            const details = runEventDetailEntries(event, t);
+            const content = event.content.trim();
             return (
               <section
                 key={event.id}
                 className={`[display:grid] [min-width:0] [overflow:hidden] [gap:8px] [border:1px_solid_var(--border-1)] [border-radius:14px] [padding:10px_12px] [background:var(--white-stationary)] [font-size:11px] ${event.status === "streaming" ? "[border-color:color-mix(in_srgb,var(--accent-codex)_18%,transparent)]" : ""} ${event.status === "error" ? "[border-color:color-mix(in_srgb,var(--state-danger)_18%,transparent)] [background:var(--on-danger)]" : ""}`}
               >
                 <div className={"[display:flex] [min-width:0] [align-items:center] [gap:6px] [overflow:hidden] [font-weight:700] [color:var(--text-primary)]"}>
-                  {isResult ? <Braces size={15} /> : <Wrench size={15} />}
-                  <strong className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{toolName}</strong>
+                  {event.type === "tool_result" ? <Braces size={15} /> : <Wrench size={15} />}
+                  <strong className={"[min-width:0] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>{formatRunEventTypeLabel(event, toolName)}</strong>
                   <span className={"[flex:0_0_auto] [color:var(--text-secondary)] [font-size:11px] [font-weight:650]"}>{formatRunEventStatus(event)}</span>
                 </div>
-                {event.content ? <pre className={"[margin:0] [max-height:220px] [overflow:auto] [border-radius:10px] [padding:10px] [white-space:pre-wrap] [color:var(--text-primary)] [background:var(--background-panel)] [font-size:11px] [line-height:1.5]"}>{event.content}</pre> : null}
+                {content ? <pre className={"[margin:0] [max-height:220px] [overflow:auto] [border-radius:10px] [padding:10px] [white-space:pre-wrap] [color:var(--text-primary)] [background:var(--background-panel)] [font-size:11px] [line-height:1.5]"}>{content}</pre> : null}
+                {details.length ? (
+                  <div className={"[display:grid] [gap:7px]"}>
+                    {details.map((detail) => (
+                      <div key={detail.key} className={"[display:grid] [gap:4px]"}>
+                        <span className={"[color:var(--text-secondary)] [font-size:11px] [font-weight:750]"}>{detail.label}</span>
+                        <pre className={"[margin:0] [max-height:220px] [overflow:auto] [border-radius:10px] [border:1px_solid_var(--border-1)] [padding:10px] [white-space:pre-wrap] [color:var(--text-primary)] [background:var(--background-panel)] [font-size:11px] [line-height:1.5] [scrollbar-gutter:stable]"}>
+                          {detail.value}
+                        </pre>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </section>
             );
           }
@@ -232,8 +246,54 @@ function groupRunEvents(events: AgentRunEvent[]): DisplayItem[] {
       continue;
     }
     flushThinking();
-    items.push({ kind: "event", event });
+    if (hasVisibleRunEventBody(event)) items.push({ kind: "event", event });
   }
   flushThinking();
   return items;
+}
+
+function hasVisibleRunEventBody(event: AgentRunEvent) {
+  if (event.content.trim()) return true;
+  const metadata = event.metadata ?? {};
+  if (event.type === "tool_call") return Boolean(formatRunEventMetadataValue(metadata.input));
+  if (event.type === "tool_result") {
+    return Boolean(
+      formatRunEventMetadataValue(metadata.summary)
+        || formatRunEventMetadataValue(metadata.output)
+        || formatRunEventMetadataValue(metadata.error),
+    );
+  }
+  if (event.type === "file_write") return Boolean(formatRunEventMetadataValue(metadata.path));
+  if (event.type === "status") return Boolean(event.content.trim());
+  return true;
+}
+
+function runEventDetailEntries(event: AgentRunEvent, t: (key: string, values?: TranslateParams) => string) {
+  const metadata = event.metadata ?? {};
+  const entries: Array<{ key: string; label: string; value: string }> = [];
+  const push = (key: string, label: string, value: unknown) => {
+    const formatted = formatRunEventMetadataValue(value);
+    if (!formatted) return;
+    entries.push({ key, label, value: formatted });
+  };
+
+  if (event.type === "tool_call") {
+    push("input", t("thinkingPanel.toolInput"), metadata.input);
+  } else if (event.type === "tool_result") {
+    push("summary", t("thinkingPanel.toolSummary"), metadata.summary);
+    push("output", t("thinkingPanel.toolOutput"), metadata.output);
+    push("error", t("thinkingPanel.toolError"), metadata.error);
+  }
+
+  return entries;
+}
+
+function formatRunEventMetadataValue(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string") return value.trim();
+  try {
+    return JSON.stringify(value, null, 2).trim();
+  } catch {
+    return String(value).trim();
+  }
 }

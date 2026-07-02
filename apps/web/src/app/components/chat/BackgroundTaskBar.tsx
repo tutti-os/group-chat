@@ -5,8 +5,6 @@ import { WHISPER_FEATURE_ENABLED } from "../../feature-flags.js";
 import { truncateMiddle } from "../../formatting.js";
 import { useTranslation } from "../../i18n/index.js";
 
-const EXECUTING_RUN_CHIP_WIDTH_PX = 200;
-
 export function BackgroundTaskBar(props: {
   tasks: BackgroundTask[];
   agentRuns: AgentRunTaskItem[];
@@ -109,7 +107,7 @@ function ExecutingRunsPanel(props: {
       </button>
       {expanded ? (
         <div
-          className={"[display:flex] [flex-wrap:wrap] [align-items:flex-start] [align-content:flex-start] [gap:6px] [padding:0_10px_10px_12px]"}
+          className={"[display:grid] [gap:6px] [padding:0_10px_10px_12px]"}
         >
           {props.agentRuns.map((run) => {
             const isWhisper = WHISPER_FEATURE_ENABLED && run.visibility === "whisper";
@@ -119,12 +117,11 @@ function ExecutingRunsPanel(props: {
               <div
                 key={run.id}
                 data-whisper={isWhisper || undefined}
-                style={{ width: `min(${EXECUTING_RUN_CHIP_WIDTH_PX}px, 100%)` }}
-                className={`[position:relative] [display:inline-flex] [flex:0_0_auto] [box-sizing:border-box] [align-items:center] [gap:2px] [border-radius:999px] [padding:2px_2px_2px_4px] [color:var(--text-primary)] [background:var(--white-stationary)] [font-size:11px] [font-weight:650] [box-shadow:0_1px_2px_color-mix(in_srgb,var(--black-stationary)_6%,transparent)] ${isWhisper ? "[border:1px_dashed_var(--border-focus)]" : "[border:1px_solid_var(--border-focus)]"} ${isOpen ? "[border-color:var(--black-stationary)] [background:var(--accent-bg)]" : ""} ${pendingDismiss ? "[border-color:color-mix(in_srgb,var(--state-danger)_28%,transparent)] [background:var(--on-danger)]" : ""}`}
+                className={`[position:relative] [display:flex] [width:100%] [min-width:0] [box-sizing:border-box] [align-items:center] [gap:2px] [border-radius:0] [padding:0] [color:var(--text-primary)] [background:transparent] [font-size:11px] [font-weight:650] [box-shadow:none] ${isWhisper ? "[border:1px_dashed_transparent]" : "[border:1px_solid_transparent]"} ${isOpen ? "[border-color:var(--border-focus)] [background:var(--transparency-hover)]" : ""} ${pendingDismiss ? "[border-color:color-mix(in_srgb,var(--state-danger)_28%,transparent)] [background:var(--on-danger)]" : ""}`}
               >
                 <button
                   type="button"
-                  className={`[display:inline-flex] [min-width:0] [flex:1_1_auto] [align-items:center] [gap:6px] [border:0] [border-radius:999px] [padding:3px_8px] [color:inherit] [background:transparent] [font-size:11px] [font-weight:inherit] [cursor:pointer] hover:[background:var(--transparency-block)] ${pendingDismiss ? "[pointer-events:none] [opacity:0.72]" : ""}`}
+                  className={`[display:inline-flex] [min-width:0] [flex:1_1_auto] [align-items:center] [gap:8px] [border:0] [border-radius:6px] [padding:4px_8px] [color:inherit] [background:transparent] [font-size:11px] [font-weight:inherit] [cursor:pointer] hover:[background:var(--transparency-block)] ${pendingDismiss ? "[pointer-events:none] [opacity:0.72]" : ""}`}
                   onClick={() => props.onOpenAgentRun(run.id)}
                   title={run.preview}
                 >
