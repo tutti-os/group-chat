@@ -440,7 +440,7 @@ function highlightText(text: string, query: string): ReactNode {
     parts.push(
       <mark
         key={`${match.start}-${match.end}`}
-        className={"[color:inherit] [background:color-mix(in_srgb,var(--state-warning)_28%,var(--background-fronted))] [padding:0_2px] [border-radius:3px]"}
+        className={"[color:inherit] [background:var(--tutti-purple-bg)] [padding:0_2px] [border-radius:2px]"}
       >
         {text.slice(match.start, match.end)}
       </mark>,
