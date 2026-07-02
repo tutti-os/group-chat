@@ -45,7 +45,7 @@ import { isMessageGroupBreak, MESSAGE_GROUP_IDLE_MS } from "../../message-group-
 import { attachmentLabel, t, translateAgentError, translateSystemNotice, useTranslation } from "../../i18n/index.js";
 import { resolveSummaryCardPresentation, SUMMARY_LINK_CARD_CLASS } from "../../summary-link-card.js";
 import { resolveLinkedMessagePreviewBlocks } from "../../message-card-elements.js";
-import { resolveMessageHoverTimePosition } from "../../message-hover-layout.js";
+import { resolveMessageActionBarPosition, resolveMessageHoverTimePosition, type MessageActionBarPosition } from "../../message-hover-layout.js";
 
 const COLLAPSED_MESSAGE_CHAR_LIMIT = 800;
 const COPY_TIP_OFFSET_PX = 8;
@@ -1759,7 +1759,8 @@ function clampNumber(value: number, min: number, max: number) {
 function MessageActionBar(props: {
   visible: boolean;
   menuOpen: boolean;
-  position: { top: number; left: number } | null;
+  position: MessageActionBarPosition | null;
+  onMeasure: (size: { width: number; height: number }) => void;
   onReply: () => void;
   onCopy: (position: CopyTipPosition) => void;
   agentForwardTargets: AgentForwardTarget[];
@@ -1768,10 +1769,27 @@ function MessageActionBar(props: {
   onCloseMenu: () => void;
   onDismissActions: () => void;
 }) {
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const toolbar = toolbarRef.current;
+    if (!toolbar) return;
+    const measure = () => {
+      const rect = toolbar.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) props.onMeasure({ width: rect.width, height: rect.height });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(toolbar);
+    return () => observer.disconnect();
+  }, [props.onMeasure]);
+
   return (
     <div
+      ref={toolbarRef}
       data-slot="message-actions"
-      className={`[user-select:none] [position:absolute] [z-index:30] [display:flex] [align-items:center] [gap:1px] [overflow:visible] [border:1px_solid_var(--border-1)] [border-radius:8px] [padding:2px] [background:color-mix(in_srgb,var(--white-stationary)_95%,transparent)] [box-shadow:0_8px_24px_color-mix(in_srgb,var(--black-stationary)_10%,transparent)] [transition:opacity_0.12s_ease] before:[content:''] before:[position:absolute] before:[top:0] before:[right:100%] before:[width:4px] before:[height:100%] before:[pointer-events:auto] ${props.visible && props.position ? "[opacity:1] [pointer-events:auto]" : "[opacity:0] [pointer-events:none]"} ${props.menuOpen ? "![opacity:1] ![pointer-events:auto]" : ""}`}
+      data-placement={props.position?.placement}
+      className={`[user-select:none] [position:absolute] [z-index:30] [display:flex] [align-items:center] [gap:1px] [overflow:visible] [border:1px_solid_var(--border-1)] [border-radius:8px] [padding:2px] [background:color-mix(in_srgb,var(--white-stationary)_95%,transparent)] [box-shadow:0_8px_24px_color-mix(in_srgb,var(--black-stationary)_10%,transparent)] [transition:opacity_0.12s_ease] before:[content:''] before:[position:absolute] before:[pointer-events:auto] ${props.position?.placement === "above" ? "before:[top:100%] before:[left:0] before:[width:100%] before:[height:4px]" : "before:[top:0] before:[right:100%] before:[width:4px] before:[height:100%]"} ${props.visible && props.position ? "[opacity:1] [pointer-events:auto]" : "[opacity:0] [pointer-events:none]"} ${props.menuOpen ? "![opacity:1] ![pointer-events:auto]" : ""}`}
       style={{
         ...(props.position
           ? { top: props.position.top, left: props.position.left, right: "auto", transform: "none" }
@@ -2843,7 +2861,7 @@ function ToolbarButton(props: {
   return (
     <button
       type="button"
-      className={`[display:inline-flex] [min-width:82px] [height:68px] [flex-direction:column] [align-items:center] [justify-content:center] [gap:5px] [border:1px_solid_transparent] [border-radius:14px] [padding:7px_9px] [font-size:11px] [font-weight:720] [line-height:15px] [text-align:center] [transition:transform_0.12s_ease,_box-shadow_0.12s_ease,_background_0.12s_ease,_border-color_0.12s_ease] hover:[transform:translateY(-1px)] focus-visible:[outline:2px_solid_var(--accent-codex)] focus-visible:[outline-offset:2px] ${props.danger ? "[border-color:color-mix(in_srgb,var(--state-danger)_20%,transparent)] [color:var(--state-danger)] [background:var(--on-danger)] hover:[background:color-mix(in_srgb,var(--state-danger)_12%,var(--background-fronted))] hover:[box-shadow:0_8px_20px_color-mix(in_srgb,var(--state-danger)_14%,transparent)]" : "[color:var(--black-stationary)] [background:var(--background-panel)] hover:[border-color:var(--line-focus-window)] hover:[background:var(--white-stationary)] hover:[box-shadow:0_8px_20px_color-mix(in_srgb,var(--black-stationary)_10%,transparent)]"}`}
+      className={`[display:inline-flex] [min-width:82px] [height:68px] [flex-direction:column] [align-items:center] [justify-content:center] [gap:5px] [border:1px_solid_transparent] [border-radius:14px] [padding:7px_9px] [font-size:11px] [font-weight:720] [line-height:15px] [text-align:center] [transition:transform_0.12s_ease,_box-shadow_0.12s_ease,_background_0.12s_ease,_border-color_0.12s_ease] hover:[transform:translateY(-1px)] focus-visible:[outline:2px_solid_var(--accent-codex)] focus-visible:[outline-offset:2px] ${props.danger ? "[border-color:color-mix(in_srgb,var(--state-danger)_20%,transparent)] [color:var(--state-danger)] bg-[var(--on-danger)] hover:[background:color-mix(in_srgb,var(--state-danger)_12%,var(--background-fronted))] hover:[box-shadow:0_8px_20px_color-mix(in_srgb,var(--state-danger)_14%,transparent)]" : "[color:var(--black-stationary)] [background:var(--background-panel)] hover:[border-color:var(--line-focus-window)] hover:[background:var(--white-stationary)] hover:[box-shadow:0_8px_20px_color-mix(in_srgb,var(--black-stationary)_10%,transparent)]"}`}
       onClick={props.onClick}
     >
       {props.icon ? <span className={"[display:grid] [width:22px] [height:22px] [place-items:center] [color:currentColor]"}>{props.icon}</span> : null}
@@ -2963,7 +2981,7 @@ const MESSAGE_ACTION_ANCHOR_SELECTOR = "[data-message-action-anchor]";
 const MESSAGE_BUBBLE_ANCHOR_SELECTOR = '[data-slot="message-composite-block"], [data-slot="message-block"], [data-slot="artifact-block"][data-artifact-id]';
 const MESSAGE_CONTEXT_ARTIFACT_SELECTOR = '[data-slot="artifact-block"][data-artifact-id]';
 
-type MessageBubbleAnchor = { top: number; left: number; width: number; height: number };
+type MessageBubbleAnchor = { top: number; left: number; width: number; height: number; containerWidth: number };
 
 function resolveDefaultMessageActionAnchor(body: HTMLElement): HTMLElement | null {
   const explicitAnchors = body.querySelectorAll(MESSAGE_ACTION_ANCHOR_SELECTOR);
@@ -3006,13 +3024,7 @@ function measureMessageBubbleAnchor(body: HTMLElement, preferredAnchor?: HTMLEle
     left: anchorRect.left - bodyRect.left,
     width: anchorRect.width,
     height: anchorRect.height,
-  };
-}
-
-function measureMessageActionBarPosition(anchor: MessageBubbleAnchor): { top: number; left: number } {
-  return {
-    top: anchor.top,
-    left: anchor.left + anchor.width + MESSAGE_ACTION_BAR_GAP_PX,
+    containerWidth: bodyRect.width,
   };
 }
 
@@ -3055,7 +3067,16 @@ function MessageBodyShell(props: {
   const lastActionAnchorRef = useRef<HTMLElement | null>(null);
   const copyAnchorFromLayoutRef = useRef<HTMLElement | null>(null);
   const [bubbleAnchor, setBubbleAnchor] = useState<MessageBubbleAnchor | null>(null);
+  const [actionBarSize, setActionBarSize] = useState({ width: 112, height: 30 });
   const bodyRef = useRef<HTMLDivElement>(null);
+
+  const updateActionBarSize = useCallback((size: { width: number; height: number }) => {
+    setActionBarSize((current) => (
+      Math.abs(current.width - size.width) < 0.5 && Math.abs(current.height - size.height) < 0.5
+        ? current
+        : size
+    ));
+  }, []);
 
   const rememberActionAnchor = useCallback((block: HTMLElement | null) => {
     if (actionAnchorElRef.current === block) return;
@@ -3131,6 +3152,7 @@ function MessageBodyShell(props: {
         && Math.abs(current.left - nextAnchor.left) < 0.5
         && Math.abs(current.width - nextAnchor.width) < 0.5
         && Math.abs(current.height - nextAnchor.height) < 0.5
+        && Math.abs(current.containerWidth - nextAnchor.containerWidth) < 0.5
       ) {
         return current;
       }
@@ -3166,7 +3188,15 @@ function MessageBodyShell(props: {
     if (actions instanceof HTMLElement) props.onOpenMenu(actions);
   }, [props.onOpenMenu]);
 
-  const actionBarPosition = bubbleAnchor ? measureMessageActionBarPosition(bubbleAnchor) : null;
+  const actionBarPosition = bubbleAnchor
+    ? resolveMessageActionBarPosition({
+      anchor: bubbleAnchor,
+      containerWidth: bubbleAnchor.containerWidth,
+      toolbarWidth: actionBarSize.width,
+      toolbarHeight: actionBarSize.height,
+      gap: MESSAGE_ACTION_BAR_GAP_PX,
+    })
+    : null;
   const hoverTimePosition = bubbleAnchor ? resolveMessageHoverTimePosition(bubbleAnchor) : null;
 
   useLayoutEffect(() => {
@@ -3219,6 +3249,7 @@ function MessageBodyShell(props: {
           visible={props.actionsVisible}
           menuOpen={props.menuOpen}
           position={actionBarPosition}
+          onMeasure={updateActionBarSize}
           onReply={props.onReply}
           onCopy={(position) => invokeCopy({ position })}
           agentForwardTargets={props.agentForwardTargets}
@@ -3287,7 +3318,7 @@ export function MessageBlockRenderer(props: {
     const toolName = typeof props.block.metadata?.toolName === "string" ? props.block.metadata.toolName : "tool";
     const isResult = props.block.type === "tool_result";
     return (
-      <div data-slot="event-block" className={`[&_pre]:[overflow-x:auto] [&_pre]:[border-radius:10px] [&_pre]:[padding:10px] [&_pre]:[white-space:pre-wrap] [width:fit-content] [max-width:100%] [margin-top:6px] [border:1px_solid_var(--border-1)] [border-radius:14px] [padding:8px_10px] [color:var(--text-secondary)] [background:var(--background-panel)] [font-size:11px] [&_summary]:[display:flex] [&_summary]:[align-items:center] [&_summary]:[gap:6px] [&_summary]:[cursor:pointer] [&_summary]:[font-weight:650] [&_summary_span]:[color:inherit] [&_pre]:[max-width:100%] [&_pre]:[max-height:180px] [&_pre]:[margin:8px_0_0] [&_pre]:[overflow:auto] [&_pre]:[color:var(--text-primary)] [&_pre]:[background:var(--white-stationary)] [&_p]:[margin:8px_0_0] ${props.block.status === "streaming" ? "[border-color:color-mix(in_srgb,var(--accent-codex)_18%,transparent)]" : ""} ${props.block.status === "error" ? "[border-color:color-mix(in_srgb,var(--state-danger)_18%,transparent)] [color:var(--state-danger)] [background:var(--on-danger)]" : ""}`}>
+      <div data-slot="event-block" className={`[&_pre]:[overflow-x:auto] [&_pre]:[border-radius:10px] [&_pre]:[padding:10px] [&_pre]:[white-space:pre-wrap] [width:fit-content] [max-width:100%] [margin-top:6px] [border:1px_solid_var(--border-1)] [border-radius:14px] [padding:8px_10px] [color:var(--text-secondary)] [background:var(--background-panel)] [font-size:11px] [&_summary]:[display:flex] [&_summary]:[align-items:center] [&_summary]:[gap:6px] [&_summary]:[cursor:pointer] [&_summary]:[font-weight:650] [&_summary_span]:[color:inherit] [&_pre]:[max-width:100%] [&_pre]:[max-height:180px] [&_pre]:[margin:8px_0_0] [&_pre]:[overflow:auto] [&_pre]:[color:var(--text-primary)] [&_pre]:[background:var(--white-stationary)] [&_p]:[margin:8px_0_0] ${props.block.status === "streaming" ? "[border-color:color-mix(in_srgb,var(--accent-codex)_18%,transparent)]" : ""} ${props.block.status === "error" ? "[border-color:color-mix(in_srgb,var(--state-danger)_18%,transparent)] [color:var(--state-danger)] bg-[var(--on-danger)]" : ""}`}>
         <div className={"[display:flex] [align-items:center] [gap:6px] [cursor:pointer] [font-weight:650] [&_span]:[color:inherit]"}>
           {isResult ? <Braces size={15} /> : <Wrench size={15} />}
           <strong>{toolName}</strong>
@@ -3299,7 +3330,7 @@ export function MessageBlockRenderer(props: {
   }
   if (props.block.type === "artifact" || props.block.type === "error") {
     return (
-      <div data-slot="event-block" className={`[&_pre]:[overflow-x:auto] [&_pre]:[border-radius:10px] [&_pre]:[padding:10px] [&_pre]:[white-space:pre-wrap] [width:fit-content] [max-width:100%] [margin-top:6px] [border:1px_solid_var(--border-1)] [border-radius:14px] [padding:8px_10px] [color:var(--text-secondary)] [background:var(--background-panel)] [font-size:11px] [&_summary]:[display:flex] [&_summary]:[align-items:center] [&_summary]:[gap:6px] [&_summary]:[cursor:pointer] [&_summary]:[font-weight:650] [&_summary_span]:[color:inherit] [&_pre]:[max-width:100%] [&_pre]:[max-height:180px] [&_pre]:[margin:8px_0_0] [&_pre]:[overflow:auto] [&_pre]:[color:var(--text-primary)] [&_pre]:[background:var(--white-stationary)] [&_p]:[margin:8px_0_0] ${props.block.status === "streaming" ? "[border-color:color-mix(in_srgb,var(--accent-codex)_18%,transparent)]" : ""} ${props.block.type === "error" || props.block.status === "error" ? "[border-color:color-mix(in_srgb,var(--state-danger)_18%,transparent)] [color:var(--state-danger)] [background:var(--on-danger)]" : ""}`}>
+      <div data-slot="event-block" className={`[&_pre]:[overflow-x:auto] [&_pre]:[border-radius:10px] [&_pre]:[padding:10px] [&_pre]:[white-space:pre-wrap] [width:fit-content] [max-width:100%] [margin-top:6px] [border:1px_solid_var(--border-1)] [border-radius:14px] [padding:8px_10px] [color:var(--text-secondary)] [background:var(--background-panel)] [font-size:11px] [&_summary]:[display:flex] [&_summary]:[align-items:center] [&_summary]:[gap:6px] [&_summary]:[cursor:pointer] [&_summary]:[font-weight:650] [&_summary_span]:[color:inherit] [&_pre]:[max-width:100%] [&_pre]:[max-height:180px] [&_pre]:[margin:8px_0_0] [&_pre]:[overflow:auto] [&_pre]:[color:var(--text-primary)] [&_pre]:[background:var(--white-stationary)] [&_p]:[margin:8px_0_0] ${props.block.status === "streaming" ? "[border-color:color-mix(in_srgb,var(--accent-codex)_18%,transparent)]" : ""} ${props.block.type === "error" || props.block.status === "error" ? "[border-color:color-mix(in_srgb,var(--state-danger)_18%,transparent)] [color:var(--state-danger)] bg-[var(--on-danger)]" : ""}`}>
         <div className={"[display:flex] [align-items:center] [gap:6px] [cursor:pointer] [font-weight:650] [&_span]:[color:inherit]"}>
           <FileText size={15} />
           <strong>{props.block.type === "error" ? "Runtime event" : "Artifact"}</strong>
@@ -3360,7 +3391,7 @@ export function MessageBlockRenderer(props: {
       data-block-id={props.block.id}
       data-link-only={isLinkOnly || undefined}
       data-composite-child={props.compositeChild || undefined}
-      className={`message-prose [box-sizing:border-box] [width:max-content] [min-width:0] [max-width:min(640px,_100%)] [overflow-wrap:break-word] [word-break:normal] [white-space:pre-wrap] [border:0] [color:var(--text-primary)] ${props.compositeChild ? "[padding:0] [background:transparent] [border-radius:0]" : isLinkOnly ? "[display:grid] [gap:6px] [padding:0] [background:transparent] [border-radius:0]" : hasWhisperFooter ? "[display:flex] [flex-direction:column] [gap:4px] [padding:10px_12px] [border-radius:8px]" : "[padding:10px_13px] [border-radius:4px_6px_6px_4px]"} ${props.block.status === "streaming" ? "[border-color:color-mix(in_srgb,var(--accent-codex)_18%,transparent)]" : ""} ${props.block.status === "error" && !hasWhisperFooter ? "[border:1px_solid_color-mix(in_srgb,var(--state-danger)_18%,transparent)] [color:var(--state-danger)] [background:var(--on-danger)]" : ""}`}
+      className={`message-prose [box-sizing:border-box] [width:max-content] [min-width:0] [max-width:min(640px,_100%)] [overflow-wrap:break-word] [word-break:normal] [white-space:pre-wrap] [border:0] [color:var(--text-primary)] ${props.compositeChild ? "[padding:0] [background:transparent] [border-radius:0]" : isLinkOnly ? "[display:grid] [gap:6px] [padding:0] [background:transparent] [border-radius:0]" : hasWhisperFooter ? "[display:flex] [flex-direction:column] [gap:4px] [padding:10px_12px] [border-radius:8px]" : "[padding:10px_13px] [border-radius:4px_6px_6px_4px]"} ${props.block.status === "streaming" ? "[border-color:color-mix(in_srgb,var(--accent-codex)_18%,transparent)]" : ""} ${props.block.status === "error" && !hasWhisperFooter ? "[border:1px_solid_color-mix(in_srgb,var(--state-danger)_18%,transparent)] [color:var(--state-danger)] bg-[var(--on-danger)]" : ""}`}
     >
       {props.quotedMessage ? (
         <ReferencedMessagePreview
