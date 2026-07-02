@@ -170,7 +170,7 @@ export function ConversationSidebar(props: {
         <button
           ref={props.profileButtonRef}
           type="button"
-          className={"[display:flex] [min-width:0] [flex:1_1_auto] [align-items:center] [gap:10px] [border:0] [border-radius:8px] [padding:4px_12px] [color:var(--text-primary)] [background:transparent] [text-align:left] [transition:background-color_0.12s_ease] [&:hover]:[background:var(--transparency-hover)]"}
+          className={"[display:flex] [min-width:0] [flex:1_1_auto] [align-items:center] [gap:10px] [border:0] [border-radius:8px] [padding:8px_12px] [color:var(--text-primary)] [background:transparent] [text-align:left] [transition:background-color_0.12s_ease] [&:hover]:[background:var(--transparency-hover)]"}
           aria-label={`${props.userProfile.displayName} profile`}
           title={props.userProfile.displayName}
           aria-expanded={props.profileMenuOpen}
