@@ -293,7 +293,6 @@ export function MessageTimeline(props: {
   onOpenMessageLink: (messageId: string) => void;
   onOpenSummaryLink: (taskId: string) => void;
   onInsertSummaryLink?: (taskId: string) => void;
-  onInsertSuggestion?: (content: string) => void;
   onEnsureSummaryTask: (taskId: string) => Promise<BackgroundTask | null>;
   summaryTasks: BackgroundTask[];
   onQuoteMessages: (messages: Message[], mode?: "quote" | "summary" | "send-to-app" | "send-to-agent") => void;
@@ -890,7 +889,6 @@ export function MessageTimeline(props: {
         <EmptyTimelineState
           participantsCount={props.participantsCount}
           onOpenMembers={props.onOpenMembers}
-          onInsertSuggestion={props.onInsertSuggestion}
         />
       ) : null}
       {visibleMessages.map((message) => {
@@ -1108,16 +1106,10 @@ export function MessageTimeline(props: {
 function EmptyTimelineState(props: {
   participantsCount: number;
   onOpenMembers: (options?: { startAdding?: boolean }) => void;
-  onInsertSuggestion?: (content: string) => void;
 }) {
   const noAgents = props.participantsCount === 0;
   const title = (noAgents ? t("timeline.emptyNoAgentsTitle") : t("timeline.emptyStartTitle")).trim();
   const hint = (noAgents ? t("timeline.emptyNoAgentsHint") : t("timeline.emptyStartHint")).trim();
-  const suggestions = [
-    t("timeline.suggestionAnalyze"),
-    t("timeline.suggestionProductPlan"),
-    t("timeline.suggestionDiscussAll"),
-  ].map((item) => item.trim()).filter(Boolean);
 
   return (
     <div className={"[display:grid] [min-height:100%] [place-items:center] [padding:28px] [text-align:center]"}>
@@ -1126,20 +1118,6 @@ function EmptyTimelineState(props: {
           <div className={"[display:grid] [gap:12px]"}>
             {title ? <h3>{title}</h3> : null}
             {hint ? <p>{hint}</p> : null}
-          </div>
-        ) : null}
-        {suggestions.length > 0 ? (
-          <div className={"[display:flex] [flex-wrap:wrap] [justify-content:center] [gap:8px]"}>
-            {suggestions.map((suggestion) => (
-              <button
-                key={suggestion}
-                type="button"
-                className={"[border:1px_solid_var(--border-1)] [border-radius:999px] [padding:5px_10px] [color:var(--tutti-purple)] [background:var(--white-stationary)] [font-size:11px] [line-height:1.2] [cursor:pointer] [transition:background-color_0.12s_ease] hover:[background:var(--tutti-purple-bg)] focus-visible:[outline:none] focus-visible:[border-color:var(--border-1)]"}
-                onClick={() => props.onInsertSuggestion?.(suggestion)}
-              >
-                {suggestion}
-              </button>
-            ))}
           </div>
         ) : null}
         <Button
