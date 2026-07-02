@@ -95,7 +95,7 @@ export function ProfileMenu(props: {
         if (props.menuRef) props.menuRef.current = node;
       }}
       style={menuStyle}
-      className={`${positionClass} [width:min(340px,_calc(100vw_-_24px))] [overflow:hidden] [border:1px_solid_var(--border-1)] [border-radius:18px] [background:var(--white-stationary)] [box-shadow:0_20px_56px_color-mix(in_srgb,var(--black-stationary)_16%,transparent),_0_2px_8px_color-mix(in_srgb,var(--black-stationary)_6%,transparent)]`}
+      className={`${positionClass} [width:min(340px,_calc(100vw_-_24px))] [overflow:hidden] [border:1px_solid_var(--border-1)] [border-radius:16px] [background:var(--white-stationary)] [box-shadow:0_20px_56px_color-mix(in_srgb,var(--black-stationary)_16%,transparent),_0_2px_8px_color-mix(in_srgb,var(--black-stationary)_6%,transparent)]`}
       role="dialog"
       aria-label={t("profileMenu.editProfile")}
       onMouseDown={(event) => event.stopPropagation()}
