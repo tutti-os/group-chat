@@ -80,6 +80,7 @@ import { loadCachedSnapshot, saveCachedSnapshot } from "./bootstrap-cache.js";
 import { buildAgentGuiDraftPrompt } from "./agent-gui-draft-prompt.js";
 import { dispatchAgentGuiTask, type TuttiAgentGuiProvider } from "./agent-gui-dispatch.js";
 import { localAgentLauncherAppId, resolveAgentGuiProviderFromRuntimeProvider } from "./agent-launcher-mentions.js";
+import { reportUserActive } from "./tutti-activity.js";
 import {
   fetchAvailableAgentLauncherAppIds,
   isAgentLauncherAvailable,
@@ -1388,6 +1389,7 @@ export function App() {
     async (...args: Parameters<typeof sendMessage>) => {
       const result = await sendMessage(...args);
       mergeSentMessage(result);
+      reportUserActive();
       registerPendingReplyTargets(result);
       setScrollToBottomRequest((current) => ({ seq: (current?.seq ?? 0) + 1 }));
       window.setTimeout(() => void refreshSnapshot(), 900);
