@@ -8,6 +8,7 @@ import {
   buildRoleDescription,
   hasRoomRoleOverride,
 } from "./agent-instructions.js";
+import { LocalAgentSessionStore } from "../runtimes/local-agent-session-store.js";
 
 const DISTILLED_CONTEXT_FILENAME = "DISTILLED_CONTEXT.md";
 const RAW_CONVERSATION_MAX_CHARS = 80000;
@@ -474,6 +475,8 @@ function readTextFile(path: string) {
 
 function buildContextUsage(input: { conversation: Conversation; participant: Participant }): AgentContextUsage {
   const root = participantWorkspaceRoot(input.conversation.roomId, input.participant.id);
+  const providerSession = new LocalAgentSessionStore(root).read(input.conversation.id);
+  const contextWindow = providerSession?.contextWindow ?? null;
   const rawConversationLog = readTextFile(join(root, "conversations", `${input.conversation.id}.md`));
   const conversationSummary = readTextFile(join(root, "conversations", `${input.conversation.id}.summary.md`));
   const memory = readTextFile(join(root, "MEMORY.md"));
@@ -495,6 +498,15 @@ function buildContextUsage(input: { conversation: Conversation; participant: Par
   return {
     participantId: input.participant.id,
     conversationId: input.conversation.id,
+    source: contextWindow ? "provider" : "workspace-estimate",
+    provider: providerSession?.provider ?? null,
+    providerSessionId: providerSession?.providerSessionId ?? null,
+    providerSessionActive: Boolean(providerSession?.providerSessionId || providerSession?.resumeToken),
+    contextWindowUsedTokens: contextWindow?.usedTokens ?? null,
+    contextWindowTotalTokens: contextWindow?.totalTokens ?? null,
+    contextWindowPercentUsed: contextWindow?.percentUsed ?? null,
+    providerUsageUpdatedAt: providerSession?.usageUpdatedAt ?? null,
+    providerCompactedAt: providerSession?.compactedAt ?? null,
     totalChars,
     estimatedTokens: Math.ceil(totalChars / 4),
     rawConversationLogChars: rawConversationLog.length,

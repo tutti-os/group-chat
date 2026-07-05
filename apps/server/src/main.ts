@@ -427,7 +427,7 @@ server.post<{ Params: { conversationId: string; participantId: string } }>(
   "/api/conversations/:conversationId/participants/:participantId/context-compact",
   async (request, reply) => {
     try {
-      return chat.compactParticipantContext(request.params.conversationId, request.params.participantId);
+      return await chat.compactParticipantContext(request.params.conversationId, request.params.participantId);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to compact context";
       return reply.code(message.includes("not found") ? 404 : 400).send({ error: message });

@@ -752,6 +752,15 @@ export interface PrivateTaskSnapshot {
 export interface AgentContextUsage {
   participantId: Id;
   conversationId: Id;
+  source?: "provider" | "workspace-estimate";
+  provider?: string | null;
+  providerSessionId?: string | null;
+  providerSessionActive?: boolean;
+  contextWindowUsedTokens?: number | null;
+  contextWindowTotalTokens?: number | null;
+  contextWindowPercentUsed?: number | null;
+  providerUsageUpdatedAt?: string | null;
+  providerCompactedAt?: string | null;
   totalChars: number;
   estimatedTokens: number;
   rawConversationLogChars: number;

@@ -54,6 +54,7 @@ export interface RuntimeProvider {
   detect(context: RuntimeReplyContext): Promise<{ available: boolean; reason?: string }>;
   listLocalAgentProviders?(): Promise<LocalAgentProviderStatus[]>;
   streamReply(context: RuntimeReplyContext): AsyncIterable<string | RuntimeStreamEvent>;
+  compactContext?(context: RuntimeReplyContext): Promise<void>;
   cancel(runId: string): Promise<{ cancelled: boolean; reason?: string }>;
 }
 

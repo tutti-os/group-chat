@@ -129,8 +129,8 @@ function ExecutingRunsPanel(props: {
                   {isWhisper ? <Ear size={13} /> : <Bot size={13} />}
                   <AgentExecutingLabel participantName={run.participantName} />
                 </button>
-                <div className={"[display:grid] [flex:0_0_auto] [width:22px] [height:22px] [place-items:center]"}>
-                  {!pendingDismiss ? (
+                {!pendingDismiss ? (
+                  <div className={"[display:grid] [flex:0_0_auto] [width:22px] [height:22px] [place-items:center]"}>
                     <button
                       type="button"
                       className={"[display:grid] [width:22px] [height:22px] [place-items:center] [border:0] [border-radius:999px] [color:var(--text-secondary)] [background:transparent] [cursor:pointer] hover:[color:var(--text-primary)] hover:[background:var(--transparency-hover)]"}
@@ -139,11 +139,10 @@ function ExecutingRunsPanel(props: {
                     >
                       <X size={12} />
                     </button>
-                  ) : null}
-                </div>
-                {pendingDismiss ? (
+                  </div>
+                ) : (
                   <div
-                    className={"[position:absolute] [top:2px] [right:2px] [bottom:2px] [z-index:1] [display:inline-flex] [align-items:center] [gap:2px] [border-radius:999px] [padding:0_2px_0_10px] [background:linear-gradient(90deg,_var(--on-danger)00_0%,_var(--on-danger)_18%,_var(--on-danger)_100%)]"}
+                    className={"[display:inline-flex] [flex:0_0_auto] [align-items:center] [gap:2px] [border-radius:999px] [padding:0_2px] [background:var(--on-danger)] [white-space:nowrap]"}
                   >
                     <button
                       type="button"
@@ -163,7 +162,7 @@ function ExecutingRunsPanel(props: {
                       {t("common.confirm")}
                     </button>
                   </div>
-                ) : null}
+                )}
               </div>
             );
           })}

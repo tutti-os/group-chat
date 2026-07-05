@@ -58,6 +58,7 @@ import { mentionTabProviders } from "../../mention-panel-tabs.js";
 import { createTuttiMessageLinkIconElement, createTuttiReferenceIconElement } from "../../tutti-reference-icons.js";
 import { AGENT_LAUNCHER_MENTION_ICON_CLASS, PARTICIPANT_MENTION_CLASS, REFERENCE_MENTION_CHIP_CLASS, REFERENCE_MENTION_ICON_CLASS, REFERENCE_MENTION_LABEL_CLASS, splitAgentLauncherMentionLabel } from "./reference-mention-chip.js";
 import { MessageReferenceContent } from "./MessageReferenceContent.js";
+import { HoverTooltip } from "../ui/HoverTooltip.js";
 import {
   MENTION_PANEL_TABS,
   type MentionPanelTab,
@@ -2023,35 +2024,37 @@ export function Composer(props: {
           if (event.target === event.currentTarget) editorRef.current?.focus();
         }}
       >
-        <label
-          className={"[display:inline-grid] [align-self:end] [place-items:center] [border:0] [width:28px] [height:28px] [border-radius:999px] [color:var(--text-tertiary)] [background:transparent] [cursor:pointer] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)] [&_input]:[display:none]"}
-          title={t("composer.attachFiles")}
-          onMouseDown={() => {
-            const editor = editorRef.current;
-            if (!editor) return;
-            const sel = window.getSelection();
-            if (sel?.rangeCount && editor.contains(sel.getRangeAt(0).startContainer)) {
-              attachmentPickerCaretRef.current = sel.getRangeAt(0).cloneRange();
-            } else {
-              attachmentPickerCaretRef.current = null;
-            }
-          }}
-        >
-          <AddLinedIcon size={16} />
-          <input
-            type="file"
-            multiple
-            onChange={(event) => {
-              if (event.target.files && event.target.files.length) {
-                queueFiles(event.target.files);
+        <HoverTooltip label={t("composer.addContentTooltip")} side="top" className={"[align-self:end]"}>
+          <label
+            className={"[display:inline-grid] [place-items:center] [border:0] [width:28px] [height:28px] [border-radius:999px] [color:var(--text-tertiary)] [background:transparent] [cursor:pointer] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)] [&_input]:[display:none]"}
+            aria-label={t("composer.addContentTooltip")}
+            onMouseDown={() => {
+              const editor = editorRef.current;
+              if (!editor) return;
+              const sel = window.getSelection();
+              if (sel?.rangeCount && editor.contains(sel.getRangeAt(0).startContainer)) {
+                attachmentPickerCaretRef.current = sel.getRangeAt(0).cloneRange();
               } else {
                 attachmentPickerCaretRef.current = null;
               }
-              event.currentTarget.value = "";
-              focusComposerAfterAttachmentInsert();
             }}
-          />
-        </label>
+          >
+            <AddLinedIcon size={16} />
+            <input
+              type="file"
+              multiple
+              onChange={(event) => {
+                if (event.target.files && event.target.files.length) {
+                  queueFiles(event.target.files);
+                } else {
+                  attachmentPickerCaretRef.current = null;
+                }
+                event.currentTarget.value = "";
+                focusComposerAfterAttachmentInsert();
+              }}
+            />
+          </label>
+        </HoverTooltip>
         <div className={"[display:grid] [min-height:28px] [align-content:center] [gap:6px] [padding:0]"}>
           {quotes.length ? (
             <QuoteComposerBar

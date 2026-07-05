@@ -548,6 +548,314 @@ test("codex local agent retries with isolated user skills when skill metadata is
   }
 });
 
+test("codex local agent skips Tutti skill bundle for simple participant mentions", async () => {
+  const home = await mkdtemp(join(tmpdir(), "group-chat-simple-no-skill-bundle-"));
+  const binDir = join(home, "bin");
+  const codexHome = join(home, "codex-home");
+  const fakeCodex = join(binDir, "codex");
+  const fakeTutti = join(binDir, "tutti-dev");
+  const checkScript = join(home, "check-simple-no-skill-bundle.ts");
+
+  await mkdir(binDir, { recursive: true });
+  await mkdir(codexHome, { recursive: true });
+  await mkdir(join(home, "rooms", "room-1", "agents", "product-agent"), { recursive: true });
+  await writeFile(join(codexHome, "auth.json"), "{}");
+  await writeFile(
+    fakeTutti,
+    `#!/usr/bin/env node
+      console.error("Tutti skill bundle should not be loaded for simple participant mentions");
+      process.exit(2);
+    `,
+  );
+  await chmod(fakeTutti, 0o755);
+  await writeFile(
+    fakeCodex,
+    `#!/usr/bin/env node
+      const { readFileSync } = await import("node:fs");
+      readFileSync(0, "utf8");
+      console.log(JSON.stringify({ type: "text_delta", text: "simple-agent-ok" }));
+    `,
+  );
+  await chmod(fakeCodex, 0o755);
+  await writeFile(
+    checkScript,
+    `
+      import assert from "node:assert/strict";
+
+      process.env.GROUP_CHAT_HOME = ${JSON.stringify(home)};
+      process.env.GROUP_CHAT_TUTTI_CLI = ${JSON.stringify(fakeTutti)};
+      process.env.CODEX_HOME = ${JSON.stringify(codexHome)};
+      process.env.PATH = ${JSON.stringify(binDir)} + ":" + (process.env.PATH || "");
+      delete process.env.GROUP_CHAT_LOCAL_AGENT_COMMAND;
+      delete process.env.GROUP_CHAT_LOCAL_AGENT_CODEX_COMMAND;
+
+      async function main() {
+        const { LocalAgentRuntimeProvider } = await import(${JSON.stringify(providerModuleUrl)});
+        const provider = new LocalAgentRuntimeProvider();
+        const content = "@产品 你好啊";
+        const userMessage = {
+          id: "msg-1",
+          conversationId: "conversation-1",
+          role: "user",
+          senderParticipantId: null,
+          senderName: "老板",
+          content,
+          mentions: [{ mentionType: "participant", participantId: "product-agent", displayNameSnapshot: "产品" }],
+          visibility: "public",
+          status: "success",
+          branchId: null,
+          parentMessageId: null,
+          runId: null,
+          tokenUsage: null,
+          createdAt: "2026-06-24T00:00:00.000Z",
+          updatedAt: "2026-06-24T00:00:00.000Z",
+        };
+        const context = {
+          runId: "run-1",
+          conversation: {
+            id: "conversation-1",
+            roomId: "room-1",
+            type: "group",
+            title: "AI 讨论室",
+            groupSystemPrompt: "",
+            collaborationRules: "",
+            collaborationRulesVersion: 1,
+            replyPolicy: { mode: "mentioned", order: "sequential", maxRounds: 1, mentionFollowupRounds: 0 },
+            activeBranchId: null,
+            pinned: false,
+            lastMessage: content,
+            lastMessageAt: "2026-06-24T00:00:00.000Z",
+            createdAt: "2026-06-24T00:00:00.000Z",
+            updatedAt: "2026-06-24T00:00:00.000Z",
+          },
+          participant: {
+            id: "product-agent",
+            conversationId: "conversation-1",
+            kind: "ai",
+            displayName: "产品",
+            avatar: null,
+            runtimeProfileId: "local-agent:codex",
+            identityId: "identity-product",
+            roomInstructions: "",
+            status: "active",
+            listenMode: "passive",
+            sortOrder: 0,
+            reasoningEffort: null,
+            speedMode: null,
+            createdAt: "2026-06-24T00:00:00.000Z",
+            updatedAt: "2026-06-24T00:00:00.000Z",
+          },
+          identity: null,
+          runtimeProfile: {
+            id: "local-agent:codex",
+            kind: "local-agent",
+            provider: "codex",
+            model: "codex:default",
+            displayName: "Codex",
+            enabled: true,
+            trustedMode: false,
+            systemPromptMode: "prompt-prefix",
+            capabilities: { streaming: true, toolUse: true, reasoning: true, vision: false, resume: true },
+            createdAt: "2026-06-24T00:00:00.000Z",
+            updatedAt: "2026-06-24T00:00:00.000Z",
+          },
+          userMessage,
+          recentMessages: [],
+          attachments: [],
+        };
+
+        let output = "";
+        let sawBundleFallbackNotice = false;
+        for await (const event of provider.streamReply(context)) {
+          if (event.type === "thinking_delta" && event.text.includes("skill bundle 暂时不可用")) {
+            sawBundleFallbackNotice = true;
+          }
+          output += event.type === "text_delta" ? event.text : "";
+        }
+
+        assert.equal(output, "simple-agent-ok");
+        assert.equal(sawBundleFallbackNotice, false);
+      }
+      main().catch((error) => {
+        console.error(error);
+        process.exit(1);
+      });
+    `,
+  );
+
+  try {
+    await execFileAsync("pnpm", ["--filter", "@group-chat/server", "exec", "tsx", checkScript], {
+      cwd: new URL("..", import.meta.url),
+      env: { ...process.env, GROUP_CHAT_HOME: home },
+    });
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("codex local agent continues when required Tutti skill bundle command is unavailable", async () => {
+  const home = await mkdtemp(join(tmpdir(), "group-chat-skill-bundle-unavailable-"));
+  const binDir = join(home, "bin");
+  const codexHome = join(home, "codex-home");
+  const fakeCodex = join(binDir, "codex");
+  const fakeTutti = join(binDir, "tutti-dev");
+  const checkScript = join(home, "check-skill-bundle-unavailable.ts");
+
+  await mkdir(binDir, { recursive: true });
+  await mkdir(codexHome, { recursive: true });
+  await mkdir(join(home, "rooms", "room-1", "agents", "product-agent"), { recursive: true });
+  await writeFile(join(codexHome, "auth.json"), "{}");
+  await writeFile(
+    fakeTutti,
+    `#!/usr/bin/env node
+      console.error("unknown command: " + process.argv.slice(2).join(" "));
+      process.exit(2);
+    `,
+  );
+  await chmod(fakeTutti, 0o755);
+  await writeFile(
+    fakeCodex,
+    `#!/usr/bin/env node
+      const { readFileSync } = await import("node:fs");
+      readFileSync(0, "utf8");
+      console.log(JSON.stringify({ type: "text_delta", text: "agent-ok-without-skill-bundle" }));
+    `,
+  );
+  await chmod(fakeCodex, 0o755);
+  await writeFile(
+    checkScript,
+    `
+      import assert from "node:assert/strict";
+
+      process.env.GROUP_CHAT_HOME = ${JSON.stringify(home)};
+      process.env.GROUP_CHAT_TUTTI_CLI = ${JSON.stringify(fakeTutti)};
+      process.env.CODEX_HOME = ${JSON.stringify(codexHome)};
+      process.env.PATH = ${JSON.stringify(binDir)} + ":" + (process.env.PATH || "");
+      delete process.env.GROUP_CHAT_LOCAL_AGENT_COMMAND;
+      delete process.env.GROUP_CHAT_LOCAL_AGENT_CODEX_COMMAND;
+
+      async function main() {
+        const { LocalAgentRuntimeProvider } = await import(${JSON.stringify(providerModuleUrl)});
+        const provider = new LocalAgentRuntimeProvider();
+        const content = "[Vibe Design](mention://workspace-app/vibe-design?workspaceId=ws-1) @产品 继续处理";
+        const userMessage = {
+          id: "msg-1",
+          conversationId: "conversation-1",
+          role: "user",
+          senderParticipantId: null,
+          senderName: "老板",
+          content,
+          mentions: [
+            {
+              mentionType: "reference",
+              participantId: "tutti-at:workspace-app:vibe-design",
+              referenceProviderId: "workspace-app",
+              referenceEntityId: "vibe-design",
+              displayNameSnapshot: "Vibe Design",
+              referenceScope: { workspaceId: "ws-1" },
+              referenceInsert: {
+                kind: "mention",
+                mention: {
+                  entityId: "vibe-design",
+                  label: "Vibe Design",
+                  scope: { workspaceId: "ws-1" },
+                },
+              },
+            },
+            { mentionType: "participant", participantId: "product-agent", displayNameSnapshot: "产品" },
+          ],
+          visibility: "public",
+          status: "success",
+          branchId: null,
+          parentMessageId: null,
+          runId: null,
+          tokenUsage: null,
+          createdAt: "2026-06-24T00:00:00.000Z",
+          updatedAt: "2026-06-24T00:00:00.000Z",
+        };
+        const context = {
+          runId: "run-1",
+          conversation: {
+            id: "conversation-1",
+            roomId: "room-1",
+            type: "group",
+            title: "AI 讨论室",
+            groupSystemPrompt: "",
+            collaborationRules: "",
+            collaborationRulesVersion: 1,
+            replyPolicy: { mode: "mentioned", order: "sequential", maxRounds: 1, mentionFollowupRounds: 0 },
+            activeBranchId: null,
+            pinned: false,
+            lastMessage: content,
+            lastMessageAt: "2026-06-24T00:00:00.000Z",
+            createdAt: "2026-06-24T00:00:00.000Z",
+            updatedAt: "2026-06-24T00:00:00.000Z",
+          },
+          participant: {
+            id: "product-agent",
+            conversationId: "conversation-1",
+            kind: "ai",
+            displayName: "产品",
+            avatar: null,
+            runtimeProfileId: "local-agent:codex",
+            identityId: "identity-product",
+            roomInstructions: "",
+            status: "active",
+            listenMode: "passive",
+            sortOrder: 0,
+            reasoningEffort: null,
+            speedMode: null,
+            createdAt: "2026-06-24T00:00:00.000Z",
+            updatedAt: "2026-06-24T00:00:00.000Z",
+          },
+          identity: null,
+          runtimeProfile: {
+            id: "local-agent:codex",
+            kind: "local-agent",
+            provider: "codex",
+            model: "codex:default",
+            displayName: "Codex",
+            enabled: true,
+            trustedMode: false,
+            systemPromptMode: "prompt-prefix",
+            capabilities: { streaming: true, toolUse: true, reasoning: true, vision: false, resume: true },
+            createdAt: "2026-06-24T00:00:00.000Z",
+            updatedAt: "2026-06-24T00:00:00.000Z",
+          },
+          userMessage,
+          recentMessages: [],
+          attachments: [],
+        };
+
+        let output = "";
+        let sawBundleFallbackNotice = false;
+        for await (const event of provider.streamReply(context)) {
+          if (event.type === "thinking_delta" && event.text.includes("skill bundle 暂时不可用")) {
+            sawBundleFallbackNotice = true;
+          }
+          output += event.type === "text_delta" ? event.text : "";
+        }
+
+        assert.equal(output, "agent-ok-without-skill-bundle");
+        assert.equal(sawBundleFallbackNotice, true);
+      }
+      main().catch((error) => {
+        console.error(error);
+        process.exit(1);
+      });
+    `,
+  );
+
+  try {
+    await execFileAsync("pnpm", ["--filter", "@group-chat/server", "exec", "tsx", checkScript], {
+      cwd: new URL("..", import.meta.url),
+      env: { ...process.env, GROUP_CHAT_HOME: home },
+    });
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
 test("codex local agent falls back to minimal context after repeated context window failures", async () => {
   const home = await mkdtemp(join(tmpdir(), "group-chat-context-fallback-"));
   const binDir = join(home, "bin");
@@ -935,6 +1243,204 @@ test("completed local agent replies keep explicit thinking events", async () => 
         assert.equal(thinking?.content, "先读取上下文，再执行请求。");
         const assistant = snapshot.messages.find((message) => message.id === run.assistantMessageId);
         assert.equal(assistant?.content, "处理完成。");
+        closeDb();
+      }
+      main().catch((error) => {
+        console.error(error);
+        process.exit(1);
+      });
+    `,
+  );
+
+  try {
+    await execFileAsync("pnpm", ["--filter", "@group-chat/server", "exec", "tsx", checkScript], {
+      cwd: new URL("..", import.meta.url),
+      env: { ...process.env, GROUP_CHAT_HOME: home },
+    });
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("agent clone replies synthesize a planning summary when real thinking is unavailable", async () => {
+  const home = await mkdtemp(join(tmpdir(), "group-chat-synthetic-progress-"));
+  const checkScript = join(home, "check-synthetic-progress.ts");
+
+  await writeFile(
+    checkScript,
+    `
+      import assert from "node:assert/strict";
+
+      process.env.GROUP_CHAT_HOME = ${JSON.stringify(home)};
+
+      async function main() {
+        const { closeDb } = await import(${JSON.stringify(databaseModuleUrl)});
+        const { ChatService } = await import(${JSON.stringify(chatServiceModuleUrl)});
+        const { ChatRepository } = await import(${JSON.stringify(chatRepositoryModuleUrl)});
+        const { EventHub } = await import(${JSON.stringify(eventHubModuleUrl)});
+        const { AgentToolTokenStore } = await import(${JSON.stringify(tokenStoreModuleUrl)});
+        const service = new ChatService(new ChatRepository(), new EventHub(), new AgentToolTokenStore());
+        service.runtimes = {
+          getProvider() {
+            return {
+              id: "local-agent",
+              canHandle: () => true,
+              describeRun: () => ({ runtime: "local-agent", provider: "codex", model: "codex:default" }),
+              detect: async () => ({ available: true }),
+              cancel: async () => ({ cancelled: false }),
+              async *streamReply() {
+                yield { type: "tool_call", id: "tool-1", name: "Bash", input: { command: "sed -n '1,80p' IDENTITY.md" } };
+                yield { type: "tool_result", id: "tool-1", name: "Bash", status: "completed", summary: "read identity" };
+                yield { type: "text_delta", text: "处理完成。" };
+              },
+            };
+          },
+          listLocalAgentProviders: async () => [],
+        };
+        service.bootstrap();
+        const { conversation } = service.createRoom({ title: "Synthetic progress", description: "" });
+        const identity = service.createIdentity({
+          name: "产品",
+          icon: "产",
+          systemPrompt: "",
+          stylePrompt: "",
+          defaultRuntimeProfileId: "local-agent:codex",
+          temperature: 0.7,
+          skillIds: [],
+          toolAccessPolicy: { mode: "none", approvedToolIds: [] },
+        });
+        const { participant } = service.addParticipant(conversation.id, {
+          identityId: identity.id,
+          runtimeProfileId: "local-agent:codex",
+        });
+        service.sendMessage(conversation.id, {
+          content: "@产品 处理一下",
+          mentions: [{ mentionType: "participant", participantId: participant.id, displayNameSnapshot: participant.displayName }],
+          maxReplyRounds: 1,
+        });
+
+        let snapshot = service.bootstrap();
+        const deadline = Date.now() + 5_000;
+        while (Date.now() < deadline) {
+          snapshot = service.bootstrap();
+          const run = snapshot.agentRuns.find((item) => item.participantId === participant.id);
+          if (run?.status === "completed") break;
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        const run = snapshot.agentRuns.find((item) => item.participantId === participant.id);
+        assert.equal(run?.status, "completed");
+        const events = snapshot.agentRunEvents.filter((event) => event.runId === run.id);
+        const thinking = events.find((event) => event.type === "thinking_delta");
+        assert.match(thinking?.content ?? "", /规划总结/);
+        assert.match(thinking?.content ?? "", /Bash/);
+        assert.equal(events[0]?.type, "tool_call");
+        const assistant = snapshot.messages.find((message) => message.id === run.assistantMessageId);
+        assert.equal(assistant?.content, "处理完成。");
+        closeDb();
+      }
+      main().catch((error) => {
+        console.error(error);
+        process.exit(1);
+      });
+    `,
+  );
+
+  try {
+    await execFileAsync("pnpm", ["--filter", "@group-chat/server", "exec", "tsx", checkScript], {
+      cwd: new URL("..", import.meta.url),
+      env: { ...process.env, GROUP_CHAT_HOME: home },
+    });
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("virtual Tutti agent replies keep native process without synthetic tool thinking", async () => {
+  const home = await mkdtemp(join(tmpdir(), "group-chat-tutti-agent-native-process-"));
+  const checkScript = join(home, "check-tutti-agent-native-process.ts");
+
+  await writeFile(
+    checkScript,
+    `
+      import assert from "node:assert/strict";
+
+      process.env.GROUP_CHAT_HOME = ${JSON.stringify(home)};
+
+      async function main() {
+        const { closeDb } = await import(${JSON.stringify(databaseModuleUrl)});
+        const { ChatService } = await import(${JSON.stringify(chatServiceModuleUrl)});
+        const { ChatRepository } = await import(${JSON.stringify(chatRepositoryModuleUrl)});
+        const { EventHub } = await import(${JSON.stringify(eventHubModuleUrl)});
+        const { AgentToolTokenStore } = await import(${JSON.stringify(tokenStoreModuleUrl)});
+        const service = new ChatService(new ChatRepository(), new EventHub(), new AgentToolTokenStore());
+        service.runtimes = {
+          getProvider() {
+            return {
+              id: "local-agent",
+              canHandle: () => true,
+              describeRun: () => ({ runtime: "local-agent", provider: "codex", model: "codex:default" }),
+              detect: async () => ({ available: true }),
+              cancel: async () => ({ cancelled: false }),
+              async *streamReply() {
+                yield { type: "text_delta", text: "我先读取真实上下文，再决定下一步。\\n\\n" };
+                yield { type: "tool_call", id: "tool-1", name: "Bash", input: { command: "sed -n '1,80p' IDENTITY.md" } };
+                yield { type: "tool_result", id: "tool-1", name: "Bash", status: "completed", summary: "read identity" };
+                yield { type: "text_delta", text: "已完成处理。" };
+              },
+            };
+          },
+          listLocalAgentProviders: async () => [],
+        };
+        service.bootstrap();
+        const { conversation } = service.createRoom({ title: "Tutti agent process", description: "" });
+        service.sendMessage(conversation.id, {
+          content: "[Codex](mention://workspace-app/agent-codex?workspaceId=ws-1) 处理一下",
+          mentions: [{
+            mentionType: "reference",
+            participantId: "tutti-at:workspace-app:agent-codex",
+            referenceProviderId: "workspace-app",
+            referenceEntityId: "agent-codex",
+            displayNameSnapshot: "Codex",
+            referenceScope: {
+              workspaceId: "ws-1",
+              groupChatLocalAgentMention: "true",
+              groupChatRuntimeProvider: "codex",
+              groupChatRuntimeProfileId: "local-agent:codex",
+            },
+            referenceInsert: {
+              kind: "mention",
+              mention: {
+                entityId: "agent-codex",
+                label: "Codex",
+                scope: {
+                  workspaceId: "ws-1",
+                  groupChatLocalAgentMention: "true",
+                  groupChatRuntimeProvider: "codex",
+                  groupChatRuntimeProfileId: "local-agent:codex",
+                },
+              },
+            },
+          }],
+          maxReplyRounds: 1,
+        });
+
+        let snapshot = service.bootstrap();
+        const deadline = Date.now() + 5_000;
+        while (Date.now() < deadline) {
+          snapshot = service.bootstrap();
+          const run = snapshot.agentRuns.find((item) => item.participantId === "tutti-agent:codex");
+          if (run?.status === "completed") break;
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        const run = snapshot.agentRuns.find((item) => item.participantId === "tutti-agent:codex");
+        assert.equal(run?.status, "completed");
+        const events = snapshot.agentRunEvents.filter((event) => event.runId === run.id);
+        const thinking = events.find((event) => event.type === "thinking_delta");
+        assert.match(thinking?.content ?? "", /我先读取真实上下文/);
+        assert.equal(/规划总结|准备调用 Bash 工具/.test(thinking?.content ?? ""), false);
+        assert.equal(events.some((event) => event.type === "tool_call"), true);
+        const assistant = snapshot.messages.find((message) => message.id === run.assistantMessageId);
+        assert.equal(assistant?.content, "已完成处理。");
         closeDb();
       }
       main().catch((error) => {

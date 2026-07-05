@@ -266,12 +266,36 @@ export class ChatService {
     return this.workspaces.getContextUsage({ conversation, participant });
   }
 
-  compactParticipantContext(conversationId: string, participantId: string) {
+  async compactParticipantContext(conversationId: string, participantId: string) {
     const conversation = this.repo.getConversation(conversationId);
     if (!conversation) throw new Error("Conversation not found");
     const participant = this.repo.getParticipant(participantId);
     if (!participant || participant.conversationId !== conversationId || participant.status === "removed") {
       throw new Error("Participant not found");
+    }
+    const before = this.workspaces.getContextUsage({ conversation, participant });
+    const runtimeProfile = participant.runtimeProfileId ? this.repo.getRuntimeProfile(participant.runtimeProfileId) : null;
+    const provider = this.runtimes.getProvider(runtimeProfile);
+    if (provider.compactContext) {
+      const identity = participant.identityId ? this.repo.getIdentity(participant.identityId) : null;
+      try {
+        await provider.compactContext({
+          conversation,
+          participant,
+          identity,
+          runtimeProfile,
+          userMessage: createSyntheticContextCompactMessage(conversation, participant),
+          recentMessages: [],
+          attachments: [],
+        });
+        const localCompaction = this.workspaces.compactConversationContext({ conversation, participant });
+        return {
+          before,
+          after: localCompaction.after,
+        };
+      } catch (error) {
+        if (!isProviderContextCompactUnavailable(error)) throw error;
+      }
     }
     return this.workspaces.compactConversationContext({ conversation, participant });
   }
@@ -1365,7 +1389,13 @@ export class ChatService {
     let content = "";
     let deferredAssistantText = "";
     const deferAssistantTextToThinking = provider.id === "local-agent";
+    const synthesizeClonePlanningSummary = shouldSynthesizeAgentClonePlanningSummary({
+      participant: currentParticipant,
+      providerId: provider.id,
+      runtimeProfile,
+    });
     const runFileWritePaths = new Set<string>();
+    const observedToolCalls: Array<Pick<Extract<RuntimeStreamEvent, { type: "tool_call" }>, "name" | "input">> = [];
     const createRunEvent = (
       type: Parameters<ChatRepository["createAgentRunEvent"]>[0]["type"],
       input: Omit<Parameters<ChatRepository["createAgentRunEvent"]>[0], "runId" | "conversationId" | "type"> = {},
@@ -1538,6 +1568,7 @@ export class ChatService {
         return;
       }
       if (event.type === "tool_call") {
+        observedToolCalls.push({ name: event.name, input: event.input });
         const runEvent = createRunEvent("tool_call", {
           content: formatToolCallContent(event.name, event.input),
           status: "streaming",
@@ -1703,7 +1734,16 @@ export class ChatService {
     const finalContent = linkRunFileArtifactPathsInContent(enrichedReply.content, runFileArtifacts);
     const finalBlock = this.repo.updateMessageBlock(visibleReply.block.id, { content: finalContent, status: "success" });
     if (deferAssistantTextToThinking && !thinkingState.hasExplicitThinking) {
-      thinkingState.content = extractLocalAgentThinking(deferredAssistantText, finalVisibleOutput);
+      const extractedThinking = extractLocalAgentThinking(deferredAssistantText, finalVisibleOutput);
+      thinkingState.content = extractedThinking.trim()
+        ? extractedThinking
+        : synthesizeClonePlanningSummary
+          ? formatSyntheticClonePlanningSummary({
+            participant: currentParticipant,
+            userMessage,
+            toolCalls: observedToolCalls,
+          })
+          : "";
     }
     appendThinking("", true);
     const finalMessage = this.repo.updateMessage(visibleReply.message.id, {
@@ -2419,6 +2459,29 @@ function formatToolCallContent(toolName: string, input: unknown) {
   return preview ? `Calling ${toolName}\n\n${preview}` : `Calling ${toolName}`;
 }
 
+function formatSyntheticClonePlanningSummary(input: {
+  participant: Participant;
+  userMessage: Message;
+  toolCalls: Array<Pick<Extract<RuntimeStreamEvent, { type: "tool_call" }>, "name" | "input">>;
+}) {
+  const toolNames = [...new Set(input.toolCalls.map((call) => call.name.trim()).filter(Boolean))];
+  const toolSummary = toolNames.length
+    ? `，并结合 ${toolNames.slice(0, 3).join("、")} 等工具结果`
+    : "";
+  const task = compactTaskPreview(input.userMessage.content);
+  return `规划总结：我会先围绕“${task}”确认任务目标和相关上下文${toolSummary}，再给出面向 ${input.participant.displayName} 角色的最终回复。`;
+}
+
+function shouldSynthesizeAgentClonePlanningSummary(input: {
+  participant: Participant;
+  providerId: string;
+  runtimeProfile: RuntimeProfile | null;
+}) {
+  return input.providerId === "local-agent"
+    && input.runtimeProfile?.kind === "local-agent"
+    && !parseTuttiAgentParticipantId(input.participant.id);
+}
+
 function formatToolResultContent(event: Extract<RuntimeStreamEvent, { type: "tool_result" }>) {
   if (event.error) return event.error;
   if (event.summary) return event.summary;
@@ -2490,6 +2553,32 @@ function replyScheduleKey(conversationId: string, participantId: string) {
 
 function compactTaskPreview(content: string) {
   return content.replace(/\s+/g, " ").trim().slice(0, 120) || "[附件]";
+}
+
+function createSyntheticContextCompactMessage(conversation: Conversation, participant: Participant): Message {
+  const now = new Date().toISOString();
+  return {
+    id: `context-compact:${conversation.id}:${participant.id}:${now}`,
+    conversationId: conversation.id,
+    role: "system",
+    senderParticipantId: participant.id,
+    senderName: participant.displayName,
+    content: "/compact",
+    mentions: [],
+    visibility: "public",
+    status: "success",
+    branchId: conversation.activeBranchId,
+    parentMessageId: null,
+    runId: null,
+    tokenUsage: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function isProviderContextCompactUnavailable(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /No active provider session|does not expose provider session compaction/i.test(message);
 }
 
 function shouldAdaptiveReply(userText: string) {

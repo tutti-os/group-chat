@@ -453,30 +453,31 @@ function AgentContextUsageSection(props: {
   onCompact?: () => void | Promise<void>;
 }) {
   const { t } = useTranslation();
-  const rawPercent = props.usage
-    ? Math.min(100, Math.round((props.usage.rawConversationLogChars / props.usage.rawConversationLogMaxChars) * 100))
+  const hasProviderUsage = Boolean(
+    props.usage
+    && typeof props.usage.contextWindowUsedTokens === "number"
+    && typeof props.usage.contextWindowTotalTokens === "number"
+    && props.usage.contextWindowTotalTokens > 0,
+  );
+  const usagePercent = hasProviderUsage
+    ? Math.min(100, Math.max(0, Math.round(props.usage?.contextWindowPercentUsed ?? 0)))
     : 0;
-  const rawLabel = props.usage
-    ? t("agentForm.contextRawUsage", {
-      used: formatCompactNumber(props.usage.rawConversationLogChars),
-      max: formatCompactNumber(props.usage.rawConversationLogMaxChars),
+  const providerLabel = hasProviderUsage && props.usage
+    ? t("agentForm.contextProviderUsage", {
+      used: formatCompactNumber(props.usage.contextWindowUsedTokens ?? 0),
+      total: formatCompactNumber(props.usage.contextWindowTotalTokens ?? 0),
     })
     : props.loading
       ? t("agentForm.contextLoading")
       : t("agentForm.contextUnavailable");
-  const totalLabel = props.usage
-    ? t("agentForm.contextTotalUsage", {
-      chars: formatCompactNumber(props.usage.totalChars),
-      tokens: formatCompactNumber(props.usage.estimatedTokens),
-    })
-    : "";
+  const canCompactProviderContext = Boolean(props.usage?.providerSessionActive || hasProviderUsage);
   return (
     <section className={"[display:grid] [gap:10px] [border:1px_solid_var(--border-1)] [border-radius:8px] [padding:12px] [background:var(--background-panel)]"}>
       <div className={"[display:flex] [align-items:center] [justify-content:space-between] [gap:10px]"}>
         <div className={"[min-width:0]"}>
           <div className={"[color:var(--text-secondary)] [font-size:11px] [font-weight:750]"}>{t("agentForm.contextTitle")}</div>
           <div className={"[margin-top:3px] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap] [color:var(--text-primary)] [font-size:12px] [font-weight:650]"}>
-            {totalLabel || rawLabel}
+            {providerLabel}
           </div>
         </div>
         <div className={"[display:flex] [flex:0_0_auto] [align-items:center] [gap:6px]"}>
@@ -493,7 +494,7 @@ function AgentContextUsageSection(props: {
           <button
             type="button"
             className={"[display:inline-flex] [height:30px] [align-items:center] [gap:6px] [border:1px_solid_color-mix(in_srgb,var(--text-primary)_12%,transparent)] [border-radius:8px] [padding:0_10px] [color:var(--text-primary)] [background:var(--white-stationary)] [font-size:11px] [font-weight:700] [&:hover:not(:disabled)]:[background:var(--transparency-hover)] [&:disabled]:[opacity:0.55]"}
-            disabled={props.readOnly || !props.onCompact || props.loading || props.compacting || !props.usage?.rawConversationLogExists}
+            disabled={props.readOnly || !props.onCompact || props.loading || props.compacting || !canCompactProviderContext}
             title={t("agentForm.contextCompact")}
             aria-label={t("agentForm.contextCompact")}
             onClick={() => void props.onCompact?.()}
@@ -507,13 +508,14 @@ function AgentContextUsageSection(props: {
         <div className={"[height:6px] [overflow:hidden] [border-radius:999px] [background:color-mix(in_srgb,var(--text-secondary)_12%,transparent)]"}>
           <div
             className={"[height:100%] [border-radius:999px] [background:var(--accent-codex)] [transition:width_160ms_ease]"}
-            style={{ width: `${rawPercent}%` }}
+            style={{ width: `${usagePercent}%` }}
           />
         </div>
-        <div className={"[display:flex] [justify-content:space-between] [gap:8px] [color:var(--text-secondary)] [font-size:11px] [line-height:1.35]"}>
-          <span>{rawLabel}</span>
-          {props.usage?.compacted ? <span>{t("agentForm.contextCompacted")}</span> : null}
-        </div>
+        {props.usage?.providerCompactedAt ? (
+          <div className={"[display:flex] [justify-content:flex-end] [gap:8px] [color:var(--text-secondary)] [font-size:11px] [line-height:1.35]"}>
+            <span>{t("agentForm.contextCompacted")}</span>
+          </div>
+        ) : null}
       </div>
     </section>
   );

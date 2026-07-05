@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { dirname, join, resolve } from "node:path";
@@ -35,6 +35,7 @@ import {
 import type { RuntimeProvider, RuntimeReplyContext, RuntimeStreamEvent } from "./runtime-provider.js";
 import { RuntimeProviderUnsupportedError } from "./runtime-provider.js";
 import { buildLocalAgentProcessEnv } from "./local-agent-env.js";
+import { LocalAgentSessionStore } from "./local-agent-session-store.js";
 
 type GroupChatLocalAgentProviderPlugin = LocalAgentProviderPlugin<"local-agent", string>;
 const DEFAULT_KIT_HISTORY_LIMIT = 16;
@@ -190,6 +191,75 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
     return { cancelled: true };
   }
 
+  async compactContext(context: RuntimeReplyContext) {
+    const provider = context.runtimeProfile?.provider ?? "local-agent";
+    if (resolveLocalAgentCommand(context)) {
+      throw new Error("Configured local-agent command bridge does not expose provider session compaction.");
+    }
+    if (!this.localAgentRuntime.listProviders().some((item) => item.id === provider)) {
+      throw new Error(`${provider} local agent provider is not registered.`);
+    }
+    const workspaceRoot = participantWorkspaceRoot(context.conversation.roomId, context.participant.id);
+    const sessionStore = new LocalAgentSessionStore(workspaceRoot);
+    const previousSession = sessionStore.read(context.conversation.id);
+    if (!previousSession || previousSession.provider !== provider || (!previousSession.providerSessionId && !previousSession.resumeToken)) {
+      throw new Error("No active provider session is available to compact yet.");
+    }
+
+    const controller = new AbortController();
+    const runId = `context-compact-${context.conversation.id}-${context.participant.id}-${Date.now()}`;
+    const resume = {
+      mode: "provider" as const,
+      ...(previousSession.providerSessionId ? { providerSessionId: previousSession.providerSessionId } : {}),
+      ...(previousSession.resumeToken ? { resumeToken: previousSession.resumeToken } : {}),
+    };
+    for await (const event of this.localAgentRuntime.run({
+      runId,
+      conversationId: context.conversation.id,
+      sessionId: context.conversation.id,
+      provider,
+      runtimeKind: "local-agent",
+      runtimeProvider: provider,
+      cwd: workspaceRoot,
+      prompt: "/compact",
+      model: stripLocalAgentProviderPrefix(context.runtimeProfile?.model ?? previousSession.model ?? "default", provider),
+      reasoning: context.participant.reasoningEffort ?? undefined,
+      env: buildLocalAgentRunEnv({ ...context, runId }, workspaceRoot),
+      metadata: context.participant.speedMode ? { speedMode: context.participant.speedMode } : undefined,
+      extraAllowedDirs: [workspaceRoot],
+      resume,
+      signal: controller.signal,
+    })) {
+      if (event.type === "usage") {
+        sessionStore.updateUsage(context.conversation.id, {
+          provider,
+          model: context.runtimeProfile?.model ?? previousSession.model ?? null,
+          usage: event.usage,
+        });
+        continue;
+      }
+      if (event.type === "done") {
+        if (event.sessionId || event.resumeToken) {
+          sessionStore.write(context.conversation.id, {
+            provider,
+            providerSessionId: event.sessionId,
+            resumeToken: event.resumeToken,
+            model: context.runtimeProfile?.model ?? previousSession.model ?? null,
+          });
+        }
+        if (event.status === "failed") {
+          throw new Error(`local-agent ${provider} compact failed${typeof event.exitCode === "number" ? ` with exit code ${event.exitCode}` : ""}`);
+        }
+      } else if (event.type === "error") {
+        throw new Error(event.message);
+      }
+    }
+    sessionStore.markCompacted(context.conversation.id, {
+      provider,
+      model: context.runtimeProfile?.model ?? previousSession.model ?? null,
+    });
+  }
+
   private async *streamCommandBridge(context: RuntimeReplyContext, command: string) {
     if (!command) {
       const provider = context.runtimeProfile?.provider ?? "local-agent";
@@ -297,11 +367,39 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       const input = buildLocalAgentInput(context);
       const timeoutMs = localAgentTimeoutMs();
       const runtimeRunId = context.runId ?? `${context.conversation.id}:${context.participant.id}`;
-      const skillContext = await loadGroupChatAgentSkillContext({
-        provider,
-        agentSessionId: runtimeRunId,
-        workspaceRoot,
-      });
+      let skillFallbackEnv: Record<string, string> | undefined;
+      let skillContext = emptyTuttiAgentSkillContext(provider, runtimeRunId);
+      if (shouldLoadGroupChatAgentSkillContext(context, input)) {
+        try {
+          skillContext = await loadGroupChatAgentSkillContext({
+            provider,
+            agentSessionId: runtimeRunId,
+            workspaceRoot,
+          });
+        } catch (error) {
+          if (provider === "codex" && isSkillLoadFailure(error)) {
+            skillFallbackEnv = buildIsolatedUserSkillEnv(workspaceRoot);
+            yield { type: "thinking_delta" as const, text: `${SKILL_LOAD_FALLBACK_NOTICE}\n` };
+            try {
+              skillContext = await loadGroupChatAgentSkillContext({
+                provider,
+                agentSessionId: runtimeRunId,
+                workspaceRoot,
+                envOverrides: skillFallbackEnv,
+              });
+            } catch (fallbackError) {
+              if (!isTuttiSkillBundleLoadFailure(fallbackError)) throw fallbackError;
+              skillContext = emptyTuttiAgentSkillContext(provider, runtimeRunId);
+              yield { type: "thinking_delta" as const, text: `${SKILL_BUNDLE_UNAVAILABLE_NOTICE}\n` };
+            }
+          } else if (isTuttiSkillBundleLoadFailure(error)) {
+            skillContext = emptyTuttiAgentSkillContext(provider, runtimeRunId);
+            yield { type: "thinking_delta" as const, text: `${SKILL_BUNDLE_UNAVAILABLE_NOTICE}\n` };
+          } else {
+            throw error;
+          }
+        }
+      }
       let resume = !input.turn.intent && previousSession?.provider === provider && (previousSession.providerSessionId || previousSession.resumeToken)
         ? {
             mode: "provider" as const,
@@ -312,8 +410,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       let canRetryFresh = resume.mode !== "fresh";
       let historyLimit = DEFAULT_KIT_HISTORY_LIMIT;
       let contextRetryMode: ContextRetryMode = "normal";
-      let canRetryWithoutUserSkills = provider === "codex";
-      let skillFallbackEnv: Record<string, string> | undefined;
+      let canRetryWithoutUserSkills = provider === "codex" && !skillFallbackEnv;
       let emittedNonRetryableEvent = false;
       let emittedContextRetryBlockingEvent = false;
       while (true) {
@@ -359,6 +456,12 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
               yield runtimeEvent;
             } else if (event.type === "error") {
               throw new Error(event.message);
+            } else if (event.type === "usage") {
+              sessionStore.updateUsage(context.conversation.id, {
+                provider,
+                model: context.runtimeProfile?.model ?? null,
+                usage: event.usage,
+              });
             } else if (event.type === "done") {
               if (event.sessionId || event.resumeToken) {
                 sessionStore.write(context.conversation.id, {
@@ -415,6 +518,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
 }
 
 const SKILL_LOAD_FALLBACK_NOTICE = "检测到用户级 skill 元数据损坏，已临时隔离用户级 skills 并自动重试。";
+const SKILL_BUNDLE_UNAVAILABLE_NOTICE = "Tutti skill bundle 暂时不可用，已跳过 skill bundle 注入并继续执行。";
 const CONTEXT_WINDOW_FRESH_RETRY_NOTICE = "检测到 Codex 上下文窗口已满，已自动开启新线程并减少历史上下文重试。";
 const CONTEXT_WINDOW_MINIMAL_RETRY_NOTICE = "上下文仍然过大，已切换到紧急最小上下文重试。";
 
@@ -779,67 +883,24 @@ function resolveLocalAgentHostScript(filename: string) {
   return resolve(currentDir, "..", "local-agent-host", filename);
 }
 
-interface StoredLocalAgentSession {
-  provider: string;
-  providerSessionId?: string;
-  resumeToken?: string;
-  model: string | null;
-  updatedAt: string;
-}
-
-class LocalAgentSessionStore {
-  constructor(private readonly workspaceRoot: string) {}
-
-  read(conversationId: string): StoredLocalAgentSession | null {
-    try {
-      const parsed = JSON.parse(readFileSync(this.pathFor(conversationId), "utf8")) as StoredLocalAgentSession;
-      return typeof parsed.provider === "string" && parsed.provider ? parsed : null;
-    } catch {
-      return null;
-    }
-  }
-
-  write(conversationId: string, session: Omit<StoredLocalAgentSession, "updatedAt">) {
-    const filePath = this.pathFor(conversationId);
-    mkdirSync(dirname(filePath), { recursive: true });
-    writeFileSync(
-      filePath,
-      `${JSON.stringify(
-        {
-          ...session,
-          updatedAt: new Date().toISOString(),
-        },
-        null,
-        2,
-      )}\n`,
-      "utf8",
-    );
-  }
-
-  remove(conversationId: string) {
-    try {
-      unlinkSync(this.pathFor(conversationId));
-    } catch {
-      // A missing session file is already equivalent to a fresh run.
-    }
-  }
-
-  private pathFor(conversationId: string) {
-    return join(this.workspaceRoot, ".group-chat", "local-agent-sessions", `${safePathSegment(conversationId)}.json`);
-  }
-}
-
 function isSkillLoadFailure(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return /failed to load skill|missing YAML frontmatter|invalid YAML/i.test(message);
+}
+
+function isTuttiSkillBundleLoadFailure(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /^Unable to load Tutti agent skill bundle/i.test(message);
 }
 
 function didLocalAgentCommandEmitOutput(error: unknown) {
   return error instanceof LocalAgentCommandError && error.emittedOutput;
 }
 
-function safePathSegment(value: string) {
-  return value.replace(/[^\w.-]/g, "_") || "unknown";
+function shouldLoadGroupChatAgentSkillContext(context: RuntimeReplyContext, input: ReturnType<typeof buildLocalAgentInput>) {
+  if (input.turn.intent) return true;
+  if (context.userMessage.mentions.some((mention) => mention.mentionType === "reference")) return true;
+  return /\b(?:mention|group-chat):\/\//i.test(context.userMessage.content);
 }
 
 export function buildKitSystemPrompt(context: RuntimeReplyContext) {
@@ -918,17 +979,29 @@ async function loadGroupChatAgentSkillContext(input: {
   provider: string;
   agentSessionId: string;
   workspaceRoot: string;
+  envOverrides?: Record<string, string>;
 }): Promise<TuttiAgentSkillContext> {
   try {
+    const env = buildLocalAgentProcessEnv(process.env, { ...tuttiCliEnv(), ...input.envOverrides });
     return await loadTuttiAgentSkillContext({
       provider: input.provider,
       agentSessionId: input.agentSessionId,
       cwd: tuttiWorkspaceCwd(input.workspaceRoot),
+      env,
       commandEnvNames: ["GROUP_CHAT_TUTTI_CLI"],
     });
   } catch (error) {
     throw new Error(`Unable to load Tutti agent skill bundle; check GROUP_CHAT_TUTTI_CLI/TUTTI_CLI: ${errorMessage(error)}`);
   }
+}
+
+function emptyTuttiAgentSkillContext(provider: string, agentSessionId: string): TuttiAgentSkillContext {
+  return {
+    provider,
+    agentSessionId,
+    skills: [],
+    skillManifest: [],
+  };
 }
 
 function tuttiWorkspaceCwd(fallback: string) {
