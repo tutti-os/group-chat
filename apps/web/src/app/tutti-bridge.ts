@@ -96,7 +96,7 @@ declare global {
           autoSubmit?: boolean;
           draftPrompt?: string;
           feature: "agent-chat" | "agent-connect" | "app-center" | "issue-manager" | "message-center";
-          provider?: "claude-code" | "codex" | "nexight" | "hermes" | "gemini" | "openclaw";
+          provider?: string;
         }): Promise<void>;
       };
     };

@@ -169,7 +169,12 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       };
       return enrichLocalAgentProviderStatus(status);
     });
-    return mergeTuttiAgentProviderStatuses(await queryTuttiAgentProviderStatuses(), kitStatuses);
+    return mergeTuttiAgentProviderStatuses(
+      await queryTuttiAgentProviderStatuses(
+        this.localAgentRuntime.listProviders().map((item) => toDaemonAgentProviderId(item.id)),
+      ),
+      kitStatuses,
+    );
   }
 
   async *streamReply(context: RuntimeReplyContext) {
@@ -614,15 +619,18 @@ function localAgentUnavailableReason(
   return `${displayName} is not available.`;
 }
 
-async function queryTuttiAgentProviderStatuses(): Promise<TuttiAgentProviderStatus[] | null> {
+async function queryTuttiAgentProviderStatuses(
+  providerIds: readonly string[],
+): Promise<TuttiAgentProviderStatus[] | null> {
   const baseUrl = process.env.TUTTI_API_BASE_URL?.trim();
   const token = process.env.TUTTI_APP_SERVER_TOKEN?.trim();
-  if (!baseUrl || !token) return null;
+  if (!baseUrl || !token || providerIds.length === 0) return null;
 
   try {
     const url = new URL("/v1/agent-providers/status", baseUrl);
-    url.searchParams.append("providers", "codex");
-    url.searchParams.append("providers", "claude-code");
+    for (const providerId of providerIds) {
+      url.searchParams.append("providers", providerId);
+    }
     const response = await fetch(url, {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -820,11 +828,18 @@ function parseTuttiAgentProviderDefaultSpeedMode(status: TuttiAgentProviderStatu
     ?? readString(defaults, "speedMode", "speed", "defaultSpeedMode", "defaultSpeed");
 }
 
+function toDaemonAgentProviderId(kitProviderId: string) {
+  const normalized = kitProviderId.trim().toLowerCase();
+  if (normalized === "claude") return "claude-code";
+  if (normalized === "nexight") return "tutti-agent";
+  return normalized;
+}
+
 function normalizeTuttiAgentProvider(provider: string) {
   const normalized = provider.trim().toLowerCase();
   if (normalized === "claude-code") return "claude";
-  if (normalized === "codex") return "codex";
-  return "";
+  if (normalized === "tutti-agent") return "nexight";
+  return normalized.replace(/[^a-z0-9_.-]/g, "");
 }
 
 function displayNameForTuttiAgentProvider(provider: string) {
@@ -834,7 +849,6 @@ function displayNameForTuttiAgentProvider(provider: string) {
 }
 
 function displayNameForLocalAgentProvider(provider: string, detectedDisplayName?: string | null) {
-  if (provider === "codex") return "Codex";
   return detectedDisplayName?.trim() || displayNameForTuttiAgentProvider(provider);
 }
 

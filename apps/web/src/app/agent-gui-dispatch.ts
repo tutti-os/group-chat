@@ -6,7 +6,17 @@ import {
 import { resolveAgentGuiProviderFromAppId } from "./agent-launcher-mentions.js";
 import { isTuttiWorkspaceAppEnvironment } from "./tutti-bridge.js";
 
-export type TuttiAgentGuiProvider = "claude-code" | "codex";
+export type TuttiAgentGuiProvider = string;
+
+export const RUNTIME_PROVIDER_TO_GUI: Record<string, string> = {
+  claude: "claude-code",
+  codex: "codex",
+  cursor: "cursor",
+  opencode: "opencode",
+  nexight: "tutti-agent",
+  hermes: "hermes",
+  openclaw: "openclaw",
+};
 
 export interface AgentGuiDispatchRequest {
   provider: TuttiAgentGuiProvider;

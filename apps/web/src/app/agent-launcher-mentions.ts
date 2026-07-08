@@ -1,4 +1,5 @@
 import type { Participant, RuntimeProfile } from "@group-chat/shared";
+import { RUNTIME_PROVIDER_TO_GUI } from "./agent-gui-dispatch.js";
 import type { TuttiAgentGuiProvider } from "./agent-gui-dispatch.js";
 
 export const AGENT_LAUNCHER_APP_IDS = {
@@ -6,15 +7,12 @@ export const AGENT_LAUNCHER_APP_IDS = {
   claude: "agent-claude-code",
 } as const;
 
-export const AGENT_LAUNCHER_APP_ID_TO_GUI: Record<string, TuttiAgentGuiProvider> = {
+export const AGENT_LAUNCHER_APP_ID_TO_GUI: Record<string, string> = {
   "agent-claude-code": "claude-code",
   "agent-codex": "codex",
 };
 
-export const RUNTIME_PROVIDER_TO_GUI: Record<string, TuttiAgentGuiProvider> = {
-  claude: "claude-code",
-  codex: "codex",
-};
+export { RUNTIME_PROVIDER_TO_GUI } from "./agent-gui-dispatch.js";
 
 export function localAgentLauncherAppId(provider: string): string | null {
   return AGENT_LAUNCHER_APP_IDS[provider.trim().toLowerCase() as keyof typeof AGENT_LAUNCHER_APP_IDS] ?? null;
@@ -33,7 +31,8 @@ export function resolveAgentGuiProviderFromRuntimeProvider(
   provider: string | null | undefined,
 ): TuttiAgentGuiProvider | null {
   if (!provider?.trim()) return null;
-  return RUNTIME_PROVIDER_TO_GUI[provider.trim().toLowerCase()] ?? null;
+  const normalized = provider.trim().toLowerCase();
+  return RUNTIME_PROVIDER_TO_GUI[normalized] ?? normalized;
 }
 
 export function resolveAgentLauncherRuntimeProvider(entityId: string | null | undefined): string | null {
