@@ -9,7 +9,7 @@
     "dev:web": "pnpm --filter @group-chat/web dev",
     "dev:server": "pnpm --filter @group-chat/server dev",
     "build": "pnpm -r build",
-    "package:tutti": "node scripts/package-tutti-app.mjs",
+    "package:tutti": "node scripts/patch-agent-acp-kit-base.mjs && node scripts/package-tutti-app.mjs",
     "dev:tutti": "node scripts/dev-tutti.mjs start",
     "dev:tutti:reload": "node scripts/dev-tutti.mjs reload",
     "dev:tutti:serve": "node scripts/dev-tutti.mjs serve",

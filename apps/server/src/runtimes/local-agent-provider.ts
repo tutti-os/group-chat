@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { dirname, join, resolve } from "node:path";
@@ -227,7 +227,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       runtimeProvider: provider,
       cwd: workspaceRoot,
       prompt: "/compact",
-      model: stripLocalAgentProviderPrefix(context.runtimeProfile?.model ?? previousSession.model ?? "default", provider),
+      model: localAgentModelIdForAcp(context.runtimeProfile?.model ?? previousSession.model ?? "default", provider),
       reasoning: context.participant.reasoningEffort ?? undefined,
       env: buildLocalAgentRunEnv({ ...context, runId }, workspaceRoot),
       metadata: context.participant.speedMode ? { speedMode: context.participant.speedMode } : undefined,
@@ -435,7 +435,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
             prompt,
             systemPrompt,
             history: buildKitHistory(context, historyLimit),
-            model: stripLocalAgentProviderPrefix(context.runtimeProfile?.model ?? "default", provider),
+            model: localAgentModelIdForAcp(context.runtimeProfile?.model ?? "default", provider),
             reasoning: context.participant.reasoningEffort ?? undefined,
             ...(mcpServers ? { mcpServers } : {}),
             ...(skillManifest ? { skillManifest } : {}),
@@ -893,8 +893,18 @@ function buildGroupChatMcpServers(context: RuntimeReplyContext): LocalAgentMcpSe
 }
 
 function resolveLocalAgentHostScript(filename: string) {
-  const currentDir = dirname(fileURLToPath(import.meta.url));
-  return resolve(currentDir, "..", "local-agent-host", filename);
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  if (filename === "tools-mcp.mjs") {
+    const packaged = resolve(moduleDir, "tools-mcp.js");
+    if (existsSync(packaged)) return packaged;
+  }
+  return resolve(moduleDir, "..", "local-agent-host", filename);
+}
+
+function localAgentModelIdForAcp(model: string, provider: string) {
+  const stripped = stripLocalAgentProviderPrefix(model, provider);
+  if (provider === "cursor" && stripped === "default") return "default[]";
+  return stripped;
 }
 
 function isSkillLoadFailure(error: unknown) {

@@ -442,6 +442,20 @@ async function bundleServer() {
   ]);
 }
 
+async function bundleToolsMcp() {
+  await run("pnpm", [
+    "exec",
+    "esbuild",
+    "apps/server/src/local-agent-host/tools-mcp.mjs",
+    "--bundle",
+    "--platform=node",
+    "--format=esm",
+    "--target=node22",
+    "--outfile=build/tutti-app/package/server/tools-mcp.js",
+    "--banner:js=import { createRequire as __groupChatCreateRequire } from 'node:module'; const require = __groupChatCreateRequire(import.meta.url);",
+  ]);
+}
+
 async function createZip(version) {
   const zipPath = path.join(buildRoot, `${APP_ID}-${version}.zip`);
   await rm(zipPath, { force: true });
@@ -478,6 +492,7 @@ export async function validatePackageRoot(root) {
     "bootstrap.sh",
     "icon.png",
     "server/server.js",
+    "server/tools-mcp.js",
     "dist/index.html",
   ];
   for (const file of requiredFiles) {
@@ -555,6 +570,7 @@ export async function packageTuttiApp() {
   await mkdir(buildRoot, { recursive: true });
   await writePackageFiles(manifest);
   await bundleServer();
+  await bundleToolsMcp();
   await validatePackageRoot(packageRoot);
   const zipPath = await createZip(version);
   const zipSha256 = await sha256File(zipPath);
