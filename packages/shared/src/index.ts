@@ -1005,7 +1005,8 @@ const TUTTI_AGENT_PARTICIPANT_PREFIX = "tutti-agent:";
 export function normalizeTuttiAgentProvider(provider: string | null | undefined) {
   const normalized = provider?.trim().toLowerCase() ?? "";
   if (normalized === "claude-code") return "claude";
-  if (normalized === "claude" || normalized === "codex") return normalized;
+  if (normalized === "tutti-agent") return "nexight";
+  if (!normalized) return "";
   return normalized.replace(/[^a-z0-9_.-]/g, "");
 }
 

@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { dirname, join, resolve } from "node:path";
@@ -169,7 +169,12 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       };
       return enrichLocalAgentProviderStatus(status);
     });
-    return mergeTuttiAgentProviderStatuses(await queryTuttiAgentProviderStatuses(), kitStatuses);
+    return mergeTuttiAgentProviderStatuses(
+      await queryTuttiAgentProviderStatuses(
+        this.localAgentRuntime.listProviders().map((item) => toDaemonAgentProviderId(item.id)),
+      ),
+      kitStatuses,
+    );
   }
 
   async *streamReply(context: RuntimeReplyContext) {
@@ -222,7 +227,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       runtimeProvider: provider,
       cwd: workspaceRoot,
       prompt: "/compact",
-      model: stripLocalAgentProviderPrefix(context.runtimeProfile?.model ?? previousSession.model ?? "default", provider),
+      model: localAgentModelIdForAcp(context.runtimeProfile?.model ?? previousSession.model ?? "default", provider),
       reasoning: context.participant.reasoningEffort ?? undefined,
       env: buildLocalAgentRunEnv({ ...context, runId }, workspaceRoot),
       metadata: context.participant.speedMode ? { speedMode: context.participant.speedMode } : undefined,
@@ -430,7 +435,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
             prompt,
             systemPrompt,
             history: buildKitHistory(context, historyLimit),
-            model: stripLocalAgentProviderPrefix(context.runtimeProfile?.model ?? "default", provider),
+            model: localAgentModelIdForAcp(context.runtimeProfile?.model ?? "default", provider),
             reasoning: context.participant.reasoningEffort ?? undefined,
             ...(mcpServers ? { mcpServers } : {}),
             ...(skillManifest ? { skillManifest } : {}),
@@ -614,15 +619,18 @@ function localAgentUnavailableReason(
   return `${displayName} is not available.`;
 }
 
-async function queryTuttiAgentProviderStatuses(): Promise<TuttiAgentProviderStatus[] | null> {
+async function queryTuttiAgentProviderStatuses(
+  providerIds: readonly string[],
+): Promise<TuttiAgentProviderStatus[] | null> {
   const baseUrl = process.env.TUTTI_API_BASE_URL?.trim();
   const token = process.env.TUTTI_APP_SERVER_TOKEN?.trim();
-  if (!baseUrl || !token) return null;
+  if (!baseUrl || !token || providerIds.length === 0) return null;
 
   try {
     const url = new URL("/v1/agent-providers/status", baseUrl);
-    url.searchParams.append("providers", "codex");
-    url.searchParams.append("providers", "claude-code");
+    for (const providerId of providerIds) {
+      url.searchParams.append("providers", providerId);
+    }
     const response = await fetch(url, {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -820,11 +828,18 @@ function parseTuttiAgentProviderDefaultSpeedMode(status: TuttiAgentProviderStatu
     ?? readString(defaults, "speedMode", "speed", "defaultSpeedMode", "defaultSpeed");
 }
 
+function toDaemonAgentProviderId(kitProviderId: string) {
+  const normalized = kitProviderId.trim().toLowerCase();
+  if (normalized === "claude") return "claude-code";
+  if (normalized === "nexight") return "tutti-agent";
+  return normalized;
+}
+
 function normalizeTuttiAgentProvider(provider: string) {
   const normalized = provider.trim().toLowerCase();
   if (normalized === "claude-code") return "claude";
-  if (normalized === "codex") return "codex";
-  return "";
+  if (normalized === "tutti-agent") return "nexight";
+  return normalized.replace(/[^a-z0-9_.-]/g, "");
 }
 
 function displayNameForTuttiAgentProvider(provider: string) {
@@ -834,7 +849,6 @@ function displayNameForTuttiAgentProvider(provider: string) {
 }
 
 function displayNameForLocalAgentProvider(provider: string, detectedDisplayName?: string | null) {
-  if (provider === "codex") return "Codex";
   return detectedDisplayName?.trim() || displayNameForTuttiAgentProvider(provider);
 }
 
@@ -879,8 +893,18 @@ function buildGroupChatMcpServers(context: RuntimeReplyContext): LocalAgentMcpSe
 }
 
 function resolveLocalAgentHostScript(filename: string) {
-  const currentDir = dirname(fileURLToPath(import.meta.url));
-  return resolve(currentDir, "..", "local-agent-host", filename);
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  if (filename === "tools-mcp.mjs") {
+    const packaged = resolve(moduleDir, "tools-mcp.js");
+    if (existsSync(packaged)) return packaged;
+  }
+  return resolve(moduleDir, "..", "local-agent-host", filename);
+}
+
+function localAgentModelIdForAcp(model: string, provider: string) {
+  const stripped = stripLocalAgentProviderPrefix(model, provider);
+  if (provider === "cursor" && stripped === "default") return "default[]";
+  return stripped;
 }
 
 function isSkillLoadFailure(error: unknown) {

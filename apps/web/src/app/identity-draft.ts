@@ -16,7 +16,7 @@ export function createDraftLocalAgent(
   runtimeProfiles: RuntimeProfile[],
   localAgentProviders: LocalAgentProviderStatus[],
 ): Identity {
-  const localRuntime = preferredDefaultRuntimeProfile(runtimeProfiles);
+  const localRuntime = preferredDefaultRuntimeProfile(runtimeProfiles, localAgentProviders);
   const canonicalRuntime = resolveCanonicalRuntimeProfile(localRuntime, runtimeProfiles);
   return {
     id: NEW_AGENT_DRAFT_ID,

@@ -117,6 +117,7 @@ test("validatePackageRoot accepts the required Tutti package files", async () =>
   await chmod(path.join(root, "bootstrap.sh"), 0o755);
   await writeFile(path.join(root, "icon.png"), "png");
   await writeFile(path.join(root, "server", "server.js"), "console.log('ok');\n");
+  await writeFile(path.join(root, "server", "tools-mcp.js"), "console.log('ok');\n");
   await writeFile(path.join(root, "dist", "index.html"), "<!doctype html>\n");
 
   await validatePackageRoot(root);
