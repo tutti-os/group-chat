@@ -35,6 +35,24 @@ const codexProfile = {
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
 
+const claudeProfile = {
+  ...codexProfile,
+  id: "local-agent:claude",
+  provider: "claude",
+  model: "claude:default",
+  displayName: "Claude Local Agent",
+};
+
+test("default runtime skips available providers without a matching profile", async () => {
+  const { preferredDefaultRuntimeProfile } = await loadModule();
+  const providers = [
+    { provider: "cursor", available: true },
+    { provider: "claude", available: true },
+  ];
+
+  assert.equal(preferredDefaultRuntimeProfile([codexProfile, claudeProfile], providers), claudeProfile);
+});
+
 test("local agent model options use detected provider models instead of provider-prefixed defaults", async () => {
   const { listRuntimeModels, preferredRuntimeModelId, resolveRuntimeModelId } = await loadModule();
   const providers = [{

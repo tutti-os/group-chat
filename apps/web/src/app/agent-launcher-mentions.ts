@@ -1,6 +1,16 @@
 import type { Participant, RuntimeProfile } from "@group-chat/shared";
-import { RUNTIME_PROVIDER_TO_GUI } from "./agent-gui-dispatch.js";
-import type { TuttiAgentGuiProvider } from "./agent-gui-dispatch.js";
+
+export type TuttiAgentGuiProvider = string;
+
+export const RUNTIME_PROVIDER_TO_GUI: Record<string, string> = {
+  claude: "claude-code",
+  codex: "codex",
+  cursor: "cursor",
+  opencode: "opencode",
+  nexight: "tutti-agent",
+  hermes: "hermes",
+  openclaw: "openclaw",
+};
 
 export const AGENT_LAUNCHER_APP_IDS = {
   codex: "agent-codex",
@@ -11,8 +21,6 @@ export const AGENT_LAUNCHER_APP_ID_TO_GUI: Record<string, string> = {
   "agent-claude-code": "claude-code",
   "agent-codex": "codex",
 };
-
-export { RUNTIME_PROVIDER_TO_GUI } from "./agent-gui-dispatch.js";
 
 export function localAgentLauncherAppId(provider: string): string | null {
   return AGENT_LAUNCHER_APP_IDS[provider.trim().toLowerCase() as keyof typeof AGENT_LAUNCHER_APP_IDS] ?? null;

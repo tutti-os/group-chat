@@ -1021,8 +1021,7 @@ export function parseTuttiAgentParticipantId(participantId: string | null | unde
   return normalizeTuttiAgentProvider(trimmed.slice(TUTTI_AGENT_PARTICIPANT_PREFIX.length));
 }
 
-export function defaultTuttiAgentParticipantName(provider: string, displayName?: string | null) {
-  if (displayName?.trim()) return displayName.trim();
+export function defaultTuttiAgentParticipantName(provider: string) {
   if (provider === "codex") return "Codex";
   if (provider === "claude") return "Claude Code";
   return provider || "Agent";

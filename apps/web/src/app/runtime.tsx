@@ -25,8 +25,7 @@ export function preferredDefaultRuntimeProfile(
   profiles: RuntimeProfile[],
   localAgentProviders: LocalAgentProviderStatus[] = [],
 ) {
-  const availableProvider = localAgentProviders.find((provider) => provider.available);
-  if (availableProvider) {
+  for (const availableProvider of localAgentProviders.filter((provider) => provider.available)) {
     const matched = profiles.find(
       (profile) =>
         profile.kind === "local-agent"

@@ -3,20 +3,14 @@ import {
   buildAgentGuiDraftPrompt,
   type AgentGuiDraftPromptContext,
 } from "./agent-gui-draft-prompt.js";
-import { resolveAgentGuiProviderFromAppId } from "./agent-launcher-mentions.js";
+import {
+  resolveAgentGuiProviderFromAppId,
+  type TuttiAgentGuiProvider,
+} from "./agent-launcher-mentions.js";
 import { isTuttiWorkspaceAppEnvironment } from "./tutti-bridge.js";
 
-export type TuttiAgentGuiProvider = string;
-
-export const RUNTIME_PROVIDER_TO_GUI: Record<string, string> = {
-  claude: "claude-code",
-  codex: "codex",
-  cursor: "cursor",
-  opencode: "opencode",
-  nexight: "tutti-agent",
-  hermes: "hermes",
-  openclaw: "openclaw",
-};
+export type { TuttiAgentGuiProvider } from "./agent-launcher-mentions.js";
+export { RUNTIME_PROVIDER_TO_GUI } from "./agent-launcher-mentions.js";
 
 export interface AgentGuiDispatchRequest {
   provider: TuttiAgentGuiProvider;
