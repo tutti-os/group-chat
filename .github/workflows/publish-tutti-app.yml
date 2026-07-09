@@ -32,6 +32,7 @@ jobs:
     uses: tutti-os/tutti/.github/workflows/publish-tutti-app-release.yml@main
     with:
       app_id: group-chat
+      min_tutti_version: "0.1.18"
       package_command: pnpm package:tutti
       package_dir: build/tutti-app/package
       icon_path: build/tutti-app/package/icon.png
