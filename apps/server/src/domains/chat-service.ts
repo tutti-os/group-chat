@@ -1077,6 +1077,7 @@ export class ChatService {
     if (!isWorkspaceAppOnlyTaskMessage({ userMessage: { content: userText, mentions } })) return null;
     const runtimeProfile =
       this.repo.getRuntimeProfile("local-agent:codex")
+      ?? this.repo.getRuntimeProfile("local-agent:claude-code")
       ?? this.repo.getRuntimeProfile("local-agent:claude");
     if (runtimeProfile?.kind !== "local-agent" || !runtimeProfile.enabled) return null;
     const appMention = mentions.find((mention) =>

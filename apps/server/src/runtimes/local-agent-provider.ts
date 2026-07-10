@@ -14,11 +14,13 @@ import {
   type RawAgentStream,
 } from "@tutti-os/agent-acp-kit";
 import {
+  loadTuttiAgentProviderCatalog,
   loadTuttiAgentSkillContext,
   resolveTuttiCliCommand,
+  type TuttiAgentProviderCatalogEntry,
   type TuttiAgentSkillContext,
 } from "@tutti-os/agent-acp-kit/tutti";
-import type { LocalAgentProviderModel, LocalAgentProviderSpeedMode, LocalAgentProviderStatus, ReasoningEffort } from "@group-chat/shared";
+import type { LocalAgentProviderStatus, ReasoningEffort } from "@group-chat/shared";
 import { isMentionAllTrigger } from "@group-chat/shared";
 import { buildEffectiveRoleDescription } from "../domains/agent-instructions.js";
 import { participantWorkspaceRoot } from "../local/paths.js";
@@ -42,42 +44,6 @@ const DEFAULT_KIT_HISTORY_LIMIT = 16;
 const COMPACT_KIT_HISTORY_LIMIT = 4;
 
 type ContextRetryMode = "normal" | "compact-history" | "minimal";
-
-type TuttiAgentProviderStatus = {
-  provider: string;
-  availability?: {
-    status?: string;
-    reasonCode?: string | null;
-  };
-  cli?: {
-    binaryPath?: string | null;
-    version?: string | null;
-  };
-  adapter?: {
-    binaryPath?: string | null;
-  };
-  auth?: {
-    status?: string;
-  };
-  models?: unknown;
-  reasoningEfforts?: unknown;
-  reasoningOptions?: unknown;
-  reasoningLevels?: unknown;
-  supportedReasoningEfforts?: unknown;
-  supportedReasoningLevels?: unknown;
-  speedModes?: unknown;
-  speedOptions?: unknown;
-  speeds?: unknown;
-  availableSpeeds?: unknown;
-  performanceModes?: unknown;
-  modelCatalog?: unknown;
-  configuration?: unknown;
-  defaults?: unknown;
-};
-
-type TuttiAgentProviderStatusListResponse = {
-  providers?: TuttiAgentProviderStatus[];
-};
 
 export class LocalAgentRuntimeProvider implements RuntimeProvider {
   id = "local-agent";
@@ -169,12 +135,17 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       };
       return enrichLocalAgentProviderStatus(status);
     });
-    return mergeTuttiAgentProviderStatuses(
-      await queryTuttiAgentProviderStatuses(
-        this.localAgentRuntime.listProviders().map((item) => toDaemonAgentProviderId(item.id)),
-      ),
-      kitStatuses,
-    );
+    const env = buildLocalAgentProcessEnv(process.env, tuttiCliEnv());
+    try {
+      const catalog = await loadTuttiAgentProviderCatalog({
+        runtime: this.localAgentRuntime,
+        env,
+        commandEnvNames: ["GROUP_CHAT_TUTTI_CLI"],
+      });
+      return mergeTuttiAgentProviderCatalog(catalog.providers, kitStatuses);
+    } catch {
+      return kitStatuses;
+    }
   }
 
   async *streamReply(context: RuntimeReplyContext) {
@@ -619,73 +590,44 @@ function localAgentUnavailableReason(
   return `${displayName} is not available.`;
 }
 
-async function queryTuttiAgentProviderStatuses(
-  providerIds: readonly string[],
-): Promise<TuttiAgentProviderStatus[] | null> {
-  const baseUrl = process.env.TUTTI_API_BASE_URL?.trim();
-  const token = process.env.TUTTI_APP_SERVER_TOKEN?.trim();
-  if (!baseUrl || !token || providerIds.length === 0) return null;
-
-  try {
-    const url = new URL("/v1/agent-providers/status", baseUrl);
-    for (const providerId of providerIds) {
-      url.searchParams.append("providers", providerId);
-    }
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-    if (!response.ok) return null;
-    const payload = await response.json() as TuttiAgentProviderStatusListResponse;
-    return Array.isArray(payload.providers) ? payload.providers : null;
-  } catch {
-    return null;
-  }
-}
-
-function mergeTuttiAgentProviderStatuses(
-  tuttiStatuses: TuttiAgentProviderStatus[] | null,
+function mergeTuttiAgentProviderCatalog(
+  catalogProviders: TuttiAgentProviderCatalogEntry[],
   kitStatuses: LocalAgentProviderStatus[],
 ): LocalAgentProviderStatus[] {
-  if (!tuttiStatuses) return kitStatuses.map((status) => ({
-    ...status,
-    displayName: displayNameForLocalAgentProvider(status.provider, status.displayName),
-  }));
   const kitStatusByProvider = new Map(kitStatuses.map((status) => [status.provider, status]));
-  const merged = new Map<string, LocalAgentProviderStatus>();
-
-  for (const tuttiStatus of tuttiStatuses) {
-    const provider = normalizeTuttiAgentProvider(tuttiStatus.provider);
-    if (!provider) continue;
+  return catalogProviders.map((catalogProvider) => {
+    const provider = catalogProvider.providerId;
     const kitStatus = kitStatusByProvider.get(provider);
-    const available = tuttiStatus.availability?.status === "ready";
-    const status: LocalAgentProviderStatus = {
+    const available = catalogProvider.runtimeSupported && (
+      catalogProvider.availability.status === "available" ||
+      (catalogProvider.availability.status === "unknown" && kitStatus?.available === true)
+    );
+    return enrichLocalAgentProviderStatus({
       provider,
-      displayName: displayNameForLocalAgentProvider(provider, kitStatus?.displayName),
+      displayName: catalogProvider.displayName,
       available,
-      authState: authStateFromTuttiAgentProvider(tuttiStatus.auth?.status),
-      executablePath: tuttiStatus.cli?.binaryPath ?? tuttiStatus.adapter?.binaryPath ?? kitStatus?.executablePath ?? "",
-      version: tuttiStatus.cli?.version ?? kitStatus?.version ?? (available ? "" : "not-installed"),
+      authState: authStateFromCatalog(catalogProvider, kitStatus?.authState),
+      executablePath: kitStatus?.executablePath ?? "",
+      version: kitStatus?.version ?? (available ? "" : "not-installed"),
       configDir: kitStatus?.configDir,
-      models: parseTuttiAgentProviderModels(tuttiStatus) ?? kitStatus?.models ?? [],
-      defaultModelId: parseTuttiAgentProviderDefaultModelId(tuttiStatus) ?? kitStatus?.defaultModelId,
-      reasoningEfforts: parseTuttiAgentProviderReasoningEfforts(tuttiStatus) ?? kitStatus?.reasoningEfforts,
-      defaultReasoningEffort: parseTuttiAgentProviderDefaultReasoningEffort(tuttiStatus) ?? kitStatus?.defaultReasoningEffort,
-      speedModes: parseTuttiAgentProviderSpeedModes(tuttiStatus) ?? kitStatus?.speedModes,
-      defaultSpeedMode: parseTuttiAgentProviderDefaultSpeedMode(tuttiStatus) ?? kitStatus?.defaultSpeedMode,
-      reason: available ? undefined : unavailableReasonFromTuttiAgentProvider(tuttiStatus),
-    };
-    merged.set(provider, enrichLocalAgentProviderStatus(status));
-  }
+      models: kitStatus?.models ?? [],
+      defaultModelId: kitStatus?.defaultModelId,
+      reasoningEfforts: kitStatus?.reasoningEfforts,
+      defaultReasoningEffort: kitStatus?.defaultReasoningEffort,
+      speedModes: kitStatus?.speedModes,
+      defaultSpeedMode: kitStatus?.defaultSpeedMode,
+      reason: available ? undefined : catalogProvider.availability.detail,
+    });
+  });
+}
 
-  for (const kitStatus of kitStatuses) {
-    if (!merged.has(kitStatus.provider)) {
-      merged.set(kitStatus.provider, kitStatus);
-    }
-  }
-
-  return [...merged.values()];
+function authStateFromCatalog(
+  provider: TuttiAgentProviderCatalogEntry,
+  detected: LocalAgentProviderStatus["authState"] | undefined,
+): LocalAgentProviderStatus["authState"] {
+  if (provider.availability.reasonCode === "auth_required") return "missing";
+  if (provider.availability.reasonCode === "auth_expired") return "expired";
+  return detected ?? "unknown";
 }
 
 const REASONING_EFFORTS = new Set<ReasoningEffort>(["low", "medium", "high", "xhigh"]);
@@ -695,15 +637,6 @@ function readString(record: Record<string, unknown> | undefined, ...keys: string
   for (const key of keys) {
     const value = record[key];
     if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return undefined;
-}
-
-function readArray(record: Record<string, unknown> | undefined, ...keys: string[]) {
-  if (!record) return undefined;
-  for (const key of keys) {
-    const value = record[key];
-    if (Array.isArray(value)) return value;
   }
   return undefined;
 }
@@ -723,154 +656,6 @@ function parseReasoningEfforts(value: unknown): ReasoningEffort[] | undefined {
     })
     .filter((effort): effort is ReasoningEffort => effort !== null);
   return efforts.length ? [...new Set(efforts)] : undefined;
-}
-
-function parseTuttiAgentProviderModels(status: TuttiAgentProviderStatus): LocalAgentProviderModel[] | undefined {
-  const root = toRecord(status);
-  const configuration = toRecord(status.configuration);
-  const catalog = toRecord(status.modelCatalog);
-  const rawModels =
-    readArray(root, "models", "availableModels", "modelOptions")
-    ?? readArray(configuration, "models", "availableModels", "modelOptions")
-    ?? readArray(catalog, "models", "availableModels", "modelOptions");
-  if (!rawModels?.length) return undefined;
-
-  const models: LocalAgentProviderModel[] = [];
-  const seen = new Set<string>();
-  for (const entry of rawModels) {
-    const record = toRecord(entry);
-    if (!record) continue;
-    if (record.hidden === true || record.visibility === "hide") continue;
-    const id = readString(record, "id", "model", "slug", "value");
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    const label = readString(record, "label", "displayName", "display_name", "name", "title") ?? id;
-    const description = readString(record, "description", "subtitle");
-    const supportedReasoningEfforts = parseReasoningEfforts(
-      record.supportedReasoningEfforts
-      ?? record.supported_reasoning_efforts
-      ?? record.supportedReasoningLevels
-      ?? record.supported_reasoning_levels
-      ?? record.reasoningEfforts
-      ?? record.reasoning,
-    );
-    models.push({
-      id,
-      label,
-      ...(description ? { description } : {}),
-      ...(supportedReasoningEfforts?.length ? { supportedReasoningEfforts } : {}),
-    });
-  }
-  return models.length ? models : undefined;
-}
-
-function parseTuttiAgentProviderDefaultModelId(status: TuttiAgentProviderStatus) {
-  const root = toRecord(status);
-  const configuration = toRecord(status.configuration);
-  const defaults = toRecord(status.defaults);
-  const catalog = toRecord(status.modelCatalog);
-  return readString(root, "defaultModelId", "defaultModel", "selectedModel", "model")
-    ?? readString(configuration, "defaultModelId", "defaultModel", "selectedModel", "model")
-    ?? readString(defaults, "modelId", "model")
-    ?? readString(catalog, "defaultModelId", "defaultModel");
-}
-
-function parseTuttiAgentProviderDefaultReasoningEffort(status: TuttiAgentProviderStatus) {
-  const root = toRecord(status);
-  const configuration = toRecord(status.configuration);
-  const defaults = toRecord(status.defaults);
-  return parseReasoningEffort(readString(root, "defaultReasoningEffort", "reasoningEffort", "reasoning"))
-    ?? parseReasoningEffort(readString(configuration, "defaultReasoningEffort", "reasoningEffort", "reasoning"))
-    ?? parseReasoningEffort(readString(defaults, "reasoningEffort", "reasoning"));
-}
-
-function parseTuttiAgentProviderReasoningEfforts(status: TuttiAgentProviderStatus) {
-  const root = toRecord(status);
-  const configuration = toRecord(status.configuration);
-  const defaults = toRecord(status.defaults);
-  return parseReasoningEfforts(
-    readArray(root, "reasoningEfforts", "reasoningOptions", "reasoningLevels", "supportedReasoningEfforts", "supportedReasoningLevels", "reasoning")
-    ?? readArray(configuration, "reasoningEfforts", "reasoningOptions", "reasoningLevels", "supportedReasoningEfforts", "supportedReasoningLevels", "reasoning")
-    ?? readArray(defaults, "reasoningEfforts", "reasoningOptions", "reasoningLevels", "supportedReasoningEfforts", "supportedReasoningLevels", "reasoning"),
-  );
-}
-
-function parseTuttiAgentProviderSpeedModes(status: TuttiAgentProviderStatus): LocalAgentProviderSpeedMode[] | undefined {
-  const root = toRecord(status);
-  const configuration = toRecord(status.configuration);
-  const defaults = toRecord(status.defaults);
-  const rawModes =
-    readArray(root, "speedModes", "speedOptions", "speeds", "availableSpeeds", "performanceModes", "performance")
-    ?? readArray(configuration, "speedModes", "speedOptions", "speeds", "availableSpeeds", "performanceModes", "performance")
-    ?? readArray(defaults, "speedModes", "speedOptions", "speeds", "availableSpeeds", "performanceModes", "performance");
-  if (!rawModes?.length) return undefined;
-  const modes: LocalAgentProviderSpeedMode[] = [];
-  const seen = new Set<string>();
-  for (const entry of rawModes) {
-    const record = toRecord(entry);
-    const id = record ? readString(record, "id", "value", "key", "mode", "name") : typeof entry === "string" ? entry.trim() : "";
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    modes.push({
-      id,
-      label: record ? readString(record, "label", "displayName", "display_name", "title", "name") ?? id : id,
-    });
-  }
-  return modes.length ? modes : undefined;
-}
-
-function parseTuttiAgentProviderDefaultSpeedMode(status: TuttiAgentProviderStatus) {
-  const root = toRecord(status);
-  const configuration = toRecord(status.configuration);
-  const defaults = toRecord(status.defaults);
-  return readString(root, "defaultSpeedMode", "defaultSpeed", "selectedSpeedMode", "selectedSpeed", "speedMode", "speed")
-    ?? readString(configuration, "defaultSpeedMode", "defaultSpeed", "selectedSpeedMode", "selectedSpeed", "speedMode", "speed")
-    ?? readString(defaults, "speedMode", "speed", "defaultSpeedMode", "defaultSpeed");
-}
-
-function toDaemonAgentProviderId(kitProviderId: string) {
-  const normalized = kitProviderId.trim().toLowerCase();
-  if (normalized === "claude") return "claude-code";
-  if (normalized === "nexight") return "tutti-agent";
-  return normalized;
-}
-
-function normalizeTuttiAgentProvider(provider: string) {
-  const normalized = provider.trim().toLowerCase();
-  if (normalized === "claude-code") return "claude";
-  if (normalized === "tutti-agent") return "nexight";
-  return normalized.replace(/[^a-z0-9_.-]/g, "");
-}
-
-function displayNameForTuttiAgentProvider(provider: string) {
-  if (provider === "claude") return "Claude Code";
-  if (provider === "codex") return "Codex";
-  return provider;
-}
-
-function displayNameForLocalAgentProvider(provider: string, detectedDisplayName?: string | null) {
-  return detectedDisplayName?.trim() || displayNameForTuttiAgentProvider(provider);
-}
-
-function authStateFromTuttiAgentProvider(status: string | null | undefined): LocalAgentProviderStatus["authState"] {
-  if (status === "authenticated") return "ok";
-  if (status === "required") return "missing";
-  return "unknown";
-}
-
-function unavailableReasonFromTuttiAgentProvider(status: TuttiAgentProviderStatus) {
-  const displayName = displayNameForTuttiAgentProvider(normalizeTuttiAgentProvider(status.provider));
-  switch (status.availability?.status) {
-    case "not_installed":
-      return `${displayName} is not installed or not discoverable.`;
-    case "auth_required":
-      return `${displayName} is installed but authentication is missing.`;
-    case "unsupported":
-      return status.availability.reasonCode ?? `${displayName} is not supported on this machine.`;
-    case "unknown":
-    default:
-      return status.availability?.reasonCode ?? `${displayName} is not available.`;
-  }
 }
 
 function buildGroupChatMcpServers(context: RuntimeReplyContext): LocalAgentMcpServerConfig[] {
@@ -1021,6 +806,7 @@ async function loadGroupChatAgentSkillContext(input: {
 
 function emptyTuttiAgentSkillContext(provider: string, agentSessionId: string): TuttiAgentSkillContext {
   return {
+    source: "standalone",
     provider,
     agentSessionId,
     skills: [],
@@ -1072,7 +858,7 @@ function stripLocalAgentProviderPrefix(model: string, provider: string) {
 
 function createGroupChatLocalAgentProviderPlugins(): GroupChatLocalAgentProviderPlugin[] {
   return createDefaultLocalAgentProviderPlugins().map((provider) =>
-    provider.id === "claude"
+    provider.id === "claude-code"
       ? withGroupChatClaudeStreamCompatibility(provider)
       : provider.id === "codex"
         ? withGroupChatCodexStreamCompatibility(provider)

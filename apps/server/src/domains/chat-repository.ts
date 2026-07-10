@@ -1338,10 +1338,10 @@ export class ChatRepository {
         updatedAt: now,
       },
       {
-        id: "local-agent:claude",
+        id: "local-agent:claude-code",
         kind: "local-agent",
-        provider: "claude",
-        model: "claude:default",
+        provider: "claude-code",
+        model: "claude-code:default",
         displayName: "Claude Local Agent",
         enabled: true,
         trustedMode: false,

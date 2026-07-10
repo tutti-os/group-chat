@@ -565,7 +565,6 @@ export async function packageTuttiApp() {
     version,
   };
 
-  await run(process.execPath, [path.join(rootDir, "scripts", "patch-agent-acp-kit-base.mjs")]);
   await run("pnpm", ["--filter", "@group-chat/shared", "build"]);
   await run("pnpm", ["--filter", "@group-chat/web", "build"]);
   await mkdir(buildRoot, { recursive: true });

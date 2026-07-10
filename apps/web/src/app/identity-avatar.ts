@@ -10,6 +10,7 @@ export interface RuntimeProviderAvatarStyle {
 
 const RUNTIME_PROVIDER_ICONS: Record<string, string> = {
   codex: "/runtime-icons/codex.png",
+  "claude-code": "/runtime-icons/claude-code.png",
   claude: "/runtime-icons/claude-code.png",
 };
 
@@ -25,7 +26,7 @@ export function getRuntimeProviderAvatarStyle(provider: string | null | undefine
   if (normalized === "codex") {
     return { label: "Cx", background: "transparent", color: "var(--white-stationary)", iconUrl };
   }
-  if (normalized === "claude") {
+  if (normalized === "claude-code" || normalized === "claude") {
     return { label: "Cc", background: "transparent", color: "var(--white-stationary)", iconUrl };
   }
   return {
