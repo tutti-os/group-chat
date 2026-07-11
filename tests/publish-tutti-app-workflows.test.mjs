@@ -26,11 +26,12 @@ test("production Tutti app workflow publishes Group Chat from a release bump", a
   assert.doesNotMatch(source, /TUTTI_APP_RELEASES_PRODUCTION_PUBLISH_CATALOG/);
 });
 
-test("staging Tutti app workflow publishes Group Chat manually", async () => {
+test("staging Tutti app workflow publishes Group Chat from main or manually", async () => {
   const source = await readFile(".github/workflows/publish-tutti-app-staging.yml", "utf8");
 
   assert.match(source, /name: Publish Tutti App Staging/);
-  assert.doesNotMatch(source, /\n\s+push:/);
+  assert.match(source, /\n\s+push:\n\s+branches:\n\s+- main/);
+  assert.match(source, /\n\s+workflow_dispatch:/);
   assert.match(source, /uses: tutti-os\/tutti\/\.github\/workflows\/publish-tutti-app-release\.yml@main/);
   assert.match(source, /app_id: group-chat/);
   assert.match(source, /package_command: pnpm package:tutti/);
