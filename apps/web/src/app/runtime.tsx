@@ -11,7 +11,7 @@ export function defaultIdentityNameForRuntime(
   if (!profile) return "Agent";
   const provider = profile.provider.trim().toLowerCase();
   if (provider === "codex") return "Codex";
-  if (provider === "claude") return "Claude Code";
+  if (provider === "claude-code" || provider === "claude") return "Claude Code";
   const detected = localAgentStatus(profile, localAgentProviders);
   if (detected?.displayName?.trim()) return detected.displayName.trim();
   return profile.displayName.replace(/\s+Local Agent$/i, "").trim() || profile.displayName;

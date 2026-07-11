@@ -37,9 +37,9 @@ const codexProfile = {
 
 const claudeProfile = {
   ...codexProfile,
-  id: "local-agent:claude",
-  provider: "claude",
-  model: "claude:default",
+  id: "local-agent:claude-code",
+  provider: "claude-code",
+  model: "claude-code:default",
   displayName: "Claude Local Agent",
 };
 
@@ -47,7 +47,7 @@ test("default runtime skips available providers without a matching profile", asy
   const { preferredDefaultRuntimeProfile } = await loadModule();
   const providers = [
     { provider: "cursor", available: true },
-    { provider: "claude", available: true },
+    { provider: "claude-code", available: true },
   ];
 
   assert.equal(preferredDefaultRuntimeProfile([codexProfile, claudeProfile], providers), claudeProfile);

@@ -36,8 +36,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared
       '@tutti-os/agent-acp-kit':
-        specifier: 0.2.4
-        version: 0.2.4
+        specifier: 0.3.3
+        version: 0.3.3
       fastify:
         specifier: ^5.8.5
         version: 5.8.5
@@ -1676,8 +1676,8 @@ packages:
       react: ^17.0.0 || ^18.0.0 || ^19.0.0
       react-dom: ^17.0.0 || ^18.0.0 || ^19.0.0
 
-  '@tutti-os/agent-acp-kit@0.2.4':
-    resolution: {integrity: sha512-P8eAJZ/qV5uI2RwTJyNHnNdxOzneR0HBdDVBNIq+DrWofK2Nhnwo3vWRNvAObuPmSWtMTd1PitM52JaNo/mPUw==}
+  '@tutti-os/agent-acp-kit@0.3.3':
+    resolution: {integrity: sha512-o5GXFgggbbMKCUN3Sz9+sM6Z57/wtKtiQCYC9Fy+JAWJgyZCxgOnuozms3ApUpYkMtWuV0LxdfEwhS3yEOcenQ==}
 
   '@tutti-os/ui-i18n-runtime@0.0.26':
     resolution: {integrity: sha512-2ucs3fflLlvmYKRUIs0BYUgG3hgTTvobahZJm6k2+DHYrzlWHVLUpVksACtIkr7GAAu+sWUErDbE2G/6MGpNTA==}
@@ -4568,7 +4568,7 @@ snapshots:
     transitivePeerDependencies:
       - '@floating-ui/dom'
 
-  '@tutti-os/agent-acp-kit@0.2.4':
+  '@tutti-os/agent-acp-kit@0.3.3':
     dependencies:
       '@anthropic-ai/claude-agent-sdk': 0.2.101(zod@4.4.3)
       zod: 4.4.3

@@ -1004,8 +1004,7 @@ const TUTTI_AGENT_PARTICIPANT_PREFIX = "tutti-agent:";
 
 export function normalizeTuttiAgentProvider(provider: string | null | undefined) {
   const normalized = provider?.trim().toLowerCase() ?? "";
-  if (normalized === "claude-code") return "claude";
-  if (normalized === "tutti-agent") return "nexight";
+  if (normalized === "claude") return "claude-code";
   if (!normalized) return "";
   return normalized.replace(/[^a-z0-9_.-]/g, "");
 }
@@ -1022,6 +1021,7 @@ export function parseTuttiAgentParticipantId(participantId: string | null | unde
 }
 
 export function defaultTuttiAgentParticipantName(provider: string) {
+  if (provider === "claude-code") return "Claude Code";
   if (provider === "codex") return "Codex";
   if (provider === "claude") return "Claude Code";
   return provider || "Agent";

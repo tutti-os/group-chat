@@ -4,10 +4,10 @@ export type TuttiAgentGuiProvider = string;
 
 export const RUNTIME_PROVIDER_TO_GUI: Record<string, string> = {
   claude: "claude-code",
+  "claude-code": "claude-code",
   codex: "codex",
   cursor: "cursor",
   opencode: "opencode",
-  nexight: "tutti-agent",
   hermes: "hermes",
   openclaw: "openclaw",
 };
@@ -45,7 +45,7 @@ export function resolveAgentGuiProviderFromRuntimeProvider(
 
 export function resolveAgentLauncherRuntimeProvider(entityId: string | null | undefined): string | null {
   if (entityId?.trim() === AGENT_LAUNCHER_APP_IDS.codex) return "codex";
-  if (entityId?.trim() === AGENT_LAUNCHER_APP_IDS.claude) return "claude";
+  if (entityId?.trim() === AGENT_LAUNCHER_APP_IDS.claude) return "claude-code";
   return null;
 }
 

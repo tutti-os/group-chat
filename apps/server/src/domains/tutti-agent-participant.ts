@@ -12,7 +12,7 @@ export { defaultTuttiAgentParticipantName, parseTuttiAgentParticipantId, tuttiAg
 
 export function localAgentProviderFromLauncherAppId(appId: string | null | undefined) {
   if (appId?.trim() === "agent-codex") return "codex";
-  if (appId?.trim() === "agent-claude-code") return "claude";
+  if (appId?.trim() === "agent-claude-code") return "claude-code";
   return "";
 }
 
