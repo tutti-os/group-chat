@@ -598,6 +598,38 @@ test("copies and resends a selected video through the same artifact link", async
   await expect(filesPanel.getByText("pasted-video.webm", { exact: true })).toHaveCount(1);
 });
 
+test("shows an aligned close button on the message reference panel", async ({ page, request }) => {
+  const sourceBundle = await (await request.post("/api/rooms", { data: { title: "Reference Panel Source Room" } })).json();
+  const targetBundle = await (await request.post("/api/rooms", { data: { title: "Reference Panel Target Room" } })).json();
+  const sourceMessageResult = await (await request.post(`/api/conversations/${sourceBundle.conversation.id}/messages`, {
+    data: { content: "Message reference panel close button", mentions: [] },
+  })).json();
+  await request.post(`/api/conversations/${targetBundle.conversation.id}/messages`, {
+    data: { content: `group-chat://message/${sourceMessageResult.message.id}`, mentions: [] },
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /Reference Panel Target Room/ }).click();
+  await page.getByRole("group", { name: /1 messages|1 message|1条消息/ }).click();
+
+  const messageLinkPanel = page.locator('[data-slot="message-link-detail-panel"]');
+  const closeMessageLinkPanel = messageLinkPanel.getByRole("button", { name: /关闭|Close/ });
+  await expect(closeMessageLinkPanel).toBeVisible();
+  expect(await closeMessageLinkPanel.evaluate((button) => {
+    const buttonRect = button.getBoundingClientRect();
+    const panelRect = button.closest("aside")?.getBoundingClientRect();
+    if (!panelRect) throw new Error("message link detail panel missing");
+    return {
+      height: buttonRect.height,
+      right: panelRect.right - buttonRect.right,
+      top: buttonRect.top - panelRect.top,
+      width: buttonRect.width,
+    };
+  })).toEqual({ height: 32, right: 14, top: 8, width: 32 });
+  await closeMessageLinkPanel.click();
+  await expect(messageLinkPanel).toBeHidden();
+});
+
 test("preserves message cards and attachments through copy, paste, send, and navigation", async ({ context, page, request }) => {
   const sourceBundle = await (await request.post("/api/rooms", { data: { title: "Element Source Room" } })).json();
   const targetBundle = await (await request.post("/api/rooms", { data: { title: "Element Target Room" } })).json();

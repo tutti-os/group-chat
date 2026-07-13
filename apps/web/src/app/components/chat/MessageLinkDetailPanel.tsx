@@ -90,15 +90,16 @@ export function MessageLinkDetailPanel(props: {
   return (
     <aside
       ref={panelRef}
+      data-slot="message-link-detail-panel"
       className={"[position:absolute] [top:56px] [right:0] [bottom:0] [z-index:36] [display:grid] [width:min(420px,_calc(100vw_-_24px))] [grid-template-rows:auto_minmax(0,_1fr)] [border-left:1px_solid_var(--border-1)] [background:var(--background-fronted)] [box-shadow:-18px_0_40px_color-mix(in_srgb,var(--black-stationary)_8%,transparent)]"}
     >
-      <div className={"[display:grid] [min-width:0] [grid-template-columns:minmax(0,_1fr)_32px] [align-items:center] [gap:10px] [padding:14px] [border-bottom:1px_solid_var(--border-1)]"}>
+      <div className={"[position:relative] [min-width:0] [padding:8px_60px_8px_14px] [border-bottom:1px_solid_var(--border-1)]"}>
         <div className={"[min-width:0] [&_h3]:[margin:0] [&_h3]:[overflow:hidden] [&_h3]:[font-size:15px] [&_h3]:[font-weight:720] [&_h3]:[line-height:1.2] [&_h3]:[text-overflow:ellipsis] [&_h3]:[white-space:nowrap] [&_span]:[display:block] [&_span]:[min-width:0] [&_span]:[overflow:hidden] [&_span]:[margin-top:3px] [&_span]:[color:var(--text-secondary)] [&_span]:[font-size:11px] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap]"}>
           <h3>{panelTitle}</h3>
           <span>{room?.title || conversation?.title || t("common.unknownConversation")}</span>
         </div>
         <button
-          className={"dialog-close-button [display:inline-grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--text-secondary)] [background:var(--transparency-hover)] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--line-focus-window)] [&:focus-visible]:[outline:none]"}
+          className={"dialog-close-button [position:absolute] [top:8px] [right:14px] [display:inline-grid] [width:32px] [height:32px] [place-items:center] [border:0] [border-radius:10px] [color:var(--text-secondary)] [background:transparent] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--transparency-hover)] [&:focus-visible]:[outline:none] [&:focus-visible]:[background:var(--transparency-hover)]"}
           type="button"
           aria-label={t("common.close")}
           title={t("common.close")}
