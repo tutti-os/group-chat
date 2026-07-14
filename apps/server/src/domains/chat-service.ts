@@ -767,6 +767,11 @@ export class ChatService {
         payload: { block: result.block },
       });
     }
+    // An edit replaces the dispatch contract for this message. Clear any
+    // participant queue entries and invocation contexts created by the prior
+    // target set before scheduling the edited target set.
+    this.repo.deletePendingRepliesForMessage(result.message.id);
+    this.messageInvocationContexts.delete(result.message.id);
     const workspaceAppOnlyDispatch = isWorkspaceAppOnlyTaskMessage({
       userMessage: { content: result.message.content, mentions: result.message.mentions },
     });
@@ -1342,8 +1347,14 @@ export class ChatService {
           );
           break;
         }
-        const currentInvocation = this.messageInvocationContexts.get(latest.id)?.get(participant.id)
-          ?? scheduledInvocation;
+        const currentInvocation = this.messageInvocationContexts.get(latest.id)?.get(participant.id);
+        if (!currentInvocation) {
+          // A queued item without its own participant-scoped invocation was
+          // recalled, edited away, superseded, or recovered stale. Never run
+          // it with credentials captured by the participant's active request.
+          nextMessage = null;
+          continue;
+        }
         let generated: Message | null;
         try {
           generated = await this.generateForParticipant(
@@ -1364,6 +1375,13 @@ export class ChatService {
           continue;
         }
         nextMessage = this.repo.getMessage(pending.messageId);
+        if (!nextMessage) {
+          this.deleteMessageInvocationContext(
+            pending.messageId,
+            participant.id,
+            this.messageInvocationContexts.get(pending.messageId)?.get(participant.id),
+          );
+        }
       }
     } finally {
       this.activeReplyKeys.delete(key);

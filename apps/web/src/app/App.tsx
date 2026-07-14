@@ -161,7 +161,6 @@ export function App() {
     return cachedSnapshot ? normalizeSnapshot(cachedSnapshot) : emptyState;
   });
   const [localAgentProviders, setLocalAgentProviders] = useState<LocalAgentProviderStatus[]>([]);
-  const [refreshingLocalAgentProviders, setRefreshingLocalAgentProviders] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [profileMenuPlacement, setProfileMenuPlacement] = useState<"sidebar" | "mobile" | "chat">("sidebar");
   const [profileMenuAnchorEl, setProfileMenuAnchorEl] = useState<HTMLElement | null>(null);
@@ -233,7 +232,6 @@ export function App() {
 
   const refreshLocalAgentProviders = useCallback(async () => {
     const refreshGeneration = ++agentRefreshGenerationRef.current;
-    setRefreshingLocalAgentProviders(true);
     try {
       const result = await fetchLocalAgentTargets();
       const agents = result.defaultAgentTargetId
@@ -257,10 +255,6 @@ export function App() {
       setState((current) => mergeAgentCatalogSnapshot(current, nextState));
     } catch {
       // Keep the last known provider list; transient bridge errors should not make the @ menu jump.
-    } finally {
-      if (refreshGeneration === agentRefreshGenerationRef.current) {
-        setRefreshingLocalAgentProviders(false);
-      }
     }
   }, []);
 

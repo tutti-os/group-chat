@@ -181,6 +181,66 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
       await runQueuedScenario({ supersedeFollowup: false });
       await runQueuedScenario({ supersedeFollowup: true });
 
+      const staleCredentials = [];
+      let releaseStaleActive;
+      let markStaleActiveStarted;
+      let markStaleActiveFinished;
+      const staleActiveStarted = new Promise((resolve) => { markStaleActiveStarted = resolve; });
+      const staleActiveFinished = new Promise((resolve) => { markStaleActiveFinished = resolve; });
+      service.generateForParticipant = async (_roomId, _conversationId, _message, _participant, _run, invocation) => {
+        staleCredentials.push(invocation?.managedAgentHeaders?.["x-tutti-agent-invocation-credential"] ?? "missing");
+        if (staleCredentials.length === 1) {
+          markStaleActiveStarted();
+          await new Promise((resolve) => { releaseStaleActive = resolve; });
+          markStaleActiveFinished();
+        }
+        return null;
+      };
+      service.sendMessage(conversation.id, {
+        content: "active while another message is edited",
+        mentions: [{
+          mentionType: "participant",
+          participantId: participant.id,
+          displayNameSnapshot: participant.displayName,
+        }],
+      }, {
+        managedAgentHeaders: { "x-tutti-agent-invocation-credential": "stale-active-secret" },
+      });
+      await staleActiveStarted;
+      const staleQueued = service.sendMessage(conversation.id, {
+        content: "queued before edit",
+        mentions: [{
+          mentionType: "participant",
+          participantId: participant.id,
+          displayNameSnapshot: participant.displayName,
+        }],
+      }, {
+        managedAgentHeaders: { "x-tutti-agent-invocation-credential": "stale-queued-secret" },
+      });
+      assert.equal(repo.getPendingReply(conversation.id, participant.id)?.messageId, staleQueued.message.id);
+      const removedTarget = await service.updateMessage(staleQueued.message.id, {
+        content: "edited into a human-only note",
+        mentions: [],
+      }, {
+        managedAgentHeaders: { "x-tutti-agent-invocation-credential": "edited-human-secret" },
+      });
+      assert.deepEqual(removedTarget?.targets, []);
+      assert.equal(repo.getPendingReply(conversation.id, participant.id), null);
+      assert.equal(service.messageInvocationContexts.has(staleQueued.message.id), false);
+      // Simulate a durable stale queue row left by an older process/version.
+      // The absence of a matching per-message invocation must fail closed.
+      repo.upsertPendingReply({
+        roomId: conversation.roomId,
+        conversationId: conversation.id,
+        participantId: participant.id,
+        messageId: staleQueued.message.id,
+      });
+      releaseStaleActive();
+      await staleActiveFinished;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.deepEqual(staleCredentials, ["stale-active-secret"]);
+      assert.equal(repo.getPendingReply(conversation.id, participant.id), null);
+
       const scopedRepo = new ChatRepository();
       const scopedService = new ChatService(scopedRepo, new EventHub(), new AgentToolTokenStore());
       scopedService.runtimes = {
