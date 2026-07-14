@@ -40,6 +40,25 @@ export function mergeAgentCatalogSnapshot<TState extends AgentCatalogState>(
   };
 }
 
+/**
+ * Applies an Agent refresh and keeps the WebSocket cursor aligned when that
+ * refresh is the snapshot that initializes an otherwise cold application.
+ * Warm catalog-only refreshes must leave the cursor untouched.
+ */
+export function applyAgentCatalogRefresh<TState extends AgentCatalogState>(
+  current: TState,
+  snapshot: TState,
+  currentWsCursor: number,
+) {
+  const initializesColdState = !current.ready && snapshot.ready;
+  return {
+    state: mergeAgentCatalogSnapshot(current, snapshot),
+    wsCursor: initializesColdState
+      ? Math.max(currentWsCursor, snapshot.lastSeq)
+      : currentWsCursor,
+  };
+}
+
 export function shouldAcceptAgentCatalogRefresh(
   refreshGeneration: number,
   acceptedGeneration: number,

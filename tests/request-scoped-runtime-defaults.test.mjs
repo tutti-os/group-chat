@@ -11,7 +11,8 @@ const execFileAsync = promisify(execFile);
 test("request-scoped defaults fail closed and identity fallback mentions keep their room participant", async () => {
   const home = await mkdtemp(join(tmpdir(), "group-chat-request-defaults-"));
   const check = join(home, "check.ts");
-  await writeFile(check, `
+  try {
+    await writeFile(check, `
     process.env.GROUP_CHAT_HOME = ${JSON.stringify(home)};
 
     async function main() {
@@ -103,7 +104,6 @@ test("request-scoped defaults fail closed and identity fallback mentions keep th
     });
   `);
 
-  try {
     const result = await execFileAsync("pnpm", ["--filter", "@group-chat/server", "exec", "tsx", check], {
       cwd: new URL("..", import.meta.url),
       env: { ...process.env, GROUP_CHAT_HOME: home },

@@ -158,15 +158,23 @@ export class ChatService {
   async deleteRoom(roomId: string) {
     if (!this.repo.getRoom(roomId)) return null;
     const bundle = this.repo.getRoomBundle(roomId);
+    const activeRuns = this.repo.listActiveAgentRuns()
+      .filter((run) => run.conversationId === bundle.conversation.id);
     const participantIds = new Set([
       ...bundle.participants.map((participant) => participant.id),
       ...this.repo.listPendingReplies()
         .filter((item) => item.conversationId === bundle.conversation.id)
         .map((item) => item.participantId),
+      ...activeRuns.flatMap((run) => run.participantId ? [run.participantId] : []),
     ]);
-    await Promise.all([...participantIds].map((participantId) =>
-      this.cancelParticipantWork(participantId, "Room deleted")
-    ));
+    await Promise.all([
+      ...[...participantIds].map((participantId) =>
+        this.cancelParticipantWork(participantId, "Room deleted")
+      ),
+      ...activeRuns
+        .filter((run) => !run.participantId)
+        .map((run) => this.cancelRun(run.id, "Room deleted")),
+    ]);
     this.deleteConversationInvocationContexts(bundle.conversation.id);
     const result = this.repo.deleteRoom(roomId);
     if (result) {
@@ -443,11 +451,22 @@ export class ChatService {
       return { run };
     }
     this.cancelledRunIds.add(runId);
-    const participant = run.participantId ? this.repo.getParticipant(run.participantId) : null;
-    const runtimeProfile = participant?.runtimeProfileId ? this.repo.getRuntimeProfile(participant.runtimeProfileId) : null;
+    const runtimeProfile = this.resolveRunRuntimeProfile(run);
     const provider = this.runtimes.getProvider(runtimeProfile);
     await provider.cancel(runId).catch(() => undefined);
     return this.finalizeRunCancellation(runId, reason);
+  }
+
+  private resolveRunRuntimeProfile(run: AgentRun) {
+    const descriptorProfile = this.repo.listRuntimeProfiles().find((profile) =>
+      profile.kind === run.runtime
+      && profile.agentTargetId === run.agentTargetId
+      && profile.provider === run.provider
+      && profile.model === run.model
+    );
+    if (descriptorProfile) return descriptorProfile;
+    const participant = run.participantId ? this.repo.getParticipant(run.participantId) : null;
+    return participant ? this.resolveParticipantRuntimeProfile(participant) : null;
   }
 
   private async cancelRunsForTriggerMessage(triggerMessageId: string) {

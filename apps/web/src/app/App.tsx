@@ -77,7 +77,7 @@ import { collectMessageProcess, resolveMessageRunId } from "./agent-thinking.js"
 import { UNREAD_FEATURE_ENABLED } from "./feature-flags.js";
 import { initTuttiWorkspaceContextCache } from "./tutti-bridge.js";
 import { loadCachedSnapshot, saveCachedSnapshot } from "./bootstrap-cache.js";
-import { mergeAgentCatalogSnapshot, shouldAcceptAgentCatalogRefresh } from "./agent-refresh-state.js";
+import { applyAgentCatalogRefresh, shouldAcceptAgentCatalogRefresh } from "./agent-refresh-state.js";
 import { reportUserActive } from "./tutti-activity.js";
 import { formatReferenceMentionMarkdown } from "./reference-mentions.js";
 import { enrichMessageContentForCopy } from "./composer-paste-content.js";
@@ -248,11 +248,16 @@ export function App() {
       )) return;
       acceptedAgentRefreshGenerationRef.current = refreshGeneration;
       setLocalAgentProviders((current) => sameLocalAgentProviders(current, agents) ? current : agents);
-      // Agent refresh is not a timeline/reconnect operation. Never advance the
-      // WS cursor or replace messages from this limited bootstrap snapshot.
-      // If WS state is newer, the catalog snapshot is stale and must not roll
-      // back participant, identity, or runtime-profile changes either.
-      setState((current) => mergeAgentCatalogSnapshot(current, nextState));
+      // Agent refresh is not a timeline/reconnect operation. A warm refresh
+      // never advances the WS cursor or replaces limited timeline data. The
+      // one exception is a successful snapshot initializing a cold app: its
+      // sequence becomes the reconnect baseline so a limited replay cannot
+      // apply stale history or leave a gap.
+      setState((current) => {
+        const merged = applyAgentCatalogRefresh(current, nextState, lastSeqRef.current);
+        lastSeqRef.current = merged.wsCursor;
+        return merged.state;
+      });
     } catch {
       // Keep the last known provider list; transient bridge errors should not make the @ menu jump.
     }

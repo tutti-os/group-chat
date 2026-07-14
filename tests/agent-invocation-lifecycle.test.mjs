@@ -363,6 +363,70 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
       assert.equal(targetAResult.targets[0]?.agentTargetId, "target-a");
       assert.equal(targetAResult.targets[0]?.displayName, "Vibe Design");
       assert.equal(sendWithDefault(catalogB.defaultAgentTargetId).targets[0]?.agentTargetId, "target-b");
+
+      const virtualParticipant = targetAResult.targets[0];
+      assert.ok(virtualParticipant);
+      assert.equal(scopedRepo.getParticipant(virtualParticipant.id), null);
+      let releaseVirtualRun;
+      let markVirtualRunStarted;
+      let markVirtualStreamStopped;
+      let cancelledVirtualRunId = null;
+      const virtualRunStarted = new Promise((resolve) => { markVirtualRunStarted = resolve; });
+      const virtualStreamStopped = new Promise((resolve) => { markVirtualStreamStopped = resolve; });
+      const virtualProvider = {
+        id: "local-agent",
+        describeRun(context) {
+          return {
+            runtime: context.runtimeProfile.kind,
+            agentTargetId: context.runtimeProfile.agentTargetId,
+            provider: context.runtimeProfile.provider,
+            model: context.runtimeProfile.model,
+          };
+        },
+        async detect() {
+          return { available: true };
+        },
+        async *streamReply(context) {
+          markVirtualRunStarted(context.runId);
+          await new Promise((resolve) => { releaseVirtualRun = resolve; });
+          markVirtualStreamStopped();
+        },
+        async cancel(runId) {
+          cancelledVirtualRunId = runId;
+          releaseVirtualRun();
+          await virtualStreamStopped;
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          return { cancelled: true };
+        },
+      };
+      scopedService.runtimes = {
+        getProvider(runtimeProfile) {
+          assert.equal(runtimeProfile?.id, virtualParticipant.runtimeProfileId);
+          return virtualProvider;
+        },
+      };
+      const virtualMessage = scopedRepo.createMessage({
+        conversationId: scopedRoom.conversation.id,
+        role: "user",
+        content: "run the workspace app until the room is deleted",
+        status: "success",
+      });
+      const virtualGeneration = scopedService.scheduleReply(
+        scopedRoom.room.id,
+        scopedRoom.conversation.id,
+        virtualMessage,
+        virtualParticipant,
+        null,
+        { managedAgentHeaders: { "x-tutti-agent-invocation-credential": "virtual-secret" } },
+      );
+      const virtualRunId = await virtualRunStarted;
+      assert.equal(scopedRepo.getAgentRun(virtualRunId)?.status, "running");
+      assert.equal(scopedService.messageInvocationContexts.size > 0, true);
+      const deletedVirtualRoom = await scopedService.deleteRoom(scopedRoom.room.id);
+      assert.equal(deletedVirtualRoom?.id, scopedRoom.room.id);
+      assert.equal(cancelledVirtualRunId, virtualRunId);
+      assert.equal(scopedService.messageInvocationContexts.size, 0);
+      await virtualGeneration;
       closeDb();
     }
 

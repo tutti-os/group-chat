@@ -23,7 +23,11 @@ async function loadModule() {
 }
 
 test("Agent refresh never rolls back newer WS state or replaces timeline data", async () => {
-  const { mergeAgentCatalogSnapshot, shouldAcceptAgentCatalogRefresh } = await loadModule();
+  const {
+    applyAgentCatalogRefresh,
+    mergeAgentCatalogSnapshot,
+    shouldAcceptAgentCatalogRefresh,
+  } = await loadModule();
   const current = {
     ready: true,
     lastSeq: 12,
@@ -112,10 +116,19 @@ test("Agent refresh never rolls back newer WS state or replaces timeline data", 
   const initialized = {
     ...current,
     ready: true,
-    lastSeq: 3,
+    lastSeq: 1_003,
     messages: [{ id: "message-from-successful-refresh" }],
   };
   assert.equal(mergeAgentCatalogSnapshot(cold, initialized), initialized);
+  const coldRefresh = applyAgentCatalogRefresh(cold, initialized, 0);
+  assert.equal(coldRefresh.state, initialized);
+  assert.equal(coldRefresh.wsCursor, initialized.lastSeq);
+  const history = Array.from({ length: initialized.lastSeq }, (_, index) => index + 1);
+  assert.equal(history.filter((seq) => seq > 0).slice(0, 500).at(-1), 500);
+  assert.deepEqual(history.filter((seq) => seq > coldRefresh.wsCursor).slice(0, 500), []);
+
+  const warmRefresh = applyAgentCatalogRefresh(current, sameSequence, 25);
+  assert.equal(warmRefresh.wsCursor, 25);
 
   let acceptedGeneration = 0;
   assert.equal(shouldAcceptAgentCatalogRefresh(2, acceptedGeneration), true);
