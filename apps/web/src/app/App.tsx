@@ -77,7 +77,7 @@ import { collectMessageProcess, resolveMessageRunId } from "./agent-thinking.js"
 import { UNREAD_FEATURE_ENABLED } from "./feature-flags.js";
 import { initTuttiWorkspaceContextCache } from "./tutti-bridge.js";
 import { loadCachedSnapshot, saveCachedSnapshot } from "./bootstrap-cache.js";
-import { mergeAgentCatalogSnapshot } from "./agent-refresh-state.js";
+import { mergeAgentCatalogSnapshot, shouldAcceptAgentCatalogRefresh } from "./agent-refresh-state.js";
 import { reportUserActive } from "./tutti-activity.js";
 import { formatReferenceMentionMarkdown } from "./reference-mentions.js";
 import { enrichMessageContentForCopy } from "./composer-paste-content.js";
@@ -228,8 +228,11 @@ export function App() {
   const [timelinePageStateByConversationId, setTimelinePageStateByConversationId] = useState<Record<string, TimelinePageState>>({});
   const messagePageCacheRef = useRef<Map<string, ConversationMessagesPage>>(new Map());
   const messagePageInFlightRef = useRef<Map<string, Promise<ConversationMessagesPage | null>>>(new Map());
+  const agentRefreshGenerationRef = useRef(0);
+  const acceptedAgentRefreshGenerationRef = useRef(0);
 
   const refreshLocalAgentProviders = useCallback(async () => {
+    const refreshGeneration = ++agentRefreshGenerationRef.current;
     setRefreshingLocalAgentProviders(true);
     try {
       const result = await fetchLocalAgentTargets();
@@ -239,9 +242,14 @@ export function App() {
             - Number(left.agentTargetId === result.defaultAgentTargetId)
           )
         : result.agents;
-      setLocalAgentProviders((current) => sameLocalAgentProviders(current, agents) ? current : agents);
       const snapshot = await fetchSnapshot(MESSAGE_PAGE_SIZE);
       const nextState = normalizeSnapshot(snapshot);
+      if (!shouldAcceptAgentCatalogRefresh(
+        refreshGeneration,
+        acceptedAgentRefreshGenerationRef.current,
+      )) return;
+      acceptedAgentRefreshGenerationRef.current = refreshGeneration;
+      setLocalAgentProviders((current) => sameLocalAgentProviders(current, agents) ? current : agents);
       // Agent refresh is not a timeline/reconnect operation. Never advance the
       // WS cursor or replace messages from this limited bootstrap snapshot.
       // If WS state is newer, the catalog snapshot is stale and must not roll
@@ -250,7 +258,9 @@ export function App() {
     } catch {
       // Keep the last known provider list; transient bridge errors should not make the @ menu jump.
     } finally {
-      setRefreshingLocalAgentProviders(false);
+      if (refreshGeneration === agentRefreshGenerationRef.current) {
+        setRefreshingLocalAgentProviders(false);
+      }
     }
   }, []);
 

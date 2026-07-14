@@ -1077,7 +1077,7 @@ export function parseLegacyTuttiAgentProviderParticipantId(participantId: string
 
 export function defaultTuttiAgentParticipantName(displayNameOrTargetId: string) {
   const value = displayNameOrTargetId.trim();
-  const literalProvider = value.toLowerCase();
+  const literalProvider = displayNameOrTargetId.toLowerCase();
   if (literalProvider === "claude" || literalProvider === "claude-code") return "Claude Code";
   if (literalProvider === "codex") return "Codex";
   return value || "Agent";

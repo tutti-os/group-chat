@@ -62,16 +62,8 @@ export function findParticipantForLocalAgentProfile(
   const activeAgents = participants.filter((participant) => participant.kind === "ai" && participant.status !== "removed");
   const candidateNames = new Set(displayNameCandidates.map(normalizeLocalAgentDisplayName).filter(Boolean));
   for (const participant of activeAgents) {
-    const runtimeProfileId =
-      participant.runtimeProfileId
-      ?? identities.find((identity) => identity.id === participant.identityId)?.defaultRuntimeProfileId
-      ?? null;
-    const runtime = runtimeProfileId
-      ? runtimeProfiles.find((item) => item.id === runtimeProfileId) ?? null
-      : null;
+    const runtime = resolveParticipantRuntimeProfile(participant, identities, runtimeProfiles);
     if (
-      runtimeProfileId === runtime?.id
-      &&
       runtime?.kind === "local-agent"
       && runtime.agentTargetId === profile.agentTargetId
       && candidateNames.has(normalizeLocalAgentDisplayName(participant.displayName))
@@ -112,8 +104,8 @@ export function buildLocalAgentMentionOptions(
       defaultIdentityNameForRuntime(profile, localAgentProviders),
       profile.displayName,
     ]);
-    const participantProfile = participant?.runtimeProfileId
-      ? runtimeProfiles.find((item) => item.id === participant.runtimeProfileId) ?? null
+    const participantProfile = participant
+      ? resolveParticipantRuntimeProfile(participant, identities, runtimeProfiles)
       : null;
     const mentionProfile = participantProfile?.kind === "local-agent"
         && participantProfile.agentTargetId === profile.agentTargetId
@@ -144,4 +136,17 @@ export function buildLocalAgentMentionOptions(
   }
 
   return results.sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function resolveParticipantRuntimeProfile(
+  participant: Participant,
+  identities: Identity[],
+  runtimeProfiles: RuntimeProfile[],
+) {
+  const runtimeProfileId = participant.runtimeProfileId
+    ?? identities.find((identity) => identity.id === participant.identityId)?.defaultRuntimeProfileId
+    ?? null;
+  return runtimeProfileId
+    ? runtimeProfiles.find((profile) => profile.id === runtimeProfileId) ?? null
+    : null;
 }

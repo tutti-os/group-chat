@@ -122,13 +122,18 @@ test("local Tutti agent launcher references retain the matching room participant
 
 test("local agent participant binding honors an identity default runtime profile", async () => {
   const { buildLocalAgentLauncherReference, buildLocalAgentMentionOptions } = await loadModule();
+  const modelProfile = {
+    ...runtimeProfile,
+    id: `${runtimeProfile.id}__gpt-fast`,
+    model: "gpt-fast",
+  };
   const identity = {
     id: "identity-legacy",
     name: "Codex CLI",
     icon: null,
     rolePrompt: "",
     stylePrompt: "",
-    defaultRuntimeProfileId: runtimeProfile.id,
+    defaultRuntimeProfileId: modelProfile.id,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
   };
@@ -152,16 +157,17 @@ test("local agent participant binding honors an identity default runtime profile
   };
 
   const options = buildLocalAgentMentionOptions(
-    [runtimeProfile],
+    [runtimeProfile, modelProfile],
     [providerStatus(true, "Codex CLI")],
     [participant],
     [identity],
     "",
   );
   assert.equal(options[0]?.participant?.id, participant.id);
+  assert.equal(options[0]?.runtimeProfile.id, modelProfile.id);
   const reference = buildLocalAgentLauncherReference(options[0]);
   assert.equal(reference.insert.mention.scope.groupChatParticipantId, participant.id);
-  assert.equal(reference.insert.mention.scope.groupChatRuntimeProfileId, runtimeProfile.id);
+  assert.equal(reference.insert.mention.scope.groupChatRuntimeProfileId, modelProfile.id);
 });
 
 test("participant mentions preserve the participant's model-specific runtime profile", async () => {

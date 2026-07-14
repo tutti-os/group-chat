@@ -98,6 +98,89 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
       assert.deepEqual(observedCredentials, ["first-secret", "edited-secret"]);
       assert.equal(service.messageInvocationContexts.size, 0);
 
+      const runQueuedScenario = async ({ supersedeFollowup }) => {
+        const credentials = [];
+        let releaseActive;
+        let markActiveStarted;
+        let markQueuedFinished;
+        const activeStarted = new Promise((resolve) => { markActiveStarted = resolve; });
+        const queuedFinished = new Promise((resolve) => { markQueuedFinished = resolve; });
+        service.generateForParticipant = async (_roomId, _conversationId, message, _participant, _run, invocation) => {
+          credentials.push(invocation?.managedAgentHeaders?.["x-tutti-agent-invocation-credential"] ?? "missing");
+          if (credentials.length === 1) {
+            markActiveStarted();
+            await new Promise((resolve) => { releaseActive = resolve; });
+          } else {
+            markQueuedFinished(message.id);
+          }
+          return null;
+        };
+        const active = service.sendMessage(conversation.id, {
+          content: "active request",
+          mentions: [{
+            mentionType: "participant",
+            participantId: participant.id,
+            displayNameSnapshot: participant.displayName,
+          }],
+        }, {
+          managedAgentHeaders: { "x-tutti-agent-invocation-credential": "active-secret" },
+        });
+        await activeStarted;
+        const assistantFollowup = repo.createMessage({
+          conversationId: conversation.id,
+          role: "assistant",
+          senderParticipantId: "another-agent",
+          content: "assistant follow-up",
+          status: "success",
+        });
+        await service.scheduleReply(
+          conversation.roomId,
+          conversation.id,
+          assistantFollowup,
+          participant,
+          null,
+          { managedAgentHeaders: { "x-tutti-agent-invocation-credential": "followup-secret" } },
+        );
+        assert.equal(
+          service.messageInvocationContexts.get(assistantFollowup.id)?.get(participant.id)
+            ?.managedAgentHeaders?.["x-tutti-agent-invocation-credential"],
+          "followup-secret",
+        );
+        let supersedingMessage = null;
+        if (supersedeFollowup) {
+          supersedingMessage = service.sendMessage(conversation.id, {
+            content: "newest queued request",
+            mentions: [{
+              mentionType: "participant",
+              participantId: participant.id,
+              displayNameSnapshot: participant.displayName,
+            }],
+          }, {
+            managedAgentHeaders: { "x-tutti-agent-invocation-credential": "newest-secret" },
+          }).message;
+          assert.equal(service.messageInvocationContexts.has(assistantFollowup.id), false);
+          assert.equal(
+            service.messageInvocationContexts.get(supersedingMessage.id)?.get(participant.id)
+              ?.managedAgentHeaders?.["x-tutti-agent-invocation-credential"],
+            "newest-secret",
+          );
+        }
+        releaseActive();
+        const generatedMessageId = await queuedFinished;
+        await Promise.resolve();
+        assert.equal(generatedMessageId, supersedingMessage?.id ?? assistantFollowup.id);
+        assert.deepEqual(
+          credentials,
+          supersedeFollowup ? ["active-secret", "newest-secret"] : ["active-secret", "followup-secret"],
+        );
+        assert.equal(service.messageInvocationContexts.has(active.message.id), false);
+        assert.equal(service.messageInvocationContexts.has(assistantFollowup.id), false);
+        if (supersedingMessage) assert.equal(service.messageInvocationContexts.has(supersedingMessage.id), false);
+      };
+
+      await runQueuedScenario({ supersedeFollowup: false });
+      await runQueuedScenario({ supersedeFollowup: true });
+
       const scopedRepo = new ChatRepository();
       const scopedService = new ChatService(scopedRepo, new EventHub(), new AgentToolTokenStore());
       scopedService.runtimes = {
@@ -139,15 +222,24 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
         displayNameSnapshot: "Vibe Design",
         referenceScope: { workspaceId: "ws-1" },
       };
+      const legacyLauncherMention = {
+        mentionType: "reference",
+        participantId: "agent-codex",
+        referenceProviderId: "workspace-app",
+        referenceEntityId: "agent-codex",
+        displayNameSnapshot: "Codex",
+      };
       const sendWithDefault = (defaultAgentTargetId) => scopedService.sendMessage(
         scopedRoom.conversation.id,
         {
-          content: "[Vibe Design](mention://workspace-app/vibe-design?workspaceId=ws-1) build a site",
-          mentions: [appMention],
+          content: "Codex [Vibe Design](mention://workspace-app/vibe-design?workspaceId=ws-1) build a site",
+          mentions: [legacyLauncherMention, appMention],
         },
         { defaultAgentTargetId },
       );
-      assert.equal(sendWithDefault(catalogA.defaultAgentTargetId).targets[0]?.agentTargetId, "target-a");
+      const targetAResult = sendWithDefault(catalogA.defaultAgentTargetId);
+      assert.equal(targetAResult.targets[0]?.agentTargetId, "target-a");
+      assert.equal(targetAResult.targets[0]?.displayName, "Vibe Design");
       assert.equal(sendWithDefault(catalogB.defaultAgentTargetId).targets[0]?.agentTargetId, "target-b");
       closeDb();
     }

@@ -55,6 +55,8 @@ test("virtual Tutti agent participants use stable non-clone ids", async () => {
   assert.equal(localAgentTargetFromLauncherAppId(" agent-target:workspace/agent:primary"), "");
   assert.equal(defaultTuttiAgentParticipantName("codex"), "Codex");
   assert.equal(defaultTuttiAgentParticipantName("claude"), "Claude Code");
+  assert.equal(defaultTuttiAgentParticipantName(" codex "), "codex");
+  assert.equal(defaultTuttiAgentParticipantName(" claude "), "claude");
   assert.equal(defaultTuttiAgentParticipantName("codex/"), "codex/");
   assert.equal(defaultTuttiAgentParticipantName("claude code"), "claude code");
   assert.equal(tuttiAgentParticipantId("workspace/agent:primary"), "tutti-agent:target:workspace%2Fagent%3Aprimary");

@@ -23,7 +23,7 @@ async function loadModule() {
 }
 
 test("Agent refresh never rolls back newer WS state or replaces timeline data", async () => {
-  const { mergeAgentCatalogSnapshot } = await loadModule();
+  const { mergeAgentCatalogSnapshot, shouldAcceptAgentCatalogRefresh } = await loadModule();
   const current = {
     lastSeq: 12,
     messages: [{ id: "message-new" }],
@@ -58,6 +58,16 @@ test("Agent refresh never rolls back newer WS state or replaces timeline data", 
   assert.deepEqual(staleMerged.messageBlocks, current.messageBlocks);
   assert.equal(staleMerged.lastSeq, current.lastSeq);
 
+  const tiedStale = mergeAgentCatalogSnapshot(current, {
+    lastSeq: 11,
+    runtimeProfiles: [{ id: "profile-shared", updatedAt: "2026-07-15T12:00:00.000Z", model: "stale-tie" }],
+    participants: [{ id: "participant-shared", updatedAt: "2026-07-15T12:00:00.000Z", status: "active" }],
+    identities: [{ id: "identity-shared", updatedAt: "2026-07-15T12:00:00.000Z", name: "stale tie" }],
+  });
+  assert.equal(tiedStale.runtimeProfiles[0]?.model, "ws-new");
+  assert.equal(tiedStale.participants[0]?.status, "inactive");
+  assert.equal(tiedStale.identities[0]?.name, "WS new");
+
   const sameSequence = {
     lastSeq: 12,
     runtimeProfiles: [{ id: "profile-shared", updatedAt: "2026-07-15T13:00:00.000Z", model: "catalog-new" }],
@@ -84,4 +94,10 @@ test("Agent refresh never rolls back newer WS state or replaces timeline data", 
   assert.equal(authoritative.participants.some((item) => item.id === "participant-removed"), false);
   assert.equal(authoritative.identities.some((item) => item.id === "identity-removed"), false);
   assert.equal(authoritative.runtimeProfiles.some((item) => item.id === "profile-removed"), false);
+
+  let acceptedGeneration = 0;
+  assert.equal(shouldAcceptAgentCatalogRefresh(2, acceptedGeneration), true);
+  acceptedGeneration = 2;
+  assert.equal(shouldAcceptAgentCatalogRefresh(1, acceptedGeneration), false);
+  assert.equal(shouldAcceptAgentCatalogRefresh(3, acceptedGeneration), true);
 });

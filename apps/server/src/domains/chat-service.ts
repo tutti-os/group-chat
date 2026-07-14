@@ -33,6 +33,7 @@ import {
   sanitizeMentionTargetForAgentContext,
   stripAssistantSkillDetails,
   normalizeTuttiAgentProvider,
+  isLegacyAgentLauncherAppId,
 } from "@group-chat/shared";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, isAbsolute, relative, resolve } from "node:path";
@@ -1205,6 +1206,7 @@ export class ChatService {
       mention.mentionType === "reference"
       && mention.referenceProviderId === "workspace-app"
       && mention.referenceEntityId?.trim()
+      && !isLegacyAgentLauncherAppId(mention.referenceProviderId, mention.referenceEntityId)
     );
     const displayName =
       appMention ? resolveMentionTargetReferenceLabel(appMention) || appMention.displayNameSnapshot.trim() : "";
@@ -1298,13 +1300,23 @@ export class ChatService {
     invocation?: RuntimeInvocationContext,
   ) {
     const key = replyScheduleKey(conversationId, participant.id);
+    const scheduledInvocation = invocation ?? {};
+    this.setMessageInvocationContext(userMessage.id, participant.id, scheduledInvocation);
     if (this.activeReplyKeys.has(key)) {
+      const displaced = this.repo.getPendingReply(conversationId, participant.id);
       this.repo.upsertPendingReply({
         roomId,
         conversationId,
         participantId: participant.id,
         messageId: userMessage.id,
       });
+      if (displaced && displaced.messageId !== userMessage.id) {
+        this.deleteMessageInvocationContext(
+          displaced.messageId,
+          participant.id,
+          this.messageInvocationContexts.get(displaced.messageId)?.get(participant.id),
+        );
+      }
       return;
     }
 
@@ -1322,8 +1334,16 @@ export class ChatService {
           break;
         }
         const latest = this.repo.getMessage(nextMessage.id);
-        if (!latest || latest.status === "recalled") break;
-        const currentInvocation = this.messageInvocationContexts.get(latest.id)?.get(participant.id) ?? invocation;
+        if (!latest || latest.status === "recalled") {
+          this.deleteMessageInvocationContext(
+            nextMessage.id,
+            participant.id,
+            this.messageInvocationContexts.get(nextMessage.id)?.get(participant.id),
+          );
+          break;
+        }
+        const currentInvocation = this.messageInvocationContexts.get(latest.id)?.get(participant.id)
+          ?? scheduledInvocation;
         let generated: Message | null;
         try {
           generated = await this.generateForParticipant(
@@ -1360,6 +1380,16 @@ export class ChatService {
       messageId,
       new Map(targets.map((target) => [target.id, invocation])),
     );
+  }
+
+  private setMessageInvocationContext(
+    messageId: string,
+    participantId: string,
+    invocation: RuntimeInvocationContext,
+  ) {
+    const byParticipant = this.messageInvocationContexts.get(messageId) ?? new Map();
+    byParticipant.set(participantId, invocation);
+    this.messageInvocationContexts.set(messageId, byParticipant);
   }
 
   private deleteMessageInvocationContext(

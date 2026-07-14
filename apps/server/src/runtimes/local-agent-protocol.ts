@@ -134,6 +134,7 @@ export function resolveWorkspaceAppIntent(
       mention.mentionType === "reference"
       && mention.referenceProviderId === "workspace-app"
       && mention.referenceEntityId?.trim()
+      && !isLegacyAgentLauncherAppId(mention.referenceProviderId, mention.referenceEntityId)
     )
     .map((mention) => {
       const sanitizedMention = sanitizeMentionTargetForAgentContext(mention);
@@ -191,7 +192,7 @@ export function isWorkspaceAppOnlyTaskMessage(
   if (mentions.some((mention) => mention.mentionType !== "reference" || mention.referenceProviderId !== "workspace-app")) return false;
   if (!mentions.some((mention) => mention.referenceEntityId?.trim())) return false;
   const requestText = stripLeadingIntentMentions(stripGeneratedReplyQuoteMarkers(content), {
-    userMessage: { mentions },
+    userMessage: { mentions: context.userMessage.mentions },
   });
   return Boolean(requestText.trim());
 }

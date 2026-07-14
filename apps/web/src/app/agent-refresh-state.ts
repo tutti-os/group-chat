@@ -38,6 +38,13 @@ export function mergeAgentCatalogSnapshot<TState extends AgentCatalogState>(
   };
 }
 
+export function shouldAcceptAgentCatalogRefresh(
+  refreshGeneration: number,
+  acceptedGeneration: number,
+) {
+  return refreshGeneration >= acceptedGeneration;
+}
+
 function mergeCatalogEntities<TEntity extends CatalogEntity>(
   current: TEntity[],
   snapshot: TEntity[],
@@ -48,7 +55,11 @@ function mergeCatalogEntities<TEntity extends CatalogEntity>(
     const existing = currentById.get(entity.id);
     currentById.delete(entity.id);
     if (!existing) return options.acceptSnapshotOnly ? [entity] : [];
-    return [(existing.updatedAt ?? "") > (entity.updatedAt ?? "") ? existing : entity];
+    const currentTimestamp = existing.updatedAt ?? "";
+    const snapshotTimestamp = entity.updatedAt ?? "";
+    const retainCurrent = currentTimestamp > snapshotTimestamp
+      || (options.retainCurrentOnly && currentTimestamp === snapshotTimestamp);
+    return [retainCurrent ? existing : entity];
   });
   return options.retainCurrentOnly ? [...merged, ...currentById.values()] : merged;
 }
