@@ -320,6 +320,8 @@ Group Chat 把附件作为 content blocks 注入，并在 agent prompt 中渲染
   - 通过公开 HTTP API 验证创建房间、更新房间设置、更新 reply policy、创建 identity、添加 participants、上传附件、结构化 @ 单个 agent、附件 message block、房间文件二次引用不破坏历史附件、active run cancellation、删除 participant 和删除 room。
 - `pnpm --filter @group-chat/server workspace:smoke`
   - 验证 identity workspace 文件、participant room workspace 文件、room-specific instructions、reasoning effort、raw conversation log、`DISTILLED_CONTEXT.md`、conversation summary 和 local-user memory 在 demo agent 回复后生成。
+- `pnpm --filter @group-chat/server local-agent:smoke`
+  - 从 live Agent catalog 选择 default target，并执行一次完整真实 turn。
 - `pnpm --filter @group-chat/server local-agent:smoke -- --detect-only`
   - 从 live Agent catalog 读取当前完整 Agent 列表，并验证 default target 可检测，不启动真实 turn。
 - `pnpm --filter @group-chat/server local-agent:smoke -- --agent-id '<exact-agent-target-id>'`

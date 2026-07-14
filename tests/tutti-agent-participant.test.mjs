@@ -15,7 +15,7 @@ function loadModule() {
       "src/domains/tutti-agent-participant.ts",
       "--bundle", "--platform=node", "--format=esm", `--outfile=${output}`,
     ],
-    { cwd: rootDir, encoding: "utf8", stdio: "pipe", env: { ...process.env, ESBUILD_WORKER: "false" } },
+    { cwd: rootDir, encoding: "utf8", stdio: "pipe", env: { ...process.env, ESBUILD_WORKER_THREADS: "0" } },
   );
   assert.equal(build.status, 0, build.stderr || build.stdout);
   return import(`${pathToFileURL(output)}?t=${Date.now()}`);
@@ -43,6 +43,7 @@ const runtimeProfile = {
 test("virtual Tutti agent participants use stable non-clone ids", async () => {
   const {
     createVirtualTuttiAgentParticipant,
+    defaultTuttiAgentParticipantName,
     localAgentTargetFromLauncherAppId,
     parseLegacyTuttiAgentProviderParticipantId,
     parseTuttiAgentParticipantId,
@@ -50,8 +51,19 @@ test("virtual Tutti agent participants use stable non-clone ids", async () => {
   } = await loadModule();
 
   assert.equal(localAgentTargetFromLauncherAppId("agent-target:workspace/agent:primary"), "workspace/agent:primary");
+  assert.equal(localAgentTargetFromLauncherAppId("agent-target: target with edges "), " target with edges ");
+  assert.equal(localAgentTargetFromLauncherAppId(" agent-target:workspace/agent:primary"), "");
+  assert.equal(defaultTuttiAgentParticipantName("codex"), "Codex");
+  assert.equal(defaultTuttiAgentParticipantName("claude"), "Claude Code");
+  assert.equal(defaultTuttiAgentParticipantName(" codex "), "codex");
+  assert.equal(defaultTuttiAgentParticipantName(" claude "), "claude");
+  assert.equal(defaultTuttiAgentParticipantName("codex/"), "codex/");
+  assert.equal(defaultTuttiAgentParticipantName("claude code"), "claude code");
   assert.equal(tuttiAgentParticipantId("workspace/agent:primary"), "tutti-agent:target:workspace%2Fagent%3Aprimary");
   assert.equal(parseTuttiAgentParticipantId("tutti-agent:target:workspace%2Fagent%3Aprimary"), "workspace/agent:primary");
+  assert.equal(tuttiAgentParticipantId(" target with edges "), "tutti-agent:target:%20target%20with%20edges%20");
+  assert.equal(parseTuttiAgentParticipantId("tutti-agent:target:%20target%20with%20edges%20"), " target with edges ");
+  assert.equal(tuttiAgentParticipantId("\ud800"), "");
   assert.equal(parseTuttiAgentParticipantId("tutti-agent:codex"), "");
   assert.equal(parseLegacyTuttiAgentProviderParticipantId("tutti-agent:codex"), "codex");
   assert.equal(parseLegacyTuttiAgentProviderParticipantId("tutti-agent:target:codex"), "");

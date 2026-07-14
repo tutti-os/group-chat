@@ -1016,6 +1016,16 @@ function participantDisplayNameCharUnits(char: string) {
 
 const TUTTI_AGENT_PARTICIPANT_PREFIX = "tutti-agent:";
 const TUTTI_AGENT_TARGET_PARTICIPANT_PREFIX = `${TUTTI_AGENT_PARTICIPANT_PREFIX}target:`;
+const LEGACY_AGENT_LAUNCHER_APP_IDS = new Set(["agent-codex", "agent-claude-code"]);
+
+/** Classifies retired provider launchers without restoring their launch behavior. */
+export function isLegacyAgentLauncherAppId(
+  providerId: string | null | undefined,
+  entityId: string | null | undefined,
+) {
+  return providerId?.trim() === "workspace-app"
+    && LEGACY_AGENT_LAUNCHER_APP_IDS.has(entityId?.trim() ?? "");
+}
 
 export function normalizeTuttiAgentProvider(provider: string | null | undefined) {
   const normalized = provider?.trim().toLowerCase() ?? "";
@@ -1025,19 +1035,24 @@ export function normalizeTuttiAgentProvider(provider: string | null | undefined)
 }
 
 export function normalizeTuttiAgentTargetId(agentTargetId: string | null | undefined) {
-  return agentTargetId?.trim() ?? "";
+  return typeof agentTargetId === "string" ? agentTargetId : "";
 }
 
 export function tuttiAgentParticipantId(agentTargetId: string) {
   const normalized = normalizeTuttiAgentTargetId(agentTargetId);
-  return normalized ? `${TUTTI_AGENT_TARGET_PARTICIPANT_PREFIX}${encodeURIComponent(normalized)}` : "";
+  if (!normalized) return "";
+  try {
+    return `${TUTTI_AGENT_TARGET_PARTICIPANT_PREFIX}${encodeURIComponent(normalized)}`;
+  } catch {
+    return "";
+  }
 }
 
 export function parseTuttiAgentParticipantId(participantId: string | null | undefined) {
-  const trimmed = participantId?.trim() ?? "";
-  if (!trimmed.startsWith(TUTTI_AGENT_TARGET_PARTICIPANT_PREFIX)) return "";
+  const value = participantId ?? "";
+  if (!value.startsWith(TUTTI_AGENT_TARGET_PARTICIPANT_PREFIX)) return "";
   try {
-    return normalizeTuttiAgentTargetId(decodeURIComponent(trimmed.slice(TUTTI_AGENT_TARGET_PARTICIPANT_PREFIX.length)));
+    return normalizeTuttiAgentTargetId(decodeURIComponent(value.slice(TUTTI_AGENT_TARGET_PARTICIPANT_PREFIX.length)));
   } catch {
     return "";
   }
@@ -1061,7 +1076,11 @@ export function parseLegacyTuttiAgentProviderParticipantId(participantId: string
 }
 
 export function defaultTuttiAgentParticipantName(displayNameOrTargetId: string) {
-  return displayNameOrTargetId.trim() || "Agent";
+  const value = displayNameOrTargetId.trim();
+  const literalProvider = displayNameOrTargetId.toLowerCase();
+  if (literalProvider === "claude" || literalProvider === "claude-code") return "Claude Code";
+  if (literalProvider === "codex") return "Codex";
+  return value || "Agent";
 }
 
 export {

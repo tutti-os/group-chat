@@ -15,7 +15,7 @@ function loadModule() {
       "src/app/runtime.tsx",
       "--bundle", "--platform=node", "--format=esm", `--outfile=${output}`,
     ],
-    { cwd: rootDir, encoding: "utf8", stdio: "pipe", env: { ...process.env, ESBUILD_WORKER: "false" } },
+    { cwd: rootDir, encoding: "utf8", stdio: "pipe", env: { ...process.env, ESBUILD_WORKER_THREADS: "0" } },
   );
   assert.equal(build.status, 0, build.stderr || build.stdout);
   return import(`${pathToFileURL(output)}?t=${Date.now()}`);
@@ -78,6 +78,25 @@ test("Agent target ids containing model separators remain visible as canonical p
 
   assert.deepEqual(listCanonicalRuntimeProfiles([base, variant]).map((profile) => profile.id), [base.id]);
   assert.equal(resolveCanonicalRuntimeProfile(variant, [base, variant])?.id, base.id);
+});
+
+test("catalog canonical profile wins over an older migrated custom-model profile", async () => {
+  const { listCanonicalRuntimeProfiles } = await loadModule();
+  const migratedCustom = {
+    ...codexProfile,
+    id: "local-agent:codex__custom",
+    model: "custom-model",
+  };
+  const catalogCanonical = {
+    ...codexProfile,
+    id: "local-agent-target:v1:6167656e743a636f6465783a7072696d617279",
+    model: "catalog-default",
+  };
+
+  assert.deepEqual(
+    listCanonicalRuntimeProfiles([migratedCustom, catalogCanonical]).map((profile) => profile.id),
+    [catalogCanonical.id],
+  );
 });
 
 test("local agent model options use detected provider models instead of provider-prefixed defaults", async () => {

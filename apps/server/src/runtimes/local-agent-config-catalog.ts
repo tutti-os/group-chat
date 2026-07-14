@@ -82,29 +82,29 @@ function parseCodexModelsCache(configDir: string): LocalAgentProviderModel[] {
   }
 }
 
-function needsModelCatalogEnrichment(provider: LocalAgentTargetStatus) {
-  if (!provider.available) return false;
-  if (provider.models.length === 0) return true;
-  return provider.models.length === 1 && provider.models[0]?.id === "default";
+function needsModelCatalogEnrichment(target: LocalAgentTargetStatus) {
+  if (!target.available) return false;
+  if (target.models.length === 0) return true;
+  return target.models.length === 1 && target.models[0]?.id === "default";
 }
 
-export function enrichLocalAgentProviderStatus(provider: LocalAgentTargetStatus): LocalAgentTargetStatus {
-  if (provider.providerId !== "codex" || !provider.configDir || !needsModelCatalogEnrichment(provider)) {
-    return provider;
+export function enrichLocalAgentTargetStatus(target: LocalAgentTargetStatus): LocalAgentTargetStatus {
+  if (target.providerId !== "codex" || !target.configDir || !needsModelCatalogEnrichment(target)) {
+    return target;
   }
 
-  const defaults = readCodexConfigDefaults(provider.configDir);
-  const cachedModels = parseCodexModelsCache(provider.configDir);
+  const defaults = readCodexConfigDefaults(target.configDir);
+  const cachedModels = parseCodexModelsCache(target.configDir);
   if (!cachedModels.length) {
     return {
-      ...provider,
+      ...target,
       ...(defaults.defaultModelId ? { defaultModelId: defaults.defaultModelId } : {}),
       ...(defaults.defaultReasoningEffort ? { defaultReasoningEffort: defaults.defaultReasoningEffort } : {}),
     };
   }
 
   return {
-    ...provider,
+    ...target,
     models: cachedModels,
     defaultModelId: defaults.defaultModelId ?? cachedModels.find((model) => model.id !== "default")?.id,
     defaultReasoningEffort: defaults.defaultReasoningEffort ?? null,

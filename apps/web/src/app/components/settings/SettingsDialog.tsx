@@ -183,7 +183,7 @@ export function SettingsDialog(props: {
                       <div>
                         <strong>{profile.displayName}</strong>
                         <span>
-                          {profile.kind} · {profile.displayName} · {profile.model}
+                          {profile.kind} · {profile.provider} · {profile.model}
                         </span>
                       </div>
                       <RuntimeStatusHint profile={profile} localAgentProviders={props.localAgentProviders} />

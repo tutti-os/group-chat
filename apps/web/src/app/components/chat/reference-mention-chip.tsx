@@ -1,7 +1,5 @@
 import type { TuttiAtProviderId } from "@group-chat/shared";
 import type { ReactNode } from "react";
-import { formatAgentLauncherMentionLabel } from "../../agent-launcher-mentions.js";
-import { getRuntimeProviderAvatarIconUrl } from "../../identity-avatar.js";
 import { TuttiReferenceIcon } from "../../tutti-reference-icons.js";
 
 export const REFERENCE_MENTION_COLOR = "var(--accent-codex)";
@@ -53,14 +51,6 @@ export const REFERENCE_MENTION_ICON_AFTER_CLASS = [
   "[vertical-align:-0.2em]",
 ].join(" ");
 
-export const AGENT_LAUNCHER_MENTION_ICON_CLASS = [
-  "[display:inline-block]",
-  "[width:14px]",
-  "[height:14px]",
-  "[margin:0_4px]",
-  "[vertical-align:-0.2em]",
-].join(" ");
-
 export const REFERENCE_MENTION_LABEL_CLASS = [
   "[min-width:0]",
   "[overflow:hidden]",
@@ -69,65 +59,6 @@ export const REFERENCE_MENTION_LABEL_CLASS = [
   "[line-height:20px]",
   "[vertical-align:baseline]",
 ].join(" ");
-
-function AgentLauncherMentionIcon(props: { runtimeProvider: string }) {
-  const iconUrl = getRuntimeProviderAvatarIconUrl(props.runtimeProvider);
-  if (!iconUrl) {
-    return <ReferenceMentionIcon providerId="agent-session" />;
-  }
-  return <img src={iconUrl} alt="" className="[width:14px] [height:14px] [border-radius:3px] [object-fit:cover]" />;
-}
-
-export function splitAgentLauncherMentionLabel(label: string) {
-  const displayLabel = formatAgentLauncherMentionLabel(label);
-  return {
-    prefix: "@",
-    name: displayLabel.replace(/^@+/, ""),
-  };
-}
-
-export function AgentLauncherMentionChip(props: {
-  label: ReactNode;
-  runtimeProvider: string;
-  pasteMarkdown?: string;
-  onClick?: () => void;
-}) {
-  const displayLabel = typeof props.label === "string"
-    ? splitAgentLauncherMentionLabel(props.label)
-    : null;
-
-  return (
-    <span
-      role="button"
-      tabIndex={0}
-      data-mention-display-mode="agent-launcher"
-      data-composer-paste-markdown={props.pasteMarkdown}
-      className={REFERENCE_MENTION_CHIP_CLASS}
-      style={{ color: "var(--accent-codex)" }}
-      onClick={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        props.onClick?.();
-      }}
-      onKeyDown={(event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        event.stopPropagation();
-        props.onClick?.();
-      }}
-    >
-      {displayLabel ? (
-        <span aria-hidden="true">@</span>
-      ) : null}
-      <span className={displayLabel ? AGENT_LAUNCHER_MENTION_ICON_CLASS : REFERENCE_MENTION_ICON_AFTER_CLASS}>
-        <AgentLauncherMentionIcon runtimeProvider={props.runtimeProvider} />
-      </span>
-      <span className={REFERENCE_MENTION_LABEL_CLASS} style={{ color: "var(--accent-codex)" }}>
-        {displayLabel ? displayLabel.name : props.label}
-      </span>
-    </span>
-  );
-}
 
 export function ReferenceMentionIcon(props: {
   providerId: TuttiAtProviderId;

@@ -151,7 +151,7 @@ export function enrichContentWithReferenceMentions(
     if (!isStyledReferenceProvider(mention.referenceProviderId)) continue;
     const entityId = mention.referenceEntityId?.trim();
     const rawLabel = mention.displayNameSnapshot.trim();
-    const label = entityId && isAgentLauncherAppId(entityId)
+    const label = entityId && isAgentLauncherAppId(mention.referenceProviderId, entityId)
       ? formatAgentLauncherMentionLabel(rawLabel)
       : rawLabel;
     if (!entityId || !label) continue;
@@ -179,7 +179,7 @@ export function serializeReferenceMentionChip(element: HTMLElement) {
   const entityId = element.dataset.mentionReferenceEntityId?.trim() || parsed?.itemId || "";
   if (!entityId) return label;
 
-  const displayLabel = isAgentLauncherAppId(entityId)
+  const displayLabel = isAgentLauncherAppId(providerId, entityId)
     ? formatAgentLauncherMentionLabel(label)
     : label;
 
@@ -301,7 +301,7 @@ function resolveReferenceSegmentForAgentForward(
       const providerId = url.hostname as TuttiAtProviderId;
       const entityId = decodeURIComponent(url.pathname.replace(/^\/+/, "")).trim();
       if (isOpenableTuttiReferenceProvider(providerId) && entityId) {
-        if (isAgentLauncherAppId(entityId)) return "";
+        if (isAgentLauncherAppId(providerId, entityId)) return "";
         return `[${label}](${segment.href})`;
       }
     } catch {
@@ -321,7 +321,7 @@ function resolveReferenceSegmentForAgentForward(
   }
 
   if (isOpenableTuttiReferenceProvider(parsed.providerId)) {
-    if (isAgentLauncherAppId(parsed.entityId)) return "";
+    if (isAgentLauncherAppId(parsed.providerId, parsed.entityId)) return "";
     const mention = findReferenceMentionMeta(mentions, parsed.providerId, parsed.entityId);
     const href = buildTuttiMentionHref(parsed.providerId, parsed.entityId, {
       referenceInsert: mention?.referenceInsert,

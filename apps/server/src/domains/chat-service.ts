@@ -32,6 +32,8 @@ import {
   resolveMentionSpeakingOrder,
   sanitizeMentionTargetForAgentContext,
   stripAssistantSkillDetails,
+  normalizeTuttiAgentProvider,
+  isLegacyAgentLauncherAppId,
 } from "@group-chat/shared";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, isAbsolute, relative, resolve } from "node:path";
@@ -41,7 +43,7 @@ import { enrichAssistantContentWithWorkspaceResourceLinks } from "./assistant-re
 import { sha256ForFile } from "./artifact-content-hash.js";
 import { AgentToolTokenStore } from "./agent-tool-tokens.js";
 import { AgentWorkspaceService } from "./agent-workspace.js";
-import { ChatRepository } from "./chat-repository.js";
+import { ChatRepository, localAgentTargetRuntimeProfileId } from "./chat-repository.js";
 import {
   createVirtualTuttiAgentParticipant,
   defaultTuttiAgentParticipantName,
@@ -72,6 +74,7 @@ const AUTO_IMPORT_RUN_FILE_MAX_BYTES = 50 * 1024 * 1024;
 
 interface RuntimeInvocationContext {
   agentDetectContext?: DetectContext;
+  defaultAgentTargetId?: string;
   managedAgentHeaders?: ManagedAgentInvocationCredentialHeaders;
 }
 
@@ -81,14 +84,13 @@ export class ChatService {
   private readonly activeReplyKeys = new Set<string>();
   private readonly cancelledRunIds = new Set<string>();
   private readonly cancelledPrivateTaskIds = new Set<string>();
-  private readonly messageInvocationContexts = new Map<string, RuntimeInvocationContext>();
+  private readonly messageInvocationContexts = new Map<string, Map<string, RuntimeInvocationContext>>();
   private readonly activePrivateTasks = new Map<string, {
     participantId: string;
     cancel: (reason: string) => Promise<void> | void;
   }>();
   private recoveredReplyQueue = false;
   private bootstrapMaintenanceStarted = false;
-  private defaultAgentTargetId = "";
 
   constructor(
     private readonly repo: ChatRepository,
@@ -115,8 +117,8 @@ export class ChatService {
 
   async listLocalAgentTargets(detectContext?: DetectContext) {
     const catalog = await this.runtimes.listLocalAgentTargets(detectContext);
-    this.defaultAgentTargetId = catalog.defaultAgentTargetId;
     this.repo.syncLocalAgentCatalog({
+      authoritative: !detectContext?.managedAgentInvocation,
       agents: catalog.agents.map((agent) => ({
         agentTargetId: agent.agentTargetId,
         providerId: agent.providerId,
@@ -129,14 +131,14 @@ export class ChatService {
     return catalog;
   }
 
-  createRoom(input: CreateRoomRequest) {
-    const defaultRuntimeProfileId = this.defaultAgentRuntimeProfile()?.id ?? null;
+  createRoom(input: CreateRoomRequest, defaultAgentTargetId = "") {
+    const defaultRuntimeProfileId = this.defaultAgentRuntimeProfile(defaultAgentTargetId)?.id ?? null;
     const bundle = this.repo.createRoom({
       ...input,
       ...(input.participants
         ? {
             participants: input.participants.map((participant) =>
-              participant.runtimeProfileId || !defaultRuntimeProfileId
+              participant.runtimeProfileId !== undefined
                 ? participant
                 : { ...participant, runtimeProfileId: defaultRuntimeProfileId }
             ),
@@ -153,7 +155,27 @@ export class ChatService {
     return bundle;
   }
 
-  deleteRoom(roomId: string) {
+  async deleteRoom(roomId: string) {
+    if (!this.repo.getRoom(roomId)) return null;
+    const bundle = this.repo.getRoomBundle(roomId);
+    const activeRuns = this.repo.listActiveAgentRuns()
+      .filter((run) => run.conversationId === bundle.conversation.id);
+    const participantIds = new Set([
+      ...bundle.participants.map((participant) => participant.id),
+      ...this.repo.listPendingReplies()
+        .filter((item) => item.conversationId === bundle.conversation.id)
+        .map((item) => item.participantId),
+      ...activeRuns.flatMap((run) => run.participantId ? [run.participantId] : []),
+    ]);
+    await Promise.all([
+      ...[...participantIds].map((participantId) =>
+        this.cancelParticipantWork(participantId, "Room deleted")
+      ),
+      ...activeRuns
+        .filter((run) => !run.participantId)
+        .map((run) => this.cancelRun(run.id, "Room deleted")),
+    ]);
+    this.deleteConversationInvocationContexts(bundle.conversation.id);
     const result = this.repo.deleteRoom(roomId);
     if (result) {
       this.events.emit({
@@ -183,8 +205,8 @@ export class ChatService {
     return bundle;
   }
 
-  createIdentity(input: CreateIdentityRequest) {
-    const identity = this.repo.createIdentity(this.resolveIdentityInput(input));
+  createIdentity(input: CreateIdentityRequest, defaultAgentTargetId = "") {
+    const identity = this.repo.createIdentity(this.resolveIdentityInput(input, undefined, defaultAgentTargetId));
     this.workspaces.materializeIdentity(identity);
     this.events.emit({
       type: "identity.created",
@@ -193,8 +215,11 @@ export class ChatService {
     return identity;
   }
 
-  updateIdentity(identityId: string, input: UpdateIdentityRequest) {
-    const identity = this.repo.updateIdentity(identityId, this.resolveIdentityInput(input, identityId));
+  updateIdentity(identityId: string, input: UpdateIdentityRequest, defaultAgentTargetId = "") {
+    const identity = this.repo.updateIdentity(
+      identityId,
+      this.resolveIdentityInput(input, identityId, defaultAgentTargetId),
+    );
     if (identity) {
       this.workspaces.materializeIdentity(identity);
       for (const participant of this.repo.listActiveParticipantsByIdentity(identity.id)) {
@@ -426,11 +451,30 @@ export class ChatService {
       return { run };
     }
     this.cancelledRunIds.add(runId);
-    const participant = run.participantId ? this.repo.getParticipant(run.participantId) : null;
-    const runtimeProfile = participant?.runtimeProfileId ? this.repo.getRuntimeProfile(participant.runtimeProfileId) : null;
+    const runtimeProfile = this.resolveRunRuntimeProfile(run);
     const provider = this.runtimes.getProvider(runtimeProfile);
     await provider.cancel(runId).catch(() => undefined);
     return this.finalizeRunCancellation(runId, reason);
+  }
+
+  private resolveRunRuntimeProfile(run: AgentRun) {
+    const profiles = this.repo.listRuntimeProfiles();
+    const descriptorProfile = profiles.find((profile) =>
+      profile.kind === run.runtime
+      && profile.agentTargetId === run.agentTargetId
+      && profile.provider === run.provider
+      && profile.model === run.model
+    );
+    if (descriptorProfile) return descriptorProfile;
+    const targetProfile = run.agentTargetId
+      ? profiles.find((profile) =>
+          profile.kind === run.runtime
+          && profile.agentTargetId === run.agentTargetId
+        )
+      : null;
+    if (targetProfile) return targetProfile;
+    const participant = run.participantId ? this.repo.getParticipant(run.participantId) : null;
+    return participant ? this.resolveParticipantRuntimeProfile(participant) : null;
   }
 
   private async cancelRunsForTriggerMessage(triggerMessageId: string) {
@@ -440,6 +484,7 @@ export class ChatService {
 
   private async cancelRunsForParticipant(participantId: string, reason: string) {
     this.repo.deletePendingRepliesForParticipant(participantId);
+    this.deleteParticipantInvocationContexts(participantId);
     const runs = this.repo.listActiveAgentRunsForParticipant(participantId);
     await Promise.all(runs.map((run) => this.cancelRun(run.id, reason)));
   }
@@ -527,7 +572,6 @@ export class ChatService {
       status: "success",
       parentMessageId: input.parentMessageId ?? null,
     });
-    this.messageInvocationContexts.set(message.id, invocation);
     const blocks = [];
     const artifacts = [];
     this.repo.touchConversation(conversationId, content || "Attached files");
@@ -588,18 +632,26 @@ export class ChatService {
 
     const mentions = message.mentions;
     const workspaceAppOnlyDispatch = isWorkspaceAppOnlyTaskMessage({ userMessage: { content, mentions } });
-    const targets = this.resolveTargets(conversation, mentions, content);
+    const targets = this.resolveTargets(
+      conversation,
+      mentions,
+      content,
+      invocation.defaultAgentTargetId,
+    );
     this.materializeParticipants(conversation, targets);
-    void this.generateReplies(conversation.roomId, conversationId, message, targets, {
-      currentRound: 1,
-      maxRounds: input.maxReplyRounds
-        ? clampInteger(input.maxReplyRounds, 1, 8)
-        : workspaceAppOnlyDispatch ? 1 : maxReplyRoundsForTrigger(conversation, mentions),
-      order: resolveReplySpeakingOrder(conversation, mentions),
-      seenParticipantIds: new Set(targets.map((participant) => participant.id)),
-      mentionScoped: workspaceAppOnlyDispatch || isParticipantMentionScoped(message.mentions),
-      invocation,
-    });
+    if (targets.length > 0) {
+      this.setMessageInvocationContexts(message.id, targets, invocation);
+      void this.generateReplies(conversation.roomId, conversationId, message, targets, {
+        currentRound: 1,
+        maxRounds: input.maxReplyRounds
+          ? clampInteger(input.maxReplyRounds, 1, 8)
+          : workspaceAppOnlyDispatch ? 1 : maxReplyRoundsForTrigger(conversation, mentions),
+        order: resolveReplySpeakingOrder(conversation, mentions),
+        seenParticipantIds: new Set(targets.map((participant) => participant.id)),
+        mentionScoped: workspaceAppOnlyDispatch || isParticipantMentionScoped(message.mentions),
+        invocation,
+      });
+    }
     return { message, blocks, artifacts, targets };
   }
 
@@ -666,6 +718,10 @@ export class ChatService {
     return this.repo.getPrivateTask(taskId);
   }
 
+  getMessage(messageId: string) {
+    return this.repo.getMessage(messageId);
+  }
+
   listPrivateTasksForConversation(conversationId: string) {
     return this.repo.listPrivateTasksForConversation(conversationId);
   }
@@ -693,6 +749,7 @@ export class ChatService {
       const result = this.repo.markMessageStatus(messageId, input.status);
       if (!result?.message) return null;
       this.repo.deletePendingRepliesForMessage(messageId);
+      this.messageInvocationContexts.delete(messageId);
       await this.cancelRunsForTriggerMessage(messageId);
       this.repo.touchConversation(conversation.id, "Message recalled");
       this.events.emit({
@@ -749,18 +806,33 @@ export class ChatService {
         payload: { block: result.block },
       });
     }
+    // An edit replaces the dispatch contract for this message. Clear any
+    // participant queue entries and invocation contexts created by the prior
+    // target set before scheduling the edited target set.
+    this.repo.deletePendingRepliesForMessage(result.message.id);
+    this.messageInvocationContexts.delete(result.message.id);
     const workspaceAppOnlyDispatch = isWorkspaceAppOnlyTaskMessage({
       userMessage: { content: result.message.content, mentions: result.message.mentions },
     });
-    const targets = this.resolveTargets(conversation, result.message.mentions, result.message.content);
-    void this.generateReplies(conversation.roomId, conversation.id, result.message, targets, {
-      currentRound: 1,
-      maxRounds: workspaceAppOnlyDispatch ? 1 : maxReplyRoundsForTrigger(conversation, result.message.mentions),
-      order: resolveReplySpeakingOrder(conversation, result.message.mentions),
-      seenParticipantIds: new Set(targets.map((participant) => participant.id)),
-      mentionScoped: workspaceAppOnlyDispatch || isParticipantMentionScoped(result.message.mentions),
-      invocation,
-    });
+    const targets = this.resolveTargets(
+      conversation,
+      result.message.mentions,
+      result.message.content,
+      invocation.defaultAgentTargetId,
+    );
+    if (targets.length > 0) {
+      this.setMessageInvocationContexts(result.message.id, targets, invocation);
+      void this.generateReplies(conversation.roomId, conversation.id, result.message, targets, {
+        currentRound: 1,
+        maxRounds: workspaceAppOnlyDispatch ? 1 : maxReplyRoundsForTrigger(conversation, result.message.mentions),
+        order: resolveReplySpeakingOrder(conversation, result.message.mentions),
+        seenParticipantIds: new Set(targets.map((participant) => participant.id)),
+        mentionScoped: workspaceAppOnlyDispatch || isParticipantMentionScoped(result.message.mentions),
+        invocation,
+      });
+    } else {
+      this.messageInvocationContexts.delete(result.message.id);
+    }
     return {
       message: result.message,
       blocks: replacement ? replacement.blocks : result.block ? [result.block] : [],
@@ -872,7 +944,7 @@ export class ChatService {
 
     const legacyProvider = scope.groupChatRuntimeProvider?.trim()
       || (mention.referenceProviderId === "agent-session" ? scope.provider?.trim() : "");
-    const agentTargetId = scope.groupChatAgentTargetId?.trim()
+    const agentTargetId = scope.groupChatAgentTargetId
       || localAgentTargetFromLauncherAppId(mention.referenceEntityId)
       || this.resolveUniqueLegacyAgentTargetId(legacyProvider);
     if (!agentTargetId) return null;
@@ -894,7 +966,7 @@ export class ChatService {
         item.id === scopedParticipantId
         && item.kind === "ai"
         && item.status !== "removed"
-        && item.runtimeProfileId === runtimeProfile.id
+        && this.resolveParticipantRuntimeProfile(item)?.id === runtimeProfile.id
       );
       if (participant) return participant;
     }
@@ -907,7 +979,7 @@ export class ChatService {
     const existing = participants.find((participant) =>
       participant.kind === "ai"
       && participant.status !== "removed"
-      && participant.runtimeProfileId === runtimeProfile.id
+      && this.resolveParticipantRuntimeProfile(participant)?.id === runtimeProfile.id
       && normalizeTuttiAgentName(participant.displayName) === normalizedRequestedName
     );
     if (existing) return existing;
@@ -944,12 +1016,11 @@ export class ChatService {
   }
 
   private resolveUniqueLegacyAgentTargetId(provider: string | null | undefined) {
-    const normalized = provider?.trim() ?? "";
-    if (!normalized) return "";
-    const canonical = normalized.toLowerCase() === "claude" ? "claude-code" : normalized.toLowerCase();
+    const canonical = normalizeTuttiAgentProvider(provider);
+    if (!canonical) return "";
     const matches = this.repo.listRuntimeProfiles().filter((profile) =>
       profile.kind === "local-agent"
-      && (profile.provider.toLowerCase() === "claude" ? "claude-code" : profile.provider.toLowerCase()) === canonical
+      && normalizeTuttiAgentProvider(profile.provider) === canonical
       && profile.enabled
       && Boolean(profile.agentTargetId)
     );
@@ -961,8 +1032,26 @@ export class ChatService {
     conversation: Conversation,
     participant: Participant,
   ) {
-    return this.repo.getParticipant(participant.id)
-      ?? this.resolveVirtualTuttiAgentParticipant(conversation, participant.id, participant.displayName);
+    const persisted = this.repo.getParticipant(participant.id);
+    if (persisted) {
+      const runtimeProfile = this.resolveParticipantRuntimeProfile(persisted);
+      return runtimeProfile && !persisted.runtimeProfileId
+        ? {
+            ...persisted,
+            runtimeProfileId: runtimeProfile.id,
+            agentTargetId: runtimeProfile.agentTargetId,
+          }
+        : persisted;
+    }
+    return this.resolveVirtualTuttiAgentParticipant(conversation, participant.id, participant.displayName);
+  }
+
+  private resolveParticipantRuntimeProfile(participant: Participant) {
+    const runtimeProfileId = participant.runtimeProfileId
+      ?? (participant.identityId
+        ? this.repo.getIdentity(participant.identityId)?.defaultRuntimeProfileId
+        : null);
+    return runtimeProfileId ? this.repo.getRuntimeProfile(runtimeProfileId) : null;
   }
 
   private materializeExistingWorkspaces() {
@@ -1134,12 +1223,18 @@ export class ChatService {
     conversation: Conversation,
     mentions: NonNullable<SendMessageRequest["mentions"]>,
     userText: string,
+    defaultAgentTargetId = "",
   ) {
     const activeAi = this.repo
       .listParticipants(conversation.id)
       .filter((participant) => participant.kind === "ai" && participant.status === "active");
     if (mentions.some((mention) => mention.mentionType === "all")) return [];
-    const workspaceAppOnlyTarget = this.resolveWorkspaceAppOnlyDispatchTarget(conversation, mentions, userText);
+    const workspaceAppOnlyTarget = this.resolveWorkspaceAppOnlyDispatchTarget(
+      conversation,
+      mentions,
+      userText,
+      defaultAgentTargetId,
+    );
     if (workspaceAppOnlyTarget) return [workspaceAppOnlyTarget];
     const mentionedIds = new Set(mentions.map((mention) => mention.participantId));
     if (mentionedIds.size > 0) {
@@ -1160,18 +1255,20 @@ export class ChatService {
     conversation: Conversation,
     mentions: NonNullable<SendMessageRequest["mentions"]>,
     userText: string,
+    defaultAgentTargetId = "",
   ) {
     if (!isWorkspaceAppOnlyTaskMessage({ userMessage: { content: userText, mentions } })) return null;
     const runtimeProfile = this.repo.listRuntimeProfiles().find((profile) =>
       profile.kind === "local-agent"
       && profile.enabled
-      && profile.agentTargetId === this.defaultAgentTargetId
+      && profile.agentTargetId === defaultAgentTargetId
     ) ?? null;
     if (runtimeProfile?.kind !== "local-agent" || !runtimeProfile.enabled) return null;
     const appMention = mentions.find((mention) =>
       mention.mentionType === "reference"
       && mention.referenceProviderId === "workspace-app"
       && mention.referenceEntityId?.trim()
+      && !isLegacyAgentLauncherAppId(mention.referenceProviderId, mention.referenceEntityId)
     );
     const displayName =
       appMention ? resolveMentionTargetReferenceLabel(appMention) || appMention.displayNameSnapshot.trim() : "";
@@ -1265,13 +1362,24 @@ export class ChatService {
     invocation?: RuntimeInvocationContext,
   ) {
     const key = replyScheduleKey(conversationId, participant.id);
+    if (invocation !== undefined) {
+      this.setMessageInvocationContext(userMessage.id, participant.id, invocation);
+    }
     if (this.activeReplyKeys.has(key)) {
+      const displaced = this.repo.getPendingReply(conversationId, participant.id);
       this.repo.upsertPendingReply({
         roomId,
         conversationId,
         participantId: participant.id,
         messageId: userMessage.id,
       });
+      if (displaced && displaced.messageId !== userMessage.id) {
+        this.deleteMessageInvocationContext(
+          displaced.messageId,
+          participant.id,
+          this.messageInvocationContexts.get(displaced.messageId)?.get(participant.id),
+        );
+      }
       return;
     }
 
@@ -1285,20 +1393,39 @@ export class ChatService {
         const currentParticipant = this.resolveEffectiveParticipant(conversation, participant);
         if (!currentParticipant || currentParticipant.status !== "active") {
           this.repo.deletePendingRepliesForParticipant(participant.id);
+          this.deleteParticipantInvocationContexts(participant.id);
           break;
         }
         const latest = this.repo.getMessage(nextMessage.id);
-        if (!latest || latest.status === "recalled") break;
-        const currentInvocation = this.messageInvocationContexts.get(latest.id) ?? invocation;
-        const generated = await this.generateForParticipant(
-          roomId,
-          conversationId,
-          latest,
-          currentParticipant,
-          nextMessage.id === userMessage.id ? preacceptedRun : null,
-          currentInvocation,
-        );
-        this.messageInvocationContexts.delete(latest.id);
+        if (!latest || latest.status === "recalled") {
+          this.deleteMessageInvocationContext(
+            nextMessage.id,
+            participant.id,
+            this.messageInvocationContexts.get(nextMessage.id)?.get(participant.id),
+          );
+          break;
+        }
+        const currentInvocation = this.messageInvocationContexts.get(latest.id)?.get(participant.id);
+        if (!currentInvocation) {
+          // A queued item without its own participant-scoped invocation was
+          // recalled, edited away, superseded, or recovered stale. Never run
+          // it with credentials captured by the participant's active request.
+          nextMessage = null;
+          continue;
+        }
+        let generated: Message | null;
+        try {
+          generated = await this.generateForParticipant(
+            roomId,
+            conversationId,
+            latest,
+            currentParticipant,
+            nextMessage.id === userMessage.id ? preacceptedRun : null,
+            currentInvocation,
+          );
+        } finally {
+          this.deleteMessageInvocationContext(latest.id, participant.id, currentInvocation);
+        }
         if (nextMessage.id === userMessage.id) requestedReply = generated;
         const pending = this.repo.consumePendingReply(conversationId, participant.id);
         if (!pending) {
@@ -1306,11 +1433,65 @@ export class ChatService {
           continue;
         }
         nextMessage = this.repo.getMessage(pending.messageId);
+        if (!nextMessage) {
+          this.deleteMessageInvocationContext(
+            pending.messageId,
+            participant.id,
+            this.messageInvocationContexts.get(pending.messageId)?.get(participant.id),
+          );
+        }
       }
     } finally {
       this.activeReplyKeys.delete(key);
     }
     return requestedReply;
+  }
+
+  private setMessageInvocationContexts(
+    messageId: string,
+    targets: Participant[],
+    invocation: RuntimeInvocationContext,
+  ) {
+    this.messageInvocationContexts.set(
+      messageId,
+      new Map(targets.map((target) => [target.id, invocation])),
+    );
+  }
+
+  private setMessageInvocationContext(
+    messageId: string,
+    participantId: string,
+    invocation: RuntimeInvocationContext,
+  ) {
+    const byParticipant = this.messageInvocationContexts.get(messageId) ?? new Map();
+    byParticipant.set(participantId, invocation);
+    this.messageInvocationContexts.set(messageId, byParticipant);
+  }
+
+  private deleteMessageInvocationContext(
+    messageId: string,
+    participantId: string,
+    expectedInvocation: RuntimeInvocationContext | undefined,
+  ) {
+    const byParticipant = this.messageInvocationContexts.get(messageId);
+    if (!byParticipant || byParticipant.get(participantId) !== expectedInvocation) return;
+    byParticipant.delete(participantId);
+    if (byParticipant.size === 0) this.messageInvocationContexts.delete(messageId);
+  }
+
+  private deleteParticipantInvocationContexts(participantId: string) {
+    for (const [messageId, byParticipant] of this.messageInvocationContexts) {
+      byParticipant.delete(participantId);
+      if (byParticipant.size === 0) this.messageInvocationContexts.delete(messageId);
+    }
+  }
+
+  private deleteConversationInvocationContexts(conversationId: string) {
+    for (const messageId of this.messageInvocationContexts.keys()) {
+      if (this.repo.getMessage(messageId)?.conversationId === conversationId) {
+        this.messageInvocationContexts.delete(messageId);
+      }
+    }
   }
 
   private resolveFollowupTargets(
@@ -2098,15 +2279,18 @@ export class ChatService {
   private resolveIdentityInput<T extends CreateIdentityRequest | UpdateIdentityRequest>(
     input: T,
     identityId?: string,
+    defaultAgentTargetId = "",
   ): T {
     const current = identityId ? this.repo.getIdentity(identityId) : null;
-    const runtimeProfileId =
-      input.defaultRuntimeProfileId === undefined
-        ? current?.defaultRuntimeProfileId ?? this.defaultAgentRuntimeProfile()?.id ?? null
-        : input.defaultRuntimeProfileId;
-    const resolvedInput = runtimeProfileId && runtimeProfileId !== input.defaultRuntimeProfileId
-      ? { ...input, defaultRuntimeProfileId: runtimeProfileId }
-      : input;
+    const runtimeProfileId = input.defaultRuntimeProfileId === undefined
+      ? current
+        ? current.defaultRuntimeProfileId
+        : this.defaultAgentRuntimeProfile(defaultAgentTargetId)?.id ?? null
+      : input.defaultRuntimeProfileId;
+    const resolvedInput = Object.prototype.hasOwnProperty.call(input, "defaultRuntimeProfileId")
+      && input.defaultRuntimeProfileId === runtimeProfileId
+      ? input
+      : { ...input, defaultRuntimeProfileId: runtimeProfileId };
     if (!runtimeProfileId || input.model === undefined) return resolvedInput;
     const baseProfile = this.repo.getRuntimeProfile(runtimeProfileId);
     if (!baseProfile) return resolvedInput;
@@ -2115,11 +2299,11 @@ export class ChatService {
     return { ...resolvedInput, defaultRuntimeProfileId: resolvedProfile.id };
   }
 
-  private defaultAgentRuntimeProfile() {
-    if (!this.defaultAgentTargetId) return null;
+  private defaultAgentRuntimeProfile(defaultAgentTargetId: string) {
+    if (!defaultAgentTargetId) return null;
     const profile = this.repo.listRuntimeProfiles().find((profile) =>
       profile.kind === "local-agent"
-      && profile.agentTargetId === this.defaultAgentTargetId
+      && profile.agentTargetId === defaultAgentTargetId
       && profile.enabled
     ) ?? null;
     return profile ? this.resolveCanonicalRuntimeProfile(profile) : null;
@@ -2127,11 +2311,13 @@ export class ChatService {
 
   private resolveCanonicalRuntimeProfile(profile: RuntimeProfile) {
     if (profile.kind !== "local-agent" || !profile.agentTargetId) return profile;
+    const canonicalId = localAgentTargetRuntimeProfileId(profile.agentTargetId);
     const canonical = this.repo
       .listRuntimeProfiles()
       .filter((item) => item.kind === "local-agent" && item.agentTargetId === profile.agentTargetId)
       .sort((left, right) =>
-        left.id.length - right.id.length
+        Number(right.id === canonicalId) - Number(left.id === canonicalId)
+        || left.id.length - right.id.length
         || left.createdAt.localeCompare(right.createdAt)
         || left.id.localeCompare(right.id)
       )[0];

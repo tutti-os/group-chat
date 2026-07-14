@@ -62,13 +62,7 @@ export function findParticipantForLocalAgentProfile(
   const activeAgents = participants.filter((participant) => participant.kind === "ai" && participant.status !== "removed");
   const candidateNames = new Set(displayNameCandidates.map(normalizeLocalAgentDisplayName).filter(Boolean));
   for (const participant of activeAgents) {
-    const runtimeProfileId =
-      participant.runtimeProfileId
-      ?? identities.find((identity) => identity.id === participant.identityId)?.defaultRuntimeProfileId
-      ?? null;
-    const runtime = runtimeProfileId
-      ? runtimeProfiles.find((item) => item.id === runtimeProfileId) ?? null
-      : null;
+    const runtime = resolveParticipantRuntimeProfile(participant, identities, runtimeProfiles);
     if (
       runtime?.kind === "local-agent"
       && runtime.agentTargetId === profile.agentTargetId
@@ -90,8 +84,6 @@ export function buildLocalAgentMentionOptions(
   participants: Participant[],
   identities: Identity[],
   query: string | null,
-  availableLauncherAppIds: ReadonlySet<string> = new Set(),
-  agentGuiBridgeAvailable = false,
 ): LocalAgentMentionOption[] {
   if (query === null) return [];
   const normalizedQuery = query.toLowerCase();
@@ -112,6 +104,13 @@ export function buildLocalAgentMentionOptions(
       defaultIdentityNameForRuntime(profile, localAgentProviders),
       profile.displayName,
     ]);
+    const participantProfile = participant
+      ? resolveParticipantRuntimeProfile(participant, identities, runtimeProfiles)
+      : null;
+    const mentionProfile = participantProfile?.kind === "local-agent"
+        && participantProfile.agentTargetId === profile.agentTargetId
+      ? participantProfile
+      : profile;
 
     const haystack = [
       label,
@@ -131,10 +130,23 @@ export function buildLocalAgentMentionOptions(
       key: profile.id,
       label,
       subtitle,
-      runtimeProfile: profile,
+      runtimeProfile: mentionProfile,
       participant,
     });
   }
 
   return results.sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function resolveParticipantRuntimeProfile(
+  participant: Participant,
+  identities: Identity[],
+  runtimeProfiles: RuntimeProfile[],
+) {
+  const runtimeProfileId = participant.runtimeProfileId
+    ?? identities.find((identity) => identity.id === participant.identityId)?.defaultRuntimeProfileId
+    ?? null;
+  return runtimeProfileId
+    ? runtimeProfiles.find((profile) => profile.id === runtimeProfileId) ?? null
+    : null;
 }

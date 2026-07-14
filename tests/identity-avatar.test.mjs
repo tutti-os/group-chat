@@ -15,7 +15,7 @@ function loadModule() {
       "src/app/identity-avatar.ts",
       "--bundle", "--platform=node", "--format=esm", `--outfile=${output}`,
     ],
-    { cwd: rootDir, encoding: "utf8", stdio: "pipe", env: { ...process.env, ESBUILD_WORKER: "false" } },
+    { cwd: rootDir, encoding: "utf8", stdio: "pipe", env: { ...process.env, ESBUILD_WORKER_THREADS: "0" } },
   );
   assert.equal(build.status, 0, build.stderr || build.stdout);
   return import(`${pathToFileURL(output)}?t=${Date.now()}`);
@@ -60,5 +60,18 @@ test("custom agent avatars still override runtime provider icons", async () => {
       runtimeProfile: codexProfile,
     }),
     { avatar: "https://example.test/avatar.png", provider: null },
+  );
+});
+
+test("legacy virtual participants retain their provider-specific avatar", async () => {
+  const { resolveAgentAvatar } = await loadModule();
+
+  assert.deepEqual(
+    resolveAgentAvatar({ participantId: "tutti-agent:codex", runtimeProfile: null }),
+    { avatar: null, provider: "codex" },
+  );
+  assert.deepEqual(
+    resolveAgentAvatar({ participantId: "tutti-agent:claude", runtimeProfile: null }),
+    { avatar: null, provider: "claude-code" },
   );
 });

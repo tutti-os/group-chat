@@ -9,7 +9,11 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "../../..");
 
 const args = parseArgs(process.argv.slice(2));
-const requestedAgentTargetId = typeof args.agentId === "string" ? args.agentId.trim() : "";
+const hasRequestedAgentTargetId = Object.prototype.hasOwnProperty.call(args, "agentId");
+if (hasRequestedAgentTargetId && (typeof args.agentId !== "string" || !args.agentId.trim())) {
+  throw new Error("--agent-id requires a non-blank value.");
+}
+const requestedAgentTargetId = typeof args.agentId === "string" ? args.agentId : "";
 const port = Number(args.port ?? (9300 + Math.floor(Math.random() * 400)));
 const timeoutMs = Number(args.timeoutMs ?? 180_000);
 const prompt =
@@ -66,6 +70,8 @@ try {
       }),
     });
     const conversationId = roomBundle.conversation.id;
+    const bootstrap = await api(baseUrl, "/api/bootstrap");
+    const runtimeProfileId = findRuntimeProfileId(bootstrap, agentTargetId);
     const identityResult = await api(baseUrl, "/api/identities", {
       method: "POST",
       body: JSON.stringify({
@@ -74,14 +80,14 @@ try {
         systemPrompt:
           "You are running inside an automated group-chat smoke test. Keep the answer short and do not modify files unless explicitly asked.",
         stylePrompt: "",
-        defaultRuntimeProfileId: findRuntimeProfileId(await api(baseUrl, "/api/bootstrap"), agentTargetId),
+        defaultRuntimeProfileId: runtimeProfileId,
       }),
     });
     await api(baseUrl, `/api/conversations/${conversationId}/participants`, {
       method: "POST",
       body: JSON.stringify({
         identityId: identityResult.identity.id,
-        runtimeProfileId: findRuntimeProfileId(await api(baseUrl, "/api/bootstrap"), agentTargetId),
+        runtimeProfileId,
       }),
     });
     await api(baseUrl, `/api/conversations/${conversationId}/messages`, {

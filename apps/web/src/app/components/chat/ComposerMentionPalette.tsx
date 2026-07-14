@@ -223,7 +223,10 @@ function buildMatchesByTab(input: Omit<ModelInput, "loading" | "activeTab" | "ca
     ].map(optionToMentionMatch),
     files: tabs.files,
     sessions: tabs.sessions,
-    apps: tabs.apps.filter((match) => !isReferenceMentionItem(match.item) || !isAgentLauncherAppId(match.item.itemId)),
+    apps: tabs.apps.filter((match) =>
+      !isReferenceMentionItem(match.item)
+      || !isAgentLauncherAppId(match.item.providerId, match.item.itemId)
+    ),
     tasks: tabs.tasks,
   };
 }

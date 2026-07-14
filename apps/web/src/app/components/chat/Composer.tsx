@@ -23,20 +23,8 @@ import { resolveArtifactsByIds } from "../../message-artifacts.js";
 import type { BackgroundTask } from "../../background-tasks.js";
 import { markMessageGroupBreak, MESSAGE_GROUP_IDLE_MS } from "../../message-group-breaks.js";
 import { AttachmentPreviewDialog, isTextAttachment, type AttachmentPreview } from "./AttachmentPreviewDialog.js";
-import { getRuntimeProviderAvatarIconUrl } from "../../identity-avatar.js";
 import { WHISPER_FEATURE_ENABLED } from "../../feature-flags.js";
 import { attachmentLabel, useTranslation, t } from "../../i18n/index.js";
-import { dispatchAgentGuiTask, openAgentGuiProvider, resolveAgentGuiDispatchFromMentions } from "../../agent-gui-dispatch.js";
-import {
-  isAgentLauncherAppId,
-  resolveAgentGuiProviderFromAppId,
-  resolveAgentLauncherRuntimeProvider,
-} from "../../agent-launcher-mentions.js";
-import {
-  fetchAvailableAgentLauncherAppIds,
-  readCachedAvailableAgentLauncherAppIds,
-  sameStringSet,
-} from "../../agent-launcher-availability.js";
 import { tryOpenFileInTuttiSync, buildTuttiMentionHref, isOpenableTuttiReferenceProvider } from "../../tutti-bridge.js";
 import { openReferenceMentionTarget } from "../../reference-mention-open.js";
 import { buildLocalAgentLauncherReference, buildLocalAgentMentionOptions } from "../../local-agent-mention-options.js";
@@ -56,7 +44,7 @@ import { buildReferencePasteTarget, normalizeComposerPasteText, splitComposerPas
 import { createSummaryLinkChipElement } from "../../summary-link-card.js";
 import { mentionTabProviders } from "../../mention-panel-tabs.js";
 import { createTuttiMessageLinkIconElement, createTuttiReferenceIconElement } from "../../tutti-reference-icons.js";
-import { AGENT_LAUNCHER_MENTION_ICON_CLASS, PARTICIPANT_MENTION_CLASS, REFERENCE_MENTION_CHIP_CLASS, REFERENCE_MENTION_ICON_CLASS, REFERENCE_MENTION_LABEL_CLASS, splitAgentLauncherMentionLabel } from "./reference-mention-chip.js";
+import { PARTICIPANT_MENTION_CLASS, REFERENCE_MENTION_CHIP_CLASS, REFERENCE_MENTION_ICON_CLASS, REFERENCE_MENTION_LABEL_CLASS } from "./reference-mention-chip.js";
 import { MessageReferenceContent } from "./MessageReferenceContent.js";
 import { HoverTooltip } from "../ui/HoverTooltip.js";
 import {
@@ -99,6 +87,14 @@ function SendFilledIcon(props: { size?: number }) {
       />
     </svg>
   );
+}
+
+function sameStringSet(left: ReadonlySet<string>, right: ReadonlySet<string>) {
+  if (left.size !== right.size) return false;
+  for (const item of left) {
+    if (!right.has(item)) return false;
+  }
+  return true;
 }
 
 function AddLinedIcon(props: { size?: number }) {
@@ -181,9 +177,6 @@ export function Composer(props: {
   const [mentionedAll, setMentionedAll] = useState(false);
   const [externalMentionOptions, setExternalMentionOptions] = useState<TuttiAtQueryResult[]>([]);
   const [externalMentionsLoading, setExternalMentionsLoading] = useState(false);
-  const [availableAgentLauncherAppIds, setAvailableAgentLauncherAppIds] = useState<Set<string>>(
-    () => readCachedAvailableAgentLauncherAppIds(),
-  );
   const [activeMentionTab, setActiveMentionTab] = useState<MentionPanelTab>("members");
   const [activeMentionKey, setActiveMentionKey] = useState<string | null>(null);
   const [fileMultiSelectMode, setFileMultiSelectMode] = useState(false);
@@ -262,10 +255,8 @@ export function Composer(props: {
         roomMembers,
         props.identities,
         mentionQuery,
-        availableAgentLauncherAppIds,
-        Boolean(window.tuttiExternal?.workspace?.openFeature),
       ),
-    [props.runtimeProfiles, props.localAgentProviders, roomMembers, props.identities, mentionQuery, availableAgentLauncherAppIds],
+    [props.runtimeProfiles, props.localAgentProviders, roomMembers, props.identities, mentionQuery],
   );
   const composerPasteContext = useMemo<ComposerPasteContext>(
     () => ({
@@ -325,12 +316,6 @@ export function Composer(props: {
     [roomArtifacts, props.conversation.roomId],
   );
 
-  const refreshAvailableAgentLauncherApps = useCallback((options?: { force?: boolean }) => {
-    void fetchAvailableAgentLauncherAppIds(options).then((ids) => {
-      setAvailableAgentLauncherAppIds((current) => sameStringSet(current, ids) ? current : new Set(ids));
-    });
-  }, []);
-
   const refreshLocalAgentProvidersForComposer = useCallback((options?: { force?: boolean }) => {
     const now = Date.now();
     if (!options?.force && now - lastLocalAgentProviderRefreshAtRef.current < 3000) return;
@@ -345,8 +330,7 @@ export function Composer(props: {
     localAgentProviderRefreshTimersRef.current = [0, 250, 900, 1800, 3200].map((delayMs) =>
       window.setTimeout(() => refreshLocalAgentProvidersForComposer({ force: true }), delayMs),
     );
-    refreshAvailableAgentLauncherApps({ force: true });
-  }, [refreshAvailableAgentLauncherApps, refreshLocalAgentProvidersForComposer]);
+  }, [refreshLocalAgentProvidersForComposer]);
 
   useEffect(() => () => {
     for (const timer of localAgentProviderRefreshTimersRef.current) {
@@ -354,10 +338,6 @@ export function Composer(props: {
     }
     localAgentProviderRefreshTimersRef.current = [];
   }, []);
-
-  useEffect(() => {
-    refreshAvailableAgentLauncherApps();
-  }, [refreshAvailableAgentLauncherApps]);
 
   useEffect(() => {
     if (mentionQuery === null) {
@@ -465,22 +445,7 @@ export function Composer(props: {
         );
         const messageParts = serializeComposerMessageParts(editorRef.current, artifactsByUploadItemId);
         const editorMentions = collectMentionTargetsFromEditor(editorRef.current, allMentionableParticipants);
-        const agentGuiDispatch = resolveAgentGuiDispatchFromMentions(
-          text,
-          editorMentions,
-          {
-            artifacts: [...props.artifacts, ...artifacts],
-            messages: props.allMessages,
-            participants: allMentionableParticipants,
-            identities: props.identities,
-            userDisplayName: props.userDisplayName,
-            summaryTasks: props.summaryTasks,
-          },
-        );
         await props.onUpdateMessage(editingMessageId, { content: text, mentions: editorMentions, parts: messageParts });
-        if (agentGuiDispatch) {
-          void dispatchAgentGuiTask(agentGuiDispatch);
-        }
         setText("");
         setEditorText(editorRef.current, "", 0);
         setEditingMessageId(null);
@@ -510,18 +475,6 @@ export function Composer(props: {
       const editorMentions = collectMentionTargetsFromEditor(editorRef.current, allMentionableParticipants);
       const isWhisper = WHISPER_FEATURE_ENABLED && hasWhisperChipInEditor(editorRef.current);
       const messageContent = quotes.length ? `${formatQuotesForMessage(quotes)}\n\n${text}` : text;
-      const agentGuiDispatch = resolveAgentGuiDispatchFromMentions(
-        messageContent,
-        editorMentions,
-        {
-          artifacts: [...props.artifacts, ...artifacts],
-          messages: props.allMessages,
-          participants: allMentionableParticipants,
-          identities: props.identities,
-          userDisplayName: props.userDisplayName,
-          summaryTasks: props.summaryTasks,
-        },
-      );
       const result = await props.onSend(props.conversationId, {
         content: messageContent,
         artifactIds: artifacts.map((artifact) => artifact.id),
@@ -531,9 +484,6 @@ export function Composer(props: {
         visibility: isWhisper ? "whisper" : "public",
         senderName: props.userDisplayName.trim() || undefined,
       });
-      if (agentGuiDispatch) {
-        void dispatchAgentGuiTask(agentGuiDispatch);
-      }
       if (composerIdleBreakPendingRef.current && result.message?.id) {
         markMessageGroupBreak(result.message.id);
         composerIdleBreakPendingRef.current = false;
@@ -1000,16 +950,6 @@ export function Composer(props: {
     if (element.dataset.mentionParticipantId?.trim()) {
       return;
     }
-    const parsedMention = parseTuttiAtMentionKey(element.dataset.mentionId ?? "");
-    const entityId = parsedMention?.itemId ?? "";
-    const guiProvider = parsedMention?.providerId === "workspace-app"
-      ? resolveAgentGuiProviderFromAppId(entityId)
-      : null;
-    if (guiProvider) {
-      void openAgentGuiProvider(guiProvider);
-      return;
-    }
-
     const href = element instanceof HTMLAnchorElement ? element.href : "";
     const mentionHref = href.startsWith("mention://") ? href : element.dataset.mentionLinkHref?.trim() || "";
     if (mentionHref.startsWith("mention://")) {
@@ -2965,21 +2905,6 @@ function createReferenceLinkIcon(reference: Pick<TuttiAtQueryResult, "providerId
   });
 }
 
-function createAgentLauncherLinkIcon(runtimeProvider: string) {
-  const iconUrl = getRuntimeProviderAvatarIconUrl(runtimeProvider);
-  if (iconUrl) {
-    const img = document.createElement("img");
-    img.src = iconUrl;
-    img.alt = "";
-    img.width = 14;
-    img.height = 14;
-    img.style.objectFit = "cover";
-    img.style.borderRadius = "3px";
-    return img;
-  }
-  return createTuttiReferenceIconElement("agent-session");
-}
-
 function localAgentParticipantMeta(reference: TuttiAtQueryResult) {
   if (reference.insert.kind !== "mention") return null;
   const participantId = reference.insert.mention.scope?.groupChatParticipantId?.trim();
@@ -2992,27 +2917,10 @@ function appendStyledReferenceChipContent(chip: HTMLAnchorElement, label: string
   chip.className = REFERENCE_MENTION_CHIP_CLASS;
   chip.style.color = "var(--accent-codex)";
 
-  const launcherRuntimeProvider = reference.providerId === "workspace-app"
-    ? resolveAgentLauncherRuntimeProvider(reference.itemId)
-    : null;
-  const displayLabel = launcherRuntimeProvider
-    ? splitAgentLauncherMentionLabel(label).name
-    : label;
-
   const labelEl = document.createElement("span");
   labelEl.className = REFERENCE_MENTION_LABEL_CLASS;
   labelEl.style.color = "var(--accent-codex)";
-  labelEl.textContent = displayLabel;
-
-  if (launcherRuntimeProvider) {
-    const atEl = document.createElement("span");
-    atEl.textContent = "@";
-    const iconWrap = document.createElement("span");
-    iconWrap.className = AGENT_LAUNCHER_MENTION_ICON_CLASS;
-    iconWrap.append(createAgentLauncherLinkIcon(launcherRuntimeProvider));
-    chip.append(atEl, iconWrap, labelEl);
-    return;
-  }
+  labelEl.textContent = label;
 
   const iconWrap = document.createElement("span");
   iconWrap.className = REFERENCE_MENTION_ICON_CLASS;

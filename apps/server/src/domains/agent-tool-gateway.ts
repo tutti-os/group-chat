@@ -1,5 +1,10 @@
 import type { UploadArtifactRequest } from "@group-chat/shared";
-import { isAgentRunVisibleToParticipant, isMessageVisibleToParticipant, enrichAgentRun } from "@group-chat/shared";
+import {
+  enrichAgentRun,
+  isAgentRunVisibleToParticipant,
+  isMessageVisibleToParticipant,
+  normalizeTuttiAgentProvider,
+} from "@group-chat/shared";
 import { participantWorkspaceRoot } from "../local/paths.js";
 import { EventHub } from "../ws/event-hub.js";
 import { AgentToolTokenStore, type AgentToolCredential } from "./agent-tool-tokens.js";
@@ -181,6 +186,5 @@ export class AgentToolGateway {
 }
 
 function canonicalProviderId(providerId: string) {
-  const normalized = providerId.trim().toLowerCase();
-  return normalized === "claude" ? "claude-code" : normalized;
+  return normalizeTuttiAgentProvider(providerId);
 }

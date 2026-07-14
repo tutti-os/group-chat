@@ -7,13 +7,7 @@ import {
   summaryLinkLabel,
 } from "./chat-links.js";
 import { isAgentLauncherAppId } from "./agent-launcher-mentions.js";
-import {
-  contentHasReferenceMentions,
-  splitContentByReferenceMentions,
-} from "./reference-mentions.js";
 import { buildTuttiMentionHref, readCachedTuttiWorkspaceId, resolveArtifactAgentDraftHref } from "./tutti-bridge.js";
-
-const AGENT_LAUNCHER_ENTITY_IDS = new Set<string>();
 
 const MESSAGE_ID_SEGMENT = "[A-Za-z0-9_-]+(?:,[A-Za-z0-9_-]+)*";
 const BARE_MESSAGE_LINK_PATTERN = new RegExp(
@@ -52,91 +46,6 @@ export function buildAgentGuiDraftPrompt(
   result = upgradeGroupChatOpenableReferenceLinks(result, mentions, context);
   result = upgradeMessageLinks(result, context);
   result = upgradeSummaryLinks(result, context);
-  result = stripAgentLauncherMentions(result, mentions);
-  return result;
-}
-
-function stripAgentLauncherMentions(content: string, mentions: MentionTarget[]) {
-  const launcherMentions = mentions.filter((mention) =>
-    mention.mentionType === "reference"
-    && mention.referenceProviderId === "workspace-app"
-    && AGENT_LAUNCHER_ENTITY_IDS.has(mention.referenceEntityId?.trim() ?? ""),
-  );
-  if (!launcherMentions.length) return content;
-
-  let result = content;
-  for (const mention of launcherMentions) {
-    result = stripSingleLauncherMention(result, mention);
-  }
-  return result.replace(/\s{2,}/g, " ").trim();
-}
-
-function stripSingleLauncherMention(content: string, mention: MentionTarget) {
-  const label = mention.displayNameSnapshot.trim();
-  if (!label) return content;
-
-  let result = content;
-  if (contentHasReferenceMentions(result)) {
-    const segments = splitContentByReferenceMentions(result);
-    result = segments
-      .map((segment) => {
-        if (segment.kind === "text") return segment.text;
-        if (shouldStripAgentLauncherSegment(segment, mention)) return "";
-        return `[${segment.label}](${segment.href})`;
-      })
-      .join("");
-  }
-
-  return stripPlainLauncherMention(result, label).trim();
-}
-
-function shouldStripAgentLauncherSegment(
-  segment: { label: string; href: string },
-  mention: MentionTarget,
-) {
-  if (isAgentLauncherReferenceHref(segment.href)) return true;
-  const segmentLabel = segment.label.replace(/^@/, "").trim().toLowerCase();
-  const agentLabel = mention.displayNameSnapshot.trim().replace(/^@/, "").toLowerCase();
-  return segmentLabel === agentLabel;
-}
-
-function isAgentLauncherReferenceHref(href: string): boolean {
-  const mentionMatch = href.match(/^mention:\/\/workspace-app\/([^/?]+)/);
-  if (mentionMatch?.[1]) {
-    try {
-      return AGENT_LAUNCHER_ENTITY_IDS.has(decodeURIComponent(mentionMatch[1]));
-    } catch {
-      return false;
-    }
-  }
-
-  const referencePrefix = "group-chat://reference/workspace-app/";
-  if (href.startsWith(referencePrefix)) {
-    const encodedEntityId = href.slice(referencePrefix.length).split("/")[0];
-    if (encodedEntityId) {
-      try {
-        return AGENT_LAUNCHER_ENTITY_IDS.has(decodeURIComponent(encodedEntityId));
-      } catch {
-        return false;
-      }
-    }
-  }
-
-  return false;
-}
-
-function stripPlainLauncherMention(content: string, label: string) {
-  const normalizedLabel = label.replace(/^@/, "");
-  const escaped = normalizedLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const patterns = [
-    new RegExp(`\\[@${escaped}\\]\\([^)]+\\)\\s*`, "i"),
-    new RegExp(`\\[${escaped}\\]\\([^)]+\\)\\s*`, "i"),
-    new RegExp(`@${escaped}(?=\\s|$|[，。！？,.!?;:：；、])`, "i"),
-  ];
-  let result = content;
-  for (const pattern of patterns) {
-    result = result.replace(pattern, "");
-  }
   return result;
 }
 
@@ -185,7 +94,7 @@ function upgradeGroupChatOpenableReferenceLinks(
       } catch {
         // keep raw entity id
       }
-      if (provider === "workspace-app" && isAgentLauncherAppId(entityId)) {
+      if (isAgentLauncherAppId(provider, entityId)) {
         return label;
       }
       const mention = mentions.find((item) =>

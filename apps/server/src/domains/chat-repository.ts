@@ -33,6 +33,7 @@ import {
   type UploadArtifactRequest,
   type PrivateTaskSnapshot,
   normalizeParticipantDisplayName,
+  normalizeTuttiAgentProvider,
   uniqueParticipantDisplayNameInRoom,
 } from "@group-chat/shared";
 import { getDb, json, parseJson } from "../db/database.js";
@@ -171,10 +172,13 @@ export class ChatRepository {
 
     const participants: NonNullable<CreateRoomRequest["participants"]> = input.participants ?? [];
     participants.forEach((participant, index) => {
+      const runtimeProfileId = Object.prototype.hasOwnProperty.call(participant, "runtimeProfileId")
+        ? participant.runtimeProfileId ?? null
+        : this.getDefaultRuntimeProfileId();
       this.createParticipant(conversationId, {
         displayName: participant.displayName,
         kind: participant.kind ?? "ai",
-        runtimeProfileId: participant.runtimeProfileId ?? this.getDefaultRuntimeProfileId(),
+        runtimeProfileId,
         identityId: participant.identityId ?? null,
         roomInstructions: participant.roomInstructions,
         listenMode: DEFAULT_PARTICIPANT_LISTEN_MODE,
@@ -484,6 +488,7 @@ export class ChatRepository {
   }
 
   syncLocalAgentCatalog(input: {
+    authoritative?: boolean;
     agents: Array<{
       agentTargetId: string;
       providerId: string;
@@ -506,38 +511,49 @@ export class ChatRepository {
 
     db.exec("BEGIN IMMEDIATE");
     try {
-      db.prepare(`UPDATE runtime_profiles SET enabled = 0, updated_at = ? WHERE kind = 'local-agent' AND agent_target_id IS NOT NULL`)
-        .run(now);
-      for (const profile of this.listRuntimeProfiles().filter((item) => item.kind === "local-agent")) {
-        if (profile.agentTargetId) continue;
-        const matches = byProvider.get(canonicalLocalAgentProviderId(profile.provider)) ?? [];
-        if (matches.length === 1) {
-          const existingTargetProfile = db.prepare(
-            `SELECT id FROM runtime_profiles WHERE agent_target_id = ? AND id != ? ORDER BY created_at ASC LIMIT 1`,
-          ).get(matches[0]!.agentTargetId, profile.id) as { id: string } | undefined;
-          if (existingTargetProfile) {
-            db.prepare(`UPDATE identities SET default_runtime_profile_id = ?, updated_at = ? WHERE default_runtime_profile_id = ?`)
-              .run(existingTargetProfile.id, now, profile.id);
-            db.prepare(`UPDATE participants SET runtime_profile_id = ?, updated_at = ? WHERE runtime_profile_id = ?`)
-              .run(existingTargetProfile.id, now, profile.id);
-            db.prepare(`UPDATE runtime_profiles SET enabled = 0, updated_at = ? WHERE id = ?`).run(now, profile.id);
+      if (input.authoritative !== false) {
+        db.prepare(`UPDATE runtime_profiles SET enabled = 0, updated_at = ? WHERE kind = 'local-agent' AND agent_target_id IS NOT NULL`)
+          .run(now);
+        for (const profile of this.listRuntimeProfiles().filter((item) => item.kind === "local-agent")) {
+          if (profile.agentTargetId) continue;
+          const matches = byProvider.get(canonicalLocalAgentProviderId(profile.provider)) ?? [];
+          if (matches.length === 1) {
+            const existingTargetProfile = db.prepare(
+              `SELECT id FROM runtime_profiles
+               WHERE agent_target_id = ? AND id != ? AND model = ?
+               ORDER BY created_at ASC LIMIT 1`,
+            ).get(matches[0]!.agentTargetId, profile.id, profile.model) as { id: string } | undefined;
+            if (existingTargetProfile) {
+              db.prepare(`UPDATE identities SET default_runtime_profile_id = ?, updated_at = ? WHERE default_runtime_profile_id = ?`)
+                .run(existingTargetProfile.id, now, profile.id);
+              db.prepare(`UPDATE participants SET runtime_profile_id = ?, updated_at = ? WHERE runtime_profile_id = ?`)
+                .run(existingTargetProfile.id, now, profile.id);
+              db.prepare(`UPDATE runtime_profiles SET enabled = 0, updated_at = ? WHERE id = ?`).run(now, profile.id);
+            } else {
+              db.prepare(`UPDATE runtime_profiles SET agent_target_id = ?, enabled = 1, updated_at = ? WHERE id = ?`)
+                .run(matches[0]!.agentTargetId, now, profile.id);
+            }
           } else {
-            db.prepare(`UPDATE runtime_profiles SET agent_target_id = ?, enabled = 1, updated_at = ? WHERE id = ?`)
-              .run(matches[0]!.agentTargetId, now, profile.id);
+            db.prepare(`UPDATE runtime_profiles SET enabled = 0, updated_at = ? WHERE id = ?`).run(now, profile.id);
           }
-        } else {
-          db.prepare(`UPDATE runtime_profiles SET enabled = 0, updated_at = ? WHERE id = ?`).run(now, profile.id);
         }
       }
 
       for (const agent of input.agents) {
-        const existing = db.prepare(`SELECT id FROM runtime_profiles WHERE agent_target_id = ? ORDER BY created_at ASC LIMIT 1`)
-          .get(agent.agentTargetId) as { id: string } | undefined;
+        if (input.authoritative === false && (!agent.available || !agent.runtimeSupported)) {
+          continue;
+        }
+        const model = agent.defaultModelId?.trim() || "default";
         // Keep exact-target profile IDs disjoint from legacy `local-agent:<provider>` IDs.
         // An Agent target is allowed to have the same string as its provider, including
         // when multiple targets share that provider, so reusing the legacy namespace
         // would silently bind provider-only rows to one arbitrary target.
-        const candidateId = `local-agent-target:v1:${Buffer.from(agent.agentTargetId, "utf8").toString("hex")}`;
+        const candidateId = localAgentTargetRuntimeProfileId(agent.agentTargetId);
+        const existing = db.prepare(
+          `SELECT id FROM runtime_profiles
+           WHERE agent_target_id = ? AND (id = ? OR model = ?)
+           ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, created_at ASC LIMIT 1`,
+        ).get(agent.agentTargetId, candidateId, model, candidateId) as { id: string } | undefined;
         const candidateOwner = existing ? undefined : db.prepare(
           `SELECT agent_target_id FROM runtime_profiles WHERE id = ?`,
         ).get(candidateId) as { agent_target_id: string | null } | undefined;
@@ -545,13 +561,13 @@ export class ChatRepository {
           ?? (candidateOwner && candidateOwner.agent_target_id !== agent.agentTargetId
             ? `local-agent-target:${nanoid()}`
             : candidateId);
-        const model = agent.defaultModelId?.trim() || "default";
         db.prepare(
           `INSERT INTO runtime_profiles
            (id, kind, agent_target_id, provider, model, display_name, enabled, trusted_mode, system_prompt_mode, capabilities, created_at, updated_at)
            VALUES (?, 'local-agent', ?, ?, ?, ?, ?, 0, 'prompt-prefix', ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET agent_target_id = excluded.agent_target_id, provider = excluded.provider,
-             display_name = excluded.display_name, enabled = excluded.enabled, updated_at = excluded.updated_at`,
+             model = excluded.model, display_name = excluded.display_name,
+             enabled = excluded.enabled, updated_at = excluded.updated_at`,
         ).run(
           id,
           agent.agentTargetId,
@@ -581,13 +597,15 @@ export class ChatRepository {
            SELECT runtime_profiles.agent_target_id FROM runtime_profiles WHERE runtime_profiles.id = participants.runtime_profile_id
          ) WHERE runtime_profile_id IS NOT NULL`,
       ).run();
-      for (const [providerId, matches] of byProvider) {
-        if (matches.length !== 1) continue;
-        db.prepare(`UPDATE agent_runs SET agent_target_id = ? WHERE agent_target_id IS NULL AND lower(provider) = ?`)
-          .run(matches[0]!.agentTargetId, providerId);
-        if (providerId === "claude-code") {
-          db.prepare(`UPDATE agent_runs SET agent_target_id = ? WHERE agent_target_id IS NULL AND provider = 'claude'`)
-            .run(matches[0]!.agentTargetId);
+      if (input.authoritative !== false) {
+        for (const [providerId, matches] of byProvider) {
+          if (matches.length !== 1) continue;
+          db.prepare(`UPDATE agent_runs SET agent_target_id = ? WHERE agent_target_id IS NULL AND lower(provider) = ?`)
+            .run(matches[0]!.agentTargetId, providerId);
+          if (providerId === "claude-code") {
+            db.prepare(`UPDATE agent_runs SET agent_target_id = ? WHERE agent_target_id IS NULL AND provider = 'claude'`)
+              .run(matches[0]!.agentTargetId);
+          }
         }
       }
       db.exec("COMMIT");
@@ -650,8 +668,10 @@ export class ChatRepository {
   createIdentity(input: CreateIdentityRequest): Identity {
     const now = new Date().toISOString();
     const id = nanoid();
-    const fallbackRuntime = this.getDefaultRuntimeProfileId();
-    if (input.defaultRuntimeProfileId) this.ensureLegacyRuntimeProfile(input.defaultRuntimeProfileId);
+    const defaultRuntimeProfileId = Object.prototype.hasOwnProperty.call(input, "defaultRuntimeProfileId")
+      ? input.defaultRuntimeProfileId ?? null
+      : this.getDefaultRuntimeProfileId();
+    if (defaultRuntimeProfileId) this.ensureLegacyRuntimeProfile(defaultRuntimeProfileId);
     getDb()
       .prepare(
         `INSERT INTO identities
@@ -664,7 +684,7 @@ export class ChatRepository {
         input.icon?.trim() || "",
         input.systemPrompt?.trim() || "",
         input.stylePrompt?.trim() || "",
-        input.defaultRuntimeProfileId ?? fallbackRuntime,
+        defaultRuntimeProfileId,
         input.defaultListenMode ?? DEFAULT_PARTICIPANT_LISTEN_MODE,
         normalizeReasoningEffort(input.defaultReasoningEffort),
         normalizeSpeedMode(input.defaultSpeedMode),
@@ -1816,8 +1836,11 @@ function modelSlug(model: string) {
 }
 
 function canonicalLocalAgentProviderId(providerId: string) {
-  const normalized = providerId.trim().toLowerCase();
-  return normalized === "claude" ? "claude-code" : normalized;
+  return normalizeTuttiAgentProvider(providerId);
+}
+
+export function localAgentTargetRuntimeProfileId(agentTargetId: string) {
+  return `local-agent-target:v1:${Buffer.from(agentTargetId, "utf8").toString("hex")}`;
 }
 
 function removeRoomArtifactRoot(roomId: string, artifactRoot: string) {

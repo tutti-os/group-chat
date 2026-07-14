@@ -16,6 +16,47 @@ const databaseModuleUrl = new URL("../apps/server/src/db/database.ts", import.me
 const eventHubModuleUrl = new URL("../apps/server/src/ws/event-hub.ts", import.meta.url).href;
 const tokenStoreModuleUrl = new URL("../apps/server/src/domains/agent-tool-tokens.ts", import.meta.url).href;
 
+test("retired provider launchers are not treated as workspace app-only tasks", async () => {
+  const checkScript = join(await mkdtemp(join(tmpdir(), "group-chat-retired-launcher-intent-")), "check-intent.ts");
+  await writeFile(
+    checkScript,
+    `
+      import assert from "node:assert/strict";
+      async function main() {
+        const { isWorkspaceAppOnlyTaskMessage } = await import(${JSON.stringify(protocolModuleUrl)});
+        const mention = (id) => ({
+          mentionType: "reference",
+          participantId: id,
+          referenceProviderId: "workspace-app",
+          referenceEntityId: id,
+          displayNameSnapshot: id,
+        });
+        assert.equal(isWorkspaceAppOnlyTaskMessage({
+          userMessage: { content: "@Codex continue", mentions: [mention("agent-codex")] },
+        }), false);
+        assert.equal(isWorkspaceAppOnlyTaskMessage({
+          userMessage: {
+            content: "@Codex [Vibe](mention://workspace-app/vibe-design) build it",
+            mentions: [mention("agent-codex"), mention("vibe-design")],
+          },
+        }), true);
+      }
+      main().catch((error) => {
+        console.error(error);
+        process.exit(1);
+      });
+    `,
+  );
+
+  try {
+    await execFileAsync("pnpm", ["--filter", "@group-chat/server", "exec", "tsx", checkScript], {
+      cwd: new URL("..", import.meta.url),
+    });
+  } finally {
+    await rm(dirname(checkScript), { recursive: true, force: true });
+  }
+});
+
 test("workspace app and agent mentions produce a clean intent prompt", async () => {
   const checkScript = join(await mkdtemp(join(tmpdir(), "group-chat-workspace-app-intent-")), "check-intent.ts");
   await writeFile(

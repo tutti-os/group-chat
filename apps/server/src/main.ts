@@ -11,23 +11,27 @@ import {
   createManagedAgentDetectContextFromHeaders,
   type ManagedAgentInvocationCredentialHeaders,
 } from "@tutti-os/agent-acp-kit";
-import type {
-  AddParticipantRequest,
-  CreateIdentityRequest,
-  CreateRoomRequest,
-  ParticipantListenMode,
-  PrivateTaskRequest,
-  SendMessageRequest,
-  UpdateConversationRulesRequest,
-  UpdateConversationPolicyRequest,
-  UpdateConversationPinRequest,
-  UpdateIdentityRequest,
-  UpdateMessageRequest,
-  UpdateParticipantRequest,
-  UpdateRoomRequest,
-  UploadArtifactRequest,
-  WsClientMessage,
-  WsServerMessage,
+import {
+  parseLegacyTuttiAgentProviderParticipantId,
+  parseTuttiAgentParticipantId,
+  resolveMentionTargetReferenceScope,
+  type AddParticipantRequest,
+  type CreateIdentityRequest,
+  type CreateRoomRequest,
+  type MentionTarget,
+  type ParticipantListenMode,
+  type PrivateTaskRequest,
+  type SendMessageRequest,
+  type UpdateConversationPolicyRequest,
+  type UpdateConversationPinRequest,
+  type UpdateConversationRulesRequest,
+  type UpdateIdentityRequest,
+  type UpdateMessageRequest,
+  type UpdateParticipantRequest,
+  type UpdateRoomRequest,
+  type UploadArtifactRequest,
+  type WsClientMessage,
+  type WsServerMessage,
 } from "@group-chat/shared";
 import { AgentToolGateway } from "./domains/agent-tool-gateway.js";
 import { inferMimeTypeForPath } from "./domains/run-file-artifacts.js";
@@ -35,6 +39,7 @@ import { readUserProfile, writeUserProfile, type StoredUserProfile } from "./dom
 import { AgentToolTokenStore, AgentToolUnauthorizedError } from "./domains/agent-tool-tokens.js";
 import { ChatRepository } from "./domains/chat-repository.js";
 import { ChatService } from "./domains/chat-service.js";
+import { isWorkspaceAppOnlyTaskMessage } from "./runtimes/local-agent-protocol.js";
 import {
   getArtifactCliOutput,
   getConversationCliOutput,
@@ -166,7 +171,16 @@ server.post<{ Body: unknown }>("/tutti/references/search", async (request, reply
   return output;
 });
 
-server.post<{ Body: CreateRoomRequest }>("/api/rooms", async (request) => chat.createRoom(request.body ?? {}));
+server.post<{ Body: CreateRoomRequest }>("/api/rooms", async (request) => {
+  const input = request.body ?? {};
+  const needsDefaultAgent = input.participants?.some(
+    (participant) => participant.runtimeProfileId === undefined,
+  ) ?? false;
+  const catalog = needsDefaultAgent
+    ? await chat.listLocalAgentTargets(createManagedAgentDetectContextFromHeaders(request.headers))
+    : null;
+  return chat.createRoom(input, catalog?.defaultAgentTargetId);
+});
 
 server.patch<{ Params: { roomId: string }; Body: UpdateRoomRequest }>("/api/rooms/:roomId", async (request, reply) => {
   const bundle = chat.updateRoom(request.params.roomId, request.body ?? {});
@@ -175,20 +189,26 @@ server.patch<{ Params: { roomId: string }; Body: UpdateRoomRequest }>("/api/room
 });
 
 server.delete<{ Params: { roomId: string } }>("/api/rooms/:roomId", async (request, reply) => {
-  const room = chat.deleteRoom(request.params.roomId);
+  const room = await chat.deleteRoom(request.params.roomId);
   if (!room) return reply.code(404).send({ error: "Room not found" });
   return { room };
 });
 
 server.post<{ Body: CreateIdentityRequest }>("/api/identities", async (request) => {
-  const identity = chat.createIdentity(request.body);
+  const catalog = request.body.defaultRuntimeProfileId === undefined
+    ? await chat.listLocalAgentTargets(createManagedAgentDetectContextFromHeaders(request.headers))
+    : null;
+  const identity = chat.createIdentity(request.body, catalog?.defaultAgentTargetId);
   return { identity, runtimeProfile: chat.getRuntimeProfile(identity.defaultRuntimeProfileId) };
 });
 
 server.patch<{ Params: { identityId: string }; Body: UpdateIdentityRequest }>(
   "/api/identities/:identityId",
   async (request) => {
-    const identity = chat.updateIdentity(request.params.identityId, request.body);
+    const identity = chat.updateIdentity(
+      request.params.identityId,
+      request.body,
+    );
     return { identity, runtimeProfile: chat.getRuntimeProfile(identity?.defaultRuntimeProfileId) };
   },
 );
@@ -252,7 +272,6 @@ server.post<{ Params: { conversationId: string }; Body: PrivateTaskRequest }>(
     try {
       const managedAgentHeaders = request.headers as ManagedAgentInvocationCredentialHeaders;
       const agentDetectContext = createManagedAgentDetectContextFromHeaders(managedAgentHeaders);
-      await chat.listLocalAgentTargets(agentDetectContext);
       return chat.runPrivateTask(request.params.conversationId, request.body ?? {}, {
         agentDetectContext,
         managedAgentHeaders,
@@ -286,9 +305,12 @@ server.post<{ Params: { conversationId: string }; Body: SendMessageRequest }>(
   async (request) => {
     const managedAgentHeaders = request.headers as ManagedAgentInvocationCredentialHeaders;
     const agentDetectContext = createManagedAgentDetectContextFromHeaders(managedAgentHeaders);
-    await chat.listLocalAgentTargets(agentDetectContext);
+    const catalog = messageRequiresAgentCatalog(request.body)
+      ? await chat.listLocalAgentTargets(agentDetectContext)
+      : null;
     return chat.sendMessage(request.params.conversationId, request.body, {
       agentDetectContext,
+      ...(catalog ? { defaultAgentTargetId: catalog.defaultAgentTargetId } : {}),
       managedAgentHeaders,
     });
   },
@@ -312,9 +334,18 @@ server.patch<{ Params: { messageId: string }; Body: UpdateMessageRequest }>(
     try {
       const managedAgentHeaders = request.headers as ManagedAgentInvocationCredentialHeaders;
       const agentDetectContext = createManagedAgentDetectContextFromHeaders(managedAgentHeaders);
-      await chat.listLocalAgentTargets(agentDetectContext);
+      const currentMessage = request.body.status === "recalled"
+        ? null
+        : chat.getMessage(request.params.messageId);
+      const catalog = currentMessage && messageRequiresAgentCatalog({
+          content: request.body.content ?? currentMessage.content,
+          mentions: request.body.mentions ?? currentMessage.mentions,
+        })
+        ? await chat.listLocalAgentTargets(agentDetectContext)
+        : null;
       const result = await chat.updateMessage(request.params.messageId, request.body, {
         agentDetectContext,
+        ...(catalog ? { defaultAgentTargetId: catalog.defaultAgentTargetId } : {}),
         managedAgentHeaders,
       });
       if (!result) return reply.code(404).send({ error: "Message not found" });
@@ -691,6 +722,24 @@ function normalizeCliEnvelope(value: unknown) {
 function parsePositiveInteger(value: string | undefined) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function messageRequiresAgentCatalog(input: Pick<SendMessageRequest, "content" | "mentions">) {
+  const mentions = input.mentions ?? [];
+  if (isWorkspaceAppOnlyTaskMessage({
+    userMessage: { content: input.content, mentions },
+  })) return true;
+  return mentions.some((mention) => mentionRequiresAgentCatalog(mention));
+}
+
+function mentionRequiresAgentCatalog(mention: MentionTarget) {
+  if (
+    parseTuttiAgentParticipantId(mention.participantId)
+    || parseLegacyTuttiAgentProviderParticipantId(mention.participantId)
+  ) return true;
+  if (mention.mentionType !== "reference") return false;
+  const scope = resolveMentionTargetReferenceScope(mention);
+  return scope?.groupChatLocalAgentMention === "true";
 }
 
 function sendCliOutput(

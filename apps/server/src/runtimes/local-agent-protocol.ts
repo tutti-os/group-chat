@@ -1,5 +1,6 @@
 import { participantWorkspaceRoot } from "../local/paths.js";
 import {
+  isLegacyAgentLauncherAppId,
   resolveMentionTargetReferenceLabel,
   resolveMentionTargetReferenceScope,
   sanitizeMentionTargetForAgentContext,
@@ -133,6 +134,7 @@ export function resolveWorkspaceAppIntent(
       mention.mentionType === "reference"
       && mention.referenceProviderId === "workspace-app"
       && mention.referenceEntityId?.trim()
+      && !isLegacyAgentLauncherAppId(mention.referenceProviderId, mention.referenceEntityId)
     )
     .map((mention) => {
       const sanitizedMention = sanitizeMentionTargetForAgentContext(mention);
@@ -178,12 +180,20 @@ export function isWorkspaceAppOnlyTaskMessage(
   context: { userMessage: Pick<RuntimeReplyContext["userMessage"], "content" | "mentions"> },
   content = context.userMessage.content,
 ) {
-  const mentions = context.userMessage.mentions;
+  const mentions = context.userMessage.mentions.filter((mention) =>
+    !(
+      mention.mentionType === "reference"
+      && mention.referenceProviderId === "workspace-app"
+      && isLegacyAgentLauncherAppId(mention.referenceProviderId, mention.referenceEntityId)
+    )
+  );
   if (!mentions.length) return false;
   if (mentions.some((mention) => mention.mentionType === "participant" || mention.mentionType === "all")) return false;
   if (mentions.some((mention) => mention.mentionType !== "reference" || mention.referenceProviderId !== "workspace-app")) return false;
   if (!mentions.some((mention) => mention.referenceEntityId?.trim())) return false;
-  const requestText = stripLeadingIntentMentions(stripGeneratedReplyQuoteMarkers(content), context);
+  const requestText = stripLeadingIntentMentions(stripGeneratedReplyQuoteMarkers(content), {
+    userMessage: { mentions: context.userMessage.mentions },
+  });
   return Boolean(requestText.trim());
 }
 

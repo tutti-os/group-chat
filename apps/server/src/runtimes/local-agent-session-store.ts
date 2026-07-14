@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { normalizeTuttiAgentProvider } from "@group-chat/shared";
 
 export interface LocalAgentContextWindowUsage {
   usedTokens: number;
@@ -26,7 +27,11 @@ export class LocalAgentSessionStore {
   read(conversationId: string): StoredLocalAgentSession | null {
     try {
       const parsed = JSON.parse(readFileSync(this.pathFor(conversationId), "utf8")) as StoredLocalAgentSession;
-      return typeof parsed.provider === "string" && parsed.provider ? parsed : null;
+      return typeof parsed.provider === "string"
+        && Boolean(parsed.provider)
+        && (parsed.agentTargetId === undefined || typeof parsed.agentTargetId === "string")
+        ? parsed
+        : null;
     } catch {
       return null;
     }
@@ -34,18 +39,26 @@ export class LocalAgentSessionStore {
 
   write(conversationId: string, session: Omit<StoredLocalAgentSession, "updatedAt">) {
     const existing = this.read(conversationId);
+    const sameTarget = Boolean(existing)
+      && existing?.agentTargetId === session.agentTargetId
+      && (session.agentTargetId !== undefined
+        || normalizeTuttiAgentProvider(existing?.provider) === normalizeTuttiAgentProvider(session.provider));
+    // Provider session ids, resume tokens, usage and compaction metadata all
+    // belong to one exact Agent target. Never carry them across a target
+    // switch, even when both targets happen to share one runtime provider.
+    const retained = sameTarget ? existing : null;
     const filePath = this.pathFor(conversationId);
     mkdirSync(dirname(filePath), { recursive: true });
     writeFileSync(
       filePath,
       `${JSON.stringify(
         {
-          ...existing,
+          ...retained,
           ...session,
-          usage: session.usage ?? existing?.usage,
-          contextWindow: session.contextWindow ?? existing?.contextWindow ?? null,
-          usageUpdatedAt: session.usageUpdatedAt ?? existing?.usageUpdatedAt ?? null,
-          compactedAt: session.compactedAt ?? existing?.compactedAt ?? null,
+          usage: session.usage ?? retained?.usage,
+          contextWindow: session.contextWindow ?? retained?.contextWindow ?? null,
+          usageUpdatedAt: session.usageUpdatedAt ?? retained?.usageUpdatedAt ?? null,
+          compactedAt: session.compactedAt ?? retained?.compactedAt ?? null,
           updatedAt: new Date().toISOString(),
         },
         null,

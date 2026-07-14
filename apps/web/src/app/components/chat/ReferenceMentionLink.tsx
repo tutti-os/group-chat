@@ -1,11 +1,6 @@
 import type { Artifact, MentionTarget, Participant, RuntimeProfile } from "@group-chat/shared";
 import { isValidElement, type ReactNode } from "react";
 import { openLocalFileInSystem } from "../../../api/client.js";
-import { openAgentGuiProvider } from "../../agent-gui-dispatch.js";
-import {
-  resolveAgentGuiProviderFromAppId,
-  resolveAgentLauncherRuntimeProvider,
-} from "../../agent-launcher-mentions.js";
 import { parseTuttiAtMentionKey } from "../../tutti-at-mentions.js";
 import {
   formatParticipantMentionMarkdown,
@@ -24,7 +19,7 @@ import {
   normalizeLocalFileHref,
   tryOpenFileInTutti,
 } from "../../tutti-bridge.js";
-import { AgentLauncherMentionChip, PARTICIPANT_MENTION_CLASS, ReferenceMentionChip } from "./reference-mention-chip.js";
+import { PARTICIPANT_MENTION_CLASS, ReferenceMentionChip } from "./reference-mention-chip.js";
 
 const PLAIN_LINK_CLASS = "[color:var(--accent-codex)] [text-decoration:underline]";
 const INLINE_CODE_LINK_CLASS = "[border:1px_solid_var(--border-1)] [border-radius:5px] [padding:1px_4px] [color:var(--accent-codex)] [background:var(--background-panel)] [font-family:ui-monospace,_SFMono-Regular,_Menlo,_Monaco,_Consolas,_monospace] [font-size:13px] [text-decoration:none] hover:[text-decoration:underline]";
@@ -235,8 +230,6 @@ export function ReferenceMentionLink(props: {
   }
 
   const entityId = mention?.referenceEntityId?.trim() || parsed?.entityId || "";
-  const guiProvider = providerId === "workspace-app" ? resolveAgentGuiProviderFromAppId(entityId) : null;
-  const launcherRuntimeProvider = resolveAgentLauncherRuntimeProvider(entityId);
   const mentionHref = href.startsWith("mention://")
     ? href
     : isOpenableTuttiReferenceProvider(providerId)
@@ -246,19 +239,6 @@ export function ReferenceMentionLink(props: {
         }) ?? href
       : href;
   const pasteMarkdown = `[${label}](${mentionHref})`;
-
-  if (guiProvider && launcherRuntimeProvider) {
-    return (
-      <AgentLauncherMentionChip
-        label={label || props.children}
-        runtimeProvider={launcherRuntimeProvider}
-        pasteMarkdown={pasteMarkdown}
-        onClick={() => {
-          void openAgentGuiProvider(guiProvider);
-        }}
-      />
-    );
-  }
 
   const handleOpen = () => {
     openReferenceMentionTarget(mentionHref, label, mention, props.artifacts ?? []);

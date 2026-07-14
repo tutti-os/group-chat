@@ -17,7 +17,7 @@ export {
 };
 
 export function localAgentTargetFromLauncherAppId(appId: string | null | undefined) {
-  const value = appId?.trim() ?? "";
+  const value = appId ?? "";
   return value.startsWith("agent-target:") ? value.slice("agent-target:".length) : "";
 }
 
