@@ -5,22 +5,25 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   createDefaultLocalAgentProviderPlugins,
-  createLocalAgentRuntime,
+  createDefaultLocalAgentRuntime,
+  createManagedAgentRunContextFromHeaders,
   type AgentEvent,
   type AgentRunMessage,
   type LocalAgentMcpServerConfig,
   type LocalAgentProviderPlugin,
   type RawAgentEvent,
   type RawAgentStream,
+  type DetectContext,
 } from "@tutti-os/agent-acp-kit";
 import {
-  loadTuttiAgentProviderCatalog,
+  loadTuttiAgentCatalog,
+  loadTuttiAgentComposerOptions,
   loadTuttiAgentSkillContext,
   resolveTuttiCliCommand,
-  type TuttiAgentProviderCatalogEntry,
+  type TuttiAgentCatalogEntry,
   type TuttiAgentSkillContext,
 } from "@tutti-os/agent-acp-kit/tutti";
-import type { LocalAgentProviderStatus, ReasoningEffort } from "@group-chat/shared";
+import type { LocalAgentTargetStatus, LocalAgentTargetStatusResponse, ReasoningEffort } from "@group-chat/shared";
 import { isMentionAllTrigger } from "@group-chat/shared";
 import { buildEffectiveRoleDescription } from "../domains/agent-instructions.js";
 import { participantWorkspaceRoot } from "../local/paths.js";
@@ -48,7 +51,7 @@ type ContextRetryMode = "normal" | "compact-history" | "minimal";
 export class LocalAgentRuntimeProvider implements RuntimeProvider {
   id = "local-agent";
   private readonly processes = new Map<string, { cancel: () => Promise<void> | void }>();
-  private readonly localAgentRuntime = createLocalAgentRuntime<"local-agent", string>({
+  private readonly localAgentRuntime = createDefaultLocalAgentRuntime({
     providers: createGroupChatLocalAgentProviderPlugins(),
   });
 
@@ -59,104 +62,155 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
   describeRun(context: RuntimeReplyContext) {
     return {
       runtime: context.runtimeProfile?.kind ?? "local-agent",
+      agentTargetId: context.runtimeProfile?.agentTargetId ?? context.participant.agentTargetId,
       provider: context.runtimeProfile?.provider ?? "local-agent",
       model: context.runtimeProfile?.model ?? context.participant.runtimeProfileId ?? "local-agent:unknown",
     };
   }
 
   async detect(context: RuntimeReplyContext) {
-    const command = resolveLocalAgentCommand(context);
-    if (command) {
+    try {
+      const agentTargetId = exactAgentTargetId(context);
+      const target = agentTargetId
+        ? await this.resolveExactTarget(agentTargetId, context.agentDetectContext)
+        : await this.resolveUniqueLegacyProviderTarget(context.runtimeProfile?.provider, context.agentDetectContext);
+      assertTargetProviderMatchesProfile(target.providerId, context);
+      if (!target.runtimeSupported || target.availability.status !== "available") {
+        return { available: false, reason: target.availability.detail || "Agent target is unavailable." };
+      }
       return { available: true };
-    }
-    const provider = context.runtimeProfile?.provider;
-    if (!provider) {
+    } catch (error) {
       return {
         available: false,
-        reason: "local-agent provider is not configured.",
+        reason: errorMessage(error),
       };
     }
-    const registered = this.localAgentRuntime.listProviders().some((item) => item.id === provider);
-    if (!registered) {
-      return {
-        available: false,
-        reason: `local-agent provider is not registered in @tutti-os/agent-acp-kit: ${provider}`,
-      };
-    }
-    const detection = (await this.localAgentRuntime.detect()).find((item) => item.provider === provider);
-    if (!detection) return { available: true };
-    if (detection.result?.supported === false) {
-      return {
-        available: false,
-        reason: detection.result.unsupportedReason ?? `${provider} local agent is not supported on this machine.`,
-      };
-    }
-    if (detection.result === null) {
-      return {
-        available: false,
-        reason: `${provider} local agent is not installed or not discoverable.`,
-      };
-    }
-    return { available: true };
   }
 
-  async listLocalAgentProviders(): Promise<LocalAgentProviderStatus[]> {
-    const detections = await this.localAgentRuntime.detect();
-    const kitStatuses = detections.map(({ provider, displayName, result }) => {
-      const available = Boolean(result && result.supported !== false);
-      const resultRecord = toRecord(result);
-      const reasoningEfforts = parseReasoningEfforts(
-        resultRecord?.reasoningEfforts
-        ?? resultRecord?.reasoningOptions
-        ?? resultRecord?.reasoningLevels
-        ?? resultRecord?.supportedReasoningEfforts
-        ?? resultRecord?.supportedReasoningLevels,
-      );
-      const status: LocalAgentProviderStatus = {
-        provider,
-        displayName,
-        available,
-        authState: result?.authState ?? "unknown",
-        executablePath: result?.executablePath ?? "",
-        version: result?.version ?? "not-installed",
-        configDir: result?.configDir,
-        models: (result?.models ?? []).map((model) => ({
-          id: model.id,
-          label: model.label,
-          ...("description" in model && typeof model.description === "string"
-            ? { description: model.description }
-            : {}),
-          ...("supportedReasoningEfforts" in model && Array.isArray(model.supportedReasoningEfforts)
-            ? { supportedReasoningEfforts: model.supportedReasoningEfforts }
-            : {}),
-        })),
+  async listLocalAgentTargets(detectContext?: DetectContext): Promise<LocalAgentTargetStatusResponse> {
+    const env = buildLocalAgentProcessEnv(process.env, tuttiCliEnv());
+    const catalog = await loadTuttiAgentCatalog({
+      runtime: this.localAgentRuntime,
+      env,
+      detectContext,
+      commandEnvNames: ["GROUP_CHAT_TUTTI_CLI"],
+    });
+    const detections = catalog.source === "standalone"
+      ? await this.localAgentRuntime.detect(detectContext)
+      : [];
+    const detectedByProvider = new Map(detections.map((item) => [item.provider, item]));
+    const agents = await Promise.all(catalog.agents.map(async (agent): Promise<LocalAgentTargetStatus> => {
+      const detected = detectedByProvider.get(agent.providerId);
+      let composer: Awaited<ReturnType<typeof loadTuttiAgentComposerOptions>> | null = null;
+      try {
+        composer = await loadTuttiAgentComposerOptions({
+          runtime: this.localAgentRuntime,
+          agentTargetId: agent.agentTargetId,
+          env,
+          detectContext,
+          commandEnvNames: ["GROUP_CHAT_TUTTI_CLI"],
+        });
+      } catch {
+        // Catalog visibility is authoritative; composer metadata is optional UI enrichment.
+      }
+      const reasoningEfforts = composer?.reasoningConfig.options
+        .map((option) => parseReasoningEffort(option.value))
+        .filter((effort): effort is ReasoningEffort => effort !== null)
+        ?? undefined;
+      const status: LocalAgentTargetStatus = {
+        agentTargetId: agent.agentTargetId,
+        providerId: agent.providerId,
+        provider: agent.providerId,
+        displayName: agent.displayName,
+        runtimeSupported: agent.runtimeSupported,
+        availabilityStatus: agent.availability.status,
+        available: agent.runtimeSupported && agent.availability.status === "available",
+        authState: authStateFromCatalog(agent, detected?.authState),
+        executablePath: "",
+        version: detected?.supported ? "detected" : "not-installed",
+        models: composer?.modelConfig.options.map((option) => ({
+          id: option.value,
+          label: option.label,
+          ...(option.description ? { description: option.description } : {}),
+        })) ?? (detected?.models ?? []).map((model) => ({ id: model.id, label: model.label })),
+        defaultModelId: composer?.modelConfig.currentValue || composer?.modelConfig.defaultValue || undefined,
         ...(reasoningEfforts?.length ? { reasoningEfforts } : {}),
-        reason: available ? undefined : localAgentUnavailableReason(displayName, result),
+        defaultReasoningEffort: parseReasoningEffort(composer?.reasoningConfig.currentValue) ?? undefined,
+        speedModes: composer?.speedConfig.options.map((option) => ({ id: option.value, label: option.label })),
+        defaultSpeedMode: composer?.speedConfig.currentValue || composer?.speedConfig.defaultValue || undefined,
+        reason: agent.availability.status === "available" && agent.runtimeSupported ? undefined : agent.availability.detail,
       };
       return enrichLocalAgentProviderStatus(status);
-    });
-    const env = buildLocalAgentProcessEnv(process.env, tuttiCliEnv());
-    try {
-      const catalog = await loadTuttiAgentProviderCatalog({
-        runtime: this.localAgentRuntime,
-        env,
-        commandEnvNames: ["GROUP_CHAT_TUTTI_CLI"],
-      });
-      return mergeTuttiAgentProviderCatalog(catalog.providers, kitStatuses);
-    } catch {
-      return kitStatuses;
-    }
+    }));
+    return { defaultAgentTargetId: catalog.defaultAgentTargetId, agents };
   }
 
   async *streamReply(context: RuntimeReplyContext) {
-    const command = resolveLocalAgentCommand(context);
+    const target = await this.resolveExactTargetForRun(context);
+    if (!context.managedAgentRunContext && context.managedAgentHeaders && context.runId) {
+      context.managedAgentRunContext = await createManagedAgentRunContextFromHeaders(context.managedAgentHeaders, {
+        providerId: target.providerId,
+        runId: context.runId,
+      });
+    }
+    const command = resolveLocalAgentCommand(context, target.providerId);
     if (command) {
       yield* this.streamCommandBridge(context, command);
       return;
     }
 
-    const provider = context.runtimeProfile?.provider ?? "local-agent";
-    yield* this.streamKitBridge(context, provider);
+    yield* this.streamKitBridge(context, target.providerId, target.agentTargetId, target.legacyProviderUnique);
+  }
+
+  private async resolveExactTarget(agentTargetId: string, detectContext?: DetectContext) {
+    const catalog = await loadTuttiAgentCatalog({
+      runtime: this.localAgentRuntime,
+      env: buildLocalAgentProcessEnv(process.env, tuttiCliEnv()),
+      detectContext,
+      commandEnvNames: ["GROUP_CHAT_TUTTI_CLI"],
+    });
+    const target = catalog.agents.find((agent) => agent.agentTargetId === agentTargetId);
+    if (!target) throw new RuntimeProviderUnsupportedError(`Unknown Agent target: ${agentTargetId}`);
+    const legacyProviderUnique = catalog.agents.filter((agent) =>
+      agent.providerId === target.providerId
+      && agent.runtimeSupported
+      && agent.availability.status === "available"
+    ).length === 1;
+    return { ...target, legacyProviderUnique };
+  }
+
+  private async resolveExactTargetForRun(context: RuntimeReplyContext) {
+    const agentTargetId = exactAgentTargetId(context);
+    const target = agentTargetId
+      ? await this.resolveExactTarget(agentTargetId, context.agentDetectContext)
+      : await this.resolveUniqueLegacyProviderTarget(context.runtimeProfile?.provider, context.agentDetectContext);
+    assertTargetProviderMatchesProfile(target.providerId, context);
+    if (!target.runtimeSupported || target.availability.status !== "available") {
+      throw new RuntimeProviderUnsupportedError(target.availability.detail || `Agent target is unavailable: ${agentTargetId}`);
+    }
+    return target;
+  }
+
+  private async resolveUniqueLegacyProviderTarget(providerId: string | null | undefined, detectContext?: DetectContext) {
+    const normalizedProviderId = canonicalProviderId(providerId);
+    if (!normalizedProviderId) throw new RuntimeProviderUnsupportedError("Exact Agent target is required.");
+    const catalog = await loadTuttiAgentCatalog({
+      runtime: this.localAgentRuntime,
+      env: buildLocalAgentProcessEnv(process.env, tuttiCliEnv()),
+      detectContext,
+      commandEnvNames: ["GROUP_CHAT_TUTTI_CLI"],
+    });
+    const matches = catalog.agents.filter((agent) =>
+      agent.providerId === normalizedProviderId
+      && agent.runtimeSupported
+      && agent.availability.status === "available"
+    );
+    if (matches.length !== 1) {
+      throw new RuntimeProviderUnsupportedError(
+        `Legacy provider cannot be migrated to one available Agent target: ${normalizedProviderId}`,
+      );
+    }
+    return { ...matches[0]!, legacyProviderUnique: true };
   }
 
   async cancel(runId: string) {
@@ -168,8 +222,10 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
   }
 
   async compactContext(context: RuntimeReplyContext) {
-    const provider = context.runtimeProfile?.provider ?? "local-agent";
-    if (resolveLocalAgentCommand(context)) {
+    const target = await this.resolveExactTargetForRun(context);
+    const provider = target.providerId;
+    const agentTargetId = target.agentTargetId;
+    if (resolveLocalAgentCommand(context, provider)) {
       throw new Error("Configured local-agent command bridge does not expose provider session compaction.");
     }
     if (!this.localAgentRuntime.listProviders().some((item) => item.id === provider)) {
@@ -178,12 +234,23 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
     const workspaceRoot = participantWorkspaceRoot(context.conversation.roomId, context.participant.id);
     const sessionStore = new LocalAgentSessionStore(workspaceRoot);
     const previousSession = sessionStore.read(context.conversation.id);
-    if (!previousSession || previousSession.provider !== provider || (!previousSession.providerSessionId && !previousSession.resumeToken)) {
+    if (!previousSession
+      || canonicalProviderId(previousSession.provider) !== canonicalProviderId(provider)
+      || (previousSession.agentTargetId
+        ? previousSession.agentTargetId !== agentTargetId
+        : !target.legacyProviderUnique)
+      || (!previousSession.providerSessionId && !previousSession.resumeToken)) {
       throw new Error("No active provider session is available to compact yet.");
     }
 
     const controller = new AbortController();
     const runId = `context-compact-${context.conversation.id}-${context.participant.id}-${Date.now()}`;
+    if (!context.managedAgentRunContext && context.managedAgentHeaders) {
+      context.managedAgentRunContext = await createManagedAgentRunContextFromHeaders(context.managedAgentHeaders, {
+        providerId: target.providerId,
+        runId,
+      });
+    }
     const resume = {
       mode: "provider" as const,
       ...(previousSession.providerSessionId ? { providerSessionId: previousSession.providerSessionId } : {}),
@@ -196,11 +263,12 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       provider,
       runtimeKind: "local-agent",
       runtimeProvider: provider,
-      cwd: workspaceRoot,
+      cwd: context.managedAgentRunContext?.cwd ?? workspaceRoot,
       prompt: "/compact",
       model: localAgentModelIdForAcp(context.runtimeProfile?.model ?? previousSession.model ?? "default", provider),
       reasoning: context.participant.reasoningEffort ?? undefined,
       env: buildLocalAgentRunEnv({ ...context, runId }, workspaceRoot),
+      managedAgentInvocation: context.managedAgentRunContext?.managedAgentInvocation,
       metadata: context.participant.speedMode ? { speedMode: context.participant.speedMode } : undefined,
       extraAllowedDirs: [workspaceRoot],
       resume,
@@ -208,6 +276,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
     })) {
       if (event.type === "usage") {
         sessionStore.updateUsage(context.conversation.id, {
+          agentTargetId,
           provider,
           model: context.runtimeProfile?.model ?? previousSession.model ?? null,
           usage: event.usage,
@@ -217,6 +286,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       if (event.type === "done") {
         if (event.sessionId || event.resumeToken) {
           sessionStore.write(context.conversation.id, {
+            agentTargetId,
             provider,
             providerSessionId: event.sessionId,
             resumeToken: event.resumeToken,
@@ -231,6 +301,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       }
     }
     sessionStore.markCompacted(context.conversation.id, {
+      agentTargetId,
       provider,
       model: context.runtimeProfile?.model ?? previousSession.model ?? null,
     });
@@ -325,7 +396,12 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
     }
   }
 
-  private async *streamKitBridge(context: RuntimeReplyContext, provider: string) {
+  private async *streamKitBridge(
+    context: RuntimeReplyContext,
+    provider: string,
+    agentTargetId: string,
+    legacyProviderUnique: boolean,
+  ) {
     const workspaceRoot = participantWorkspaceRoot(context.conversation.roomId, context.participant.id);
     const controller = new AbortController();
     if (context.runId) {
@@ -344,10 +420,11 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       const timeoutMs = localAgentTimeoutMs();
       const runtimeRunId = context.runId ?? `${context.conversation.id}:${context.participant.id}`;
       let skillFallbackEnv: Record<string, string> | undefined;
-      let skillContext = emptyTuttiAgentSkillContext(provider, runtimeRunId);
+      let skillContext = emptyTuttiAgentSkillContext(agentTargetId, provider, runtimeRunId);
       if (shouldLoadGroupChatAgentSkillContext(context, input)) {
         try {
           skillContext = await loadGroupChatAgentSkillContext({
+            agentTargetId,
             provider,
             agentSessionId: runtimeRunId,
             workspaceRoot,
@@ -358,6 +435,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
             yield { type: "thinking_delta" as const, text: `${SKILL_LOAD_FALLBACK_NOTICE}\n` };
             try {
               skillContext = await loadGroupChatAgentSkillContext({
+                agentTargetId,
                 provider,
                 agentSessionId: runtimeRunId,
                 workspaceRoot,
@@ -365,22 +443,25 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
               });
             } catch (fallbackError) {
               if (!isTuttiSkillBundleLoadFailure(fallbackError)) throw fallbackError;
-              skillContext = emptyTuttiAgentSkillContext(provider, runtimeRunId);
+              skillContext = emptyTuttiAgentSkillContext(agentTargetId, provider, runtimeRunId);
               yield { type: "thinking_delta" as const, text: `${SKILL_BUNDLE_UNAVAILABLE_NOTICE}\n` };
             }
           } else if (isTuttiSkillBundleLoadFailure(error)) {
-            skillContext = emptyTuttiAgentSkillContext(provider, runtimeRunId);
+            skillContext = emptyTuttiAgentSkillContext(agentTargetId, provider, runtimeRunId);
             yield { type: "thinking_delta" as const, text: `${SKILL_BUNDLE_UNAVAILABLE_NOTICE}\n` };
           } else {
             throw error;
           }
         }
       }
-      let resume = !input.turn.intent && previousSession?.provider === provider && (previousSession.providerSessionId || previousSession.resumeToken)
+      const previousSessionMatchesTarget = previousSession?.agentTargetId
+        ? previousSession.agentTargetId === agentTargetId
+        : legacyProviderUnique && canonicalProviderId(previousSession?.provider) === canonicalProviderId(provider);
+      let resume = !input.turn.intent && previousSessionMatchesTarget && (previousSession?.providerSessionId || previousSession?.resumeToken)
         ? {
             mode: "provider" as const,
-            ...(previousSession.providerSessionId ? { providerSessionId: previousSession.providerSessionId } : {}),
-            ...(previousSession.resumeToken ? { resumeToken: previousSession.resumeToken } : {}),
+            ...(previousSession?.providerSessionId ? { providerSessionId: previousSession.providerSessionId } : {}),
+            ...(previousSession?.resumeToken ? { resumeToken: previousSession.resumeToken } : {}),
           }
         : { mode: "fresh" as const };
       let canRetryFresh = resume.mode !== "fresh";
@@ -402,7 +483,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
             provider,
             runtimeKind: "local-agent",
             runtimeProvider: provider,
-            cwd: workspaceRoot,
+            cwd: context.managedAgentRunContext?.cwd ?? workspaceRoot,
             prompt,
             systemPrompt,
             history: buildKitHistory(context, historyLimit),
@@ -411,6 +492,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
             ...(mcpServers ? { mcpServers } : {}),
             ...(skillManifest ? { skillManifest } : {}),
             env: buildLocalAgentRunEnv(context, workspaceRoot, skillFallbackEnv),
+            managedAgentInvocation: context.managedAgentRunContext?.managedAgentInvocation,
             metadata: context.participant.speedMode ? { speedMode: context.participant.speedMode } : undefined,
             ...(timeoutMs ? { timeoutMs } : {}),
             extraAllowedDirs: [workspaceRoot],
@@ -434,6 +516,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
               throw new Error(event.message);
             } else if (event.type === "usage") {
               sessionStore.updateUsage(context.conversation.id, {
+                agentTargetId,
                 provider,
                 model: context.runtimeProfile?.model ?? null,
                 usage: event.usage,
@@ -441,6 +524,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
             } else if (event.type === "done") {
               if (event.sessionId || event.resumeToken) {
                 sessionStore.write(context.conversation.id, {
+                  agentTargetId,
                   provider,
                   providerSessionId: event.sessionId,
                   resumeToken: event.resumeToken,
@@ -573,8 +657,29 @@ function toRuntimeStreamEvent(event: AgentEvent): RuntimeStreamEvent | null {
   return null;
 }
 
-function resolveLocalAgentCommand(context: RuntimeReplyContext) {
-  const provider = context.runtimeProfile?.provider?.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+function exactAgentTargetId(context: RuntimeReplyContext) {
+  const profileTargetId = context.runtimeProfile?.agentTargetId?.trim() ?? "";
+  const participantTargetId = context.participant.agentTargetId?.trim() ?? "";
+  if (profileTargetId && participantTargetId && profileTargetId !== participantTargetId) {
+    throw new RuntimeProviderUnsupportedError("Participant and runtime profile Agent targets do not match.");
+  }
+  return participantTargetId || profileTargetId;
+}
+
+function assertTargetProviderMatchesProfile(providerId: string, context: RuntimeReplyContext) {
+  const profileProvider = canonicalProviderId(context.runtimeProfile?.provider);
+  if (profileProvider && profileProvider !== canonicalProviderId(providerId)) {
+    throw new RuntimeProviderUnsupportedError("Agent target runtime metadata changed; refresh the Agent catalog.");
+  }
+}
+
+function canonicalProviderId(providerId: string | null | undefined) {
+  const normalized = providerId?.trim().toLowerCase() ?? "";
+  return normalized === "claude" ? "claude-code" : normalized;
+}
+
+function resolveLocalAgentCommand(_context: RuntimeReplyContext, providerId: string) {
+  const provider = providerId.toUpperCase().replace(/[^A-Z0-9]/g, "_");
   const providerSpecific = provider ? process.env[`GROUP_CHAT_LOCAL_AGENT_${provider}_COMMAND`] : undefined;
   return providerSpecific || process.env.GROUP_CHAT_LOCAL_AGENT_COMMAND || "";
 }
@@ -590,41 +695,10 @@ function localAgentUnavailableReason(
   return `${displayName} is not available.`;
 }
 
-function mergeTuttiAgentProviderCatalog(
-  catalogProviders: TuttiAgentProviderCatalogEntry[],
-  kitStatuses: LocalAgentProviderStatus[],
-): LocalAgentProviderStatus[] {
-  const kitStatusByProvider = new Map(kitStatuses.map((status) => [status.provider, status]));
-  return catalogProviders.map((catalogProvider) => {
-    const provider = catalogProvider.providerId;
-    const kitStatus = kitStatusByProvider.get(provider);
-    const available = catalogProvider.runtimeSupported && (
-      catalogProvider.availability.status === "available" ||
-      (catalogProvider.availability.status === "unknown" && kitStatus?.available === true)
-    );
-    return enrichLocalAgentProviderStatus({
-      provider,
-      displayName: catalogProvider.displayName,
-      available,
-      authState: authStateFromCatalog(catalogProvider, kitStatus?.authState),
-      executablePath: kitStatus?.executablePath ?? "",
-      version: kitStatus?.version ?? (available ? "" : "not-installed"),
-      configDir: kitStatus?.configDir,
-      models: kitStatus?.models ?? [],
-      defaultModelId: kitStatus?.defaultModelId,
-      reasoningEfforts: kitStatus?.reasoningEfforts,
-      defaultReasoningEffort: kitStatus?.defaultReasoningEffort,
-      speedModes: kitStatus?.speedModes,
-      defaultSpeedMode: kitStatus?.defaultSpeedMode,
-      reason: available ? undefined : catalogProvider.availability.detail,
-    });
-  });
-}
-
 function authStateFromCatalog(
-  provider: TuttiAgentProviderCatalogEntry,
-  detected: LocalAgentProviderStatus["authState"] | undefined,
-): LocalAgentProviderStatus["authState"] {
+  provider: TuttiAgentCatalogEntry,
+  detected: LocalAgentTargetStatus["authState"] | undefined,
+): LocalAgentTargetStatus["authState"] {
   if (provider.availability.reasonCode === "auth_required") return "missing";
   if (provider.availability.reasonCode === "auth_expired") return "expired";
   return detected ?? "unknown";
@@ -785,6 +859,7 @@ function nextContextRetryMode(mode: ContextRetryMode): ContextRetryMode | null {
 }
 
 async function loadGroupChatAgentSkillContext(input: {
+  agentTargetId: string;
   provider: string;
   agentSessionId: string;
   workspaceRoot: string;
@@ -793,7 +868,7 @@ async function loadGroupChatAgentSkillContext(input: {
   try {
     const env = buildLocalAgentProcessEnv(process.env, { ...tuttiCliEnv(), ...input.envOverrides });
     return await loadTuttiAgentSkillContext({
-      provider: input.provider,
+      agentTargetId: input.agentTargetId,
       agentSessionId: input.agentSessionId,
       cwd: tuttiWorkspaceCwd(input.workspaceRoot),
       env,
@@ -804,10 +879,15 @@ async function loadGroupChatAgentSkillContext(input: {
   }
 }
 
-function emptyTuttiAgentSkillContext(provider: string, agentSessionId: string): TuttiAgentSkillContext {
+function emptyTuttiAgentSkillContext(
+  agentTargetId: string,
+  providerId: string,
+  agentSessionId: string,
+): TuttiAgentSkillContext {
   return {
     source: "standalone",
-    provider,
+    agentTargetId,
+    providerId,
     agentSessionId,
     skills: [],
     skillManifest: [],

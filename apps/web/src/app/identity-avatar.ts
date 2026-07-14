@@ -1,4 +1,9 @@
-import { parseTuttiAgentParticipantId, type Identity, type RuntimeProfile } from "@group-chat/shared";
+import {
+  parseLegacyTuttiAgentProviderParticipantId,
+  parseTuttiAgentParticipantId,
+  type Identity,
+  type RuntimeProfile,
+} from "@group-chat/shared";
 import { hasCustomRoomAvatar } from "./room-avatar.js";
 
 export interface RuntimeProviderAvatarStyle {
@@ -46,10 +51,10 @@ export function resolveAgentAvatar(input: {
   avatar: string | null;
   provider: string | null;
 } {
-  const builtInProvider = parseTuttiAgentParticipantId(input.participantId);
-  if (builtInProvider) {
-    return { avatar: null, provider: builtInProvider };
-  }
+  const isVirtualTuttiAgent = Boolean(
+    parseTuttiAgentParticipantId(input.participantId)
+    || parseLegacyTuttiAgentProviderParticipantId(input.participantId),
+  );
 
   const custom = input.avatar ?? input.icon;
   if (hasCustomRoomAvatar(custom)) {
@@ -58,6 +63,7 @@ export function resolveAgentAvatar(input: {
   if (input.runtimeProfile?.kind === "local-agent" && input.runtimeProfile.provider.trim()) {
     return { avatar: null, provider: input.runtimeProfile.provider };
   }
+  if (isVirtualTuttiAgent) return { avatar: null, provider: "local-agent" };
   return { avatar: null, provider: null };
 }
 

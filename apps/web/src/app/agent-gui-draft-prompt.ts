@@ -13,7 +13,7 @@ import {
 } from "./reference-mentions.js";
 import { buildTuttiMentionHref, readCachedTuttiWorkspaceId, resolveArtifactAgentDraftHref } from "./tutti-bridge.js";
 
-const AGENT_LAUNCHER_ENTITY_IDS = new Set(["agent-claude-code", "agent-codex"]);
+const AGENT_LAUNCHER_ENTITY_IDS = new Set<string>();
 
 const MESSAGE_ID_SEGMENT = "[A-Za-z0-9_-]+(?:,[A-Za-z0-9_-]+)*";
 const BARE_MESSAGE_LINK_PATTERN = new RegExp(

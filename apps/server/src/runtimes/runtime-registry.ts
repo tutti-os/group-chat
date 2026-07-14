@@ -1,4 +1,5 @@
-import type { LocalAgentProviderStatus, RuntimeProfile } from "@group-chat/shared";
+import type { LocalAgentTargetStatusResponse, RuntimeProfile } from "@group-chat/shared";
+import type { DetectContext } from "@tutti-os/agent-acp-kit";
 import { LocalAgentRuntimeProvider } from "./local-agent-provider.js";
 import type { RuntimeProvider } from "./runtime-provider.js";
 import { ServerDemoRuntimeProvider } from "./server-demo-provider.js";
@@ -10,9 +11,9 @@ export class RuntimeProviderRegistry {
     return this.providers.find((provider) => provider.canHandle(runtimeProfile)) ?? this.providers[0]!;
   }
 
-  async listLocalAgentProviders(): Promise<LocalAgentProviderStatus[]> {
-    const provider = this.providers.find((item) => typeof item.listLocalAgentProviders === "function");
-    return provider?.listLocalAgentProviders?.() ?? [];
+  async listLocalAgentTargets(detectContext?: DetectContext): Promise<LocalAgentTargetStatusResponse> {
+    const provider = this.providers.find((item) => typeof item.listLocalAgentTargets === "function");
+    return provider?.listLocalAgentTargets?.(detectContext) ?? { defaultAgentTargetId: "", agents: [] };
   }
 }
 

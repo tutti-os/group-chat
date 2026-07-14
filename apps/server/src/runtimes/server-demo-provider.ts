@@ -14,6 +14,7 @@ export class ServerDemoRuntimeProvider implements RuntimeProvider {
   describeRun(context: RuntimeReplyContext) {
     return {
       runtime: context.runtimeProfile?.kind ?? "server-demo",
+      agentTargetId: null,
       provider: context.runtimeProfile?.provider ?? "group-chat",
       model: context.runtimeProfile?.model ?? context.participant.runtimeProfileId ?? "demo",
     };

@@ -132,13 +132,19 @@ detect()
 resume?(resumeToken)
 ```
 
-建议 provider：
+建议 runtime：
 
 - `server-deepagent`：server 内 agent loop。
-- `local-agent:codex`：通过 local CLI agent 运行。
-- `local-agent:claude`：同一 adapter 层扩展。
+- `local-agent`：由 Tutti Agent catalog 返回的精确 `agentTargetId` 选择本地 agent；`providerId` 仅作为开放的底层 adapter metadata。
 
-聊天室业务不直接调用具体 SDK/CLI。
+聊天室业务不直接调用具体 SDK/CLI，也不以 Codex、Claude 等 provider 名称构造 participant、profile、session 或 launcher。
+
+Agent 身份边界：
+
+- 新的虚拟 participant 使用 `tutti-agent:target:<encoded-agentTargetId>`；旧的 `tutti-agent:<provider>` 只作为 provider-only 兼容格式，并且只能在完整 catalog 中唯一映射到一个可用 target 时迁移。
+- runtime profile id 是不透明内部键，target 与 model 组件必须使用无分隔符碰撞的编码；业务代码不得从 profile id 反向猜测 Agent ID。
+- provider session、resume token、context usage 和 compact 状态只能在存储的 `agentTargetId` 与当前 participant 完全一致时复用；无 target 的 legacy session 只允许走 catalog 唯一迁移路径。
+- parallel reply 预受理的 run 必须在真正启动前重新核对 runtime、`agentTargetId`、provider 和 model；任一项变化都 fail closed，不能让执行目标与 run 审计身份分叉。
 
 ## Local Agent Host
 
@@ -280,6 +286,6 @@ resume?(resumeToken)
 
 ## 待确认
 
-- P0 runtime 默认选择 `server-deepagent` 还是 `local-agent:codex`。
+- P0 runtime 默认选择 `server-deepagent`，还是从完整 Agent catalog 的 `defaultAgentTargetId` 选择 `local-agent`。
 - Provider key 是否使用系统 keychain，还是先做 SQLite 加密字段。
 - Tool gateway 的 mutate 工具 P0 是否允许 agent 改聊天室状态，还是只读。

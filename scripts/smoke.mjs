@@ -2,9 +2,9 @@
 import { spawn } from "node:child_process";
 
 const args = parseArgs(process.argv.slice(2));
-const providers = String(args.providers ?? "codex,claude")
+const agentTargetIds = String(args.agentIds ?? "")
   .split(",")
-  .map((provider) => provider.trim())
+  .map((agentTargetId) => agentTargetId.trim())
   .filter(Boolean);
 const includeRealLocalAgents = Boolean(args.realLocalAgents);
 const skipLocalAgentDetect = Boolean(args.skipLocalAgentDetect);
@@ -21,19 +21,20 @@ const steps = [
 ];
 
 if (!skipLocalAgentDetect) {
-  for (const provider of providers) {
-    steps.push({
-      name: `${provider} detect`,
-      command: ["pnpm", "--filter", "@group-chat/server", "local-agent:smoke", "--", "--provider", provider, "--detect-only"],
-    });
-  }
+  steps.push({
+    name: "default Agent catalog detect",
+    command: ["pnpm", "--filter", "@group-chat/server", "local-agent:smoke", "--", "--detect-only"],
+  });
 }
 
 if (includeRealLocalAgents) {
-  for (const provider of providers) {
+  for (const agentTargetId of agentTargetIds.length ? agentTargetIds : [""]) {
     steps.push({
-      name: `${provider} real local-agent`,
-      command: ["pnpm", "--filter", "@group-chat/server", "local-agent:smoke", "--", "--provider", provider],
+      name: `${agentTargetId || "default Agent"} real local-agent`,
+      command: [
+        "pnpm", "--filter", "@group-chat/server", "local-agent:smoke", "--",
+        ...(agentTargetId ? ["--agent-id", agentTargetId] : []),
+      ],
     });
   }
 }

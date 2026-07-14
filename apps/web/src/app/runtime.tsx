@@ -9,9 +9,6 @@ export function defaultIdentityNameForRuntime(
   localAgentProviders: LocalAgentProviderStatus[] = [],
 ) {
   if (!profile) return "Agent";
-  const provider = profile.provider.trim().toLowerCase();
-  if (provider === "codex") return "Codex";
-  if (provider === "claude-code" || provider === "claude") return "Claude Code";
   const detected = localAgentStatus(profile, localAgentProviders);
   if (detected?.displayName?.trim()) return detected.displayName.trim();
   return profile.displayName.replace(/\s+Local Agent$/i, "").trim() || profile.displayName;
@@ -29,7 +26,7 @@ export function preferredDefaultRuntimeProfile(
     const matched = profiles.find(
       (profile) =>
         profile.kind === "local-agent"
-        && profile.provider.trim().toLowerCase() === availableProvider.provider.trim().toLowerCase(),
+        && profile.agentTargetId === availableProvider.agentTargetId,
     );
     if (matched) return matched;
   }
@@ -58,7 +55,7 @@ export function runtimeStatusSummary(profile: RuntimeProfile | null, localAgentP
 
 export function localAgentStatus(profile: RuntimeProfile | null, localAgentProviders: LocalAgentProviderStatus[]) {
   if (!profile || profile.kind !== "local-agent") return null;
-  return localAgentProviders.find((item) => item.provider === profile.provider) ?? null;
+  return localAgentProviders.find((item) => item.agentTargetId === profile.agentTargetId) ?? null;
 }
 
 export function listRuntimeModels(
@@ -118,7 +115,7 @@ export function normalizeRuntimeModelId(profile: RuntimeProfile | null, modelId:
 
 function isDefaultLocalAgentModelId(profile: RuntimeProfile | null, modelId: string | null | undefined) {
   if (!profile || profile.kind !== "local-agent") return false;
-  return modelId === `${profile.provider}:default`;
+  return modelId === "default" || modelId === `${profile.provider}:default`;
 }
 
 function isDefaultModelOptionId(modelId: string | null | undefined) {
@@ -150,12 +147,6 @@ export function listRuntimeSpeedOptions(
 ): LocalAgentProviderSpeedMode[] {
   const provider = localAgentStatus(profile, localAgentProviders);
   if (provider?.speedModes?.length) return provider.speedModes;
-  if (profile?.kind === "local-agent" && profile.provider === "codex") {
-    return [
-      { id: "standard", label: t("speed.standard") },
-      { id: "fast", label: t("speed.fast") },
-    ];
-  }
   return [{ id: "standard", label: t("speed.standard") }];
 }
 
@@ -171,23 +162,31 @@ export function resolveRuntimeSpeedMode(
   return options[0]?.id ?? "standard";
 }
 
-function isCanonicalLocalAgentProfile(profile: RuntimeProfile) {
-  return profile.kind === "local-agent" && profile.id === `local-agent:${profile.provider}`;
-}
-
 export function listCanonicalRuntimeProfiles(profiles: RuntimeProfile[]) {
-  return profiles.filter((profile) => profile.kind !== "local-agent" || isCanonicalLocalAgentProfile(profile));
+  const canonicalIds = new Set<string>();
+  const byTarget = new Map<string, RuntimeProfile[]>();
+  for (const profile of profiles) {
+    if (profile.kind !== "local-agent" || !profile.agentTargetId) continue;
+    const matches = byTarget.get(profile.agentTargetId) ?? [];
+    matches.push(profile);
+    byTarget.set(profile.agentTargetId, matches);
+  }
+  for (const matches of byTarget.values()) {
+    matches.sort((left, right) =>
+      left.id.length - right.id.length
+      || left.createdAt.localeCompare(right.createdAt)
+      || left.id.localeCompare(right.id)
+    );
+    if (matches[0]) canonicalIds.add(matches[0].id);
+  }
+  return profiles.filter((profile) => profile.kind !== "local-agent" || canonicalIds.has(profile.id));
 }
 
 export function resolveCanonicalRuntimeProfile(profile: RuntimeProfile | null, profiles: RuntimeProfile[]) {
   if (!profile) return null;
-  if (isCanonicalLocalAgentProfile(profile)) return profile;
   return (
-    profiles.find(
-      (item) =>
-        item.kind === "local-agent" &&
-        item.provider === profile.provider &&
-        isCanonicalLocalAgentProfile(item),
+    listCanonicalRuntimeProfiles(profiles).find((item) =>
+      item.kind === "local-agent" && item.agentTargetId === profile.agentTargetId
     ) ?? profile
   );
 }
@@ -205,17 +204,17 @@ export function RuntimeStatusHint(props: {
   }
   const status = localAgentStatus(props.profile, props.localAgentProviders);
   if (!status) {
-    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--text-secondary)] [font-size:11px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>{t("runtime.detectingProvider")}</span>;
+    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--text-secondary)] [font-size:11px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap]"}>{t("runtime.detectingAgent")}</span>;
   }
   if (!status.available) {
-    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--text-secondary)] [font-size:11px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap] [color:var(--state-danger)]"}>{t("runtime.needsSetup")} · {status.reason ?? t("runtime.providerUnavailable")}</span>;
+    return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--text-secondary)] [font-size:11px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap] [color:var(--state-danger)]"}>{t("runtime.needsSetup")} · {status.reason ?? t("runtime.agentUnavailable")}</span>;
   }
   const version = status.version && status.version !== "not-installed" ? status.version : null;
   return <span className={"[display:block] [min-width:0] [overflow:hidden] [color:var(--text-secondary)] [font-size:11px] [font-weight:600] [line-height:1.35] [text-overflow:ellipsis] [white-space:nowrap] [color:var(--state-success)]"}>{t("runtime.ready")}{version ? ` · ${version}` : ""}</span>;
 }
 
 function providerStatusLine(profile: RuntimeProfile, status: LocalAgentProviderStatus | null) {
-  if (!status) return `${profile.provider} · ${t("runtime.detecting")}`;
+  if (!status) return `${profile.displayName} · ${t("runtime.detecting")}`;
   const modelCount = status.models.length;
   const modelLabel = modelCount === 1
     ? t("runtime.modelCountOne")
@@ -254,20 +253,20 @@ export function LocalAgentProvidersPanel(props: {
       profile,
       status: localAgentStatus(profile, props.localAgentProviders),
     })),
-    (item) => item.profile.provider,
+    (item) => item.profile.agentTargetId,
   );
   return (
-    <section className={"[margin:8px] [overflow:hidden] [border:0] [border-top:1px_solid_var(--border-1)] [border-radius:0] [background:transparent]"} aria-label={t("runtime.localProviders")}>
+    <section className={"[margin:8px] [overflow:hidden] [border:0] [border-top:1px_solid_var(--border-1)] [border-radius:0] [background:transparent]"} aria-label={t("runtime.localAgents")}>
       <div className={"[&_h3]:[margin:0] [&_h3]:[color:var(--text-primary)] [&_h3]:[font-size:13px] [&_h3]:[font-weight:650] [&_span]:[display:block] [&_span]:[margin-top:3px] [display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [padding:12px] [border-bottom:0] [&_span]:[color:var(--text-secondary)] [&_span]:[font-size:11px]"}>
         <div>
-          <h3>{t("runtime.localProviders")}</h3>
+          <h3>{t("runtime.localAgents")}</h3>
           <span>{t("runtime.configuredCount", { count: providers.length })}</span>
         </div>
         <button
           type="button"
           className={"[display:inline-grid] [place-items:center] [border:0] [width:34px] [height:34px] [border-radius:12px] [color:var(--text-secondary)] [background:var(--transparency-hover)] [transition:background-color_0.12s_ease,_color_0.12s_ease] [&:hover]:[color:var(--text-primary)] [&:hover]:[background:var(--line-focus-window)] [width:28px] [height:28px] [&:disabled]:[opacity:0.45]"}
-          title={t("runtime.refreshProviders")}
-          aria-label={t("runtime.refreshProviders")}
+          title={t("runtime.refreshAgents")}
+          aria-label={t("runtime.refreshAgents")}
           disabled={props.refreshing}
           onClick={() => void props.onRefresh()}
         >
@@ -276,7 +275,7 @@ export function LocalAgentProvidersPanel(props: {
       </div>
       <div className={"[display:grid] [gap:4px] [padding:8px]"}>
         {providers.map(({ profile, status }) => (
-          <div key={profile.provider} className={`[&_strong]:[display:block] [&_strong]:[min-width:0] [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:[display:block] [&_span]:[min-width:0] [&_span]:[overflow:hidden] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_small]:[display:block] [&_small]:[min-width:0] [&_small]:[overflow:hidden] [&_small]:[text-overflow:ellipsis] [&_small]:[white-space:nowrap] [&_small]:[color:var(--text-secondary)] [&_small]:[font-size:11px] [&_small]:[font-size:11px] [display:grid] [grid-template-columns:22px_minmax(0,_1fr)] [gap:8px] [align-items:start] [border-radius:12px] [padding:9px] [color:var(--text-secondary)] [background:transparent] [&_strong]:[color:var(--text-primary)] [&_strong]:[font-size:11px] [&_span]:[margin-top:2px] [&_span]:[font-size:11px] [&_span]:[font-weight:650] ${status?.available ? "[color:var(--state-success)]" : "[color:var(--state-danger)]"}`}>
+          <div key={profile.agentTargetId ?? profile.id} className={`[&_strong]:[display:block] [&_strong]:[min-width:0] [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:[display:block] [&_span]:[min-width:0] [&_span]:[overflow:hidden] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_small]:[display:block] [&_small]:[min-width:0] [&_small]:[overflow:hidden] [&_small]:[text-overflow:ellipsis] [&_small]:[white-space:nowrap] [&_small]:[color:var(--text-secondary)] [&_small]:[font-size:11px] [&_small]:[font-size:11px] [display:grid] [grid-template-columns:22px_minmax(0,_1fr)] [gap:8px] [align-items:start] [border-radius:12px] [padding:9px] [color:var(--text-secondary)] [background:transparent] [&_strong]:[color:var(--text-primary)] [&_strong]:[font-size:11px] [&_span]:[margin-top:2px] [&_span]:[font-size:11px] [&_span]:[font-weight:650] ${status?.available ? "[color:var(--state-success)]" : "[color:var(--state-danger)]"}`}>
             <Terminal size={15} />
             <div>
               <strong>{defaultIdentityNameForRuntime(profile, props.localAgentProviders)}</strong>

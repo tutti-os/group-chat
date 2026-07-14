@@ -163,6 +163,7 @@ export interface Participant {
   displayName: string;
   avatar: string | null;
   runtimeProfileId: string | null;
+  agentTargetId: string | null;
   identityId: string | null;
   roomInstructions: string;
   status: ParticipantStatus;
@@ -177,6 +178,7 @@ export interface Participant {
 export interface RuntimeProfile {
   id: Id;
   kind: RuntimeKind;
+  agentTargetId: string | null;
   provider: string;
   model: string;
   displayName: string;
@@ -206,9 +208,14 @@ export interface LocalAgentProviderSpeedMode {
   label: string;
 }
 
-export interface LocalAgentProviderStatus {
+export interface LocalAgentTargetStatus {
+  agentTargetId: string;
+  providerId: string;
+  /** Runtime adapter metadata. Never use this field as Agent selection identity. */
   provider: string;
   displayName: string;
+  runtimeSupported: boolean;
+  availabilityStatus: "available" | "unavailable" | "unknown";
   available: boolean;
   authState: "ok" | "missing" | "expired" | "unknown";
   executablePath: string;
@@ -223,9 +230,15 @@ export interface LocalAgentProviderStatus {
   reason?: string;
 }
 
-export interface LocalAgentProviderStatusResponse {
-  providers: LocalAgentProviderStatus[];
+export interface LocalAgentTargetStatusResponse {
+  defaultAgentTargetId: string;
+  agents: LocalAgentTargetStatus[];
 }
+
+/** @deprecated Prefer LocalAgentTargetStatus; provider is not a selection identity. */
+export type LocalAgentProviderStatus = LocalAgentTargetStatus;
+/** @deprecated Prefer LocalAgentTargetStatusResponse. */
+export type LocalAgentProviderStatusResponse = LocalAgentTargetStatusResponse;
 
 export interface Identity {
   id: Id;
@@ -348,6 +361,7 @@ export interface AgentRun {
   assistantMessageId: string | null;
   triggerMessageId: string | null;
   runtime: string;
+  agentTargetId: string | null;
   provider: string;
   model: string;
   status: AgentRunStatus;
@@ -1001,6 +1015,7 @@ function participantDisplayNameCharUnits(char: string) {
 }
 
 const TUTTI_AGENT_PARTICIPANT_PREFIX = "tutti-agent:";
+const TUTTI_AGENT_TARGET_PARTICIPANT_PREFIX = `${TUTTI_AGENT_PARTICIPANT_PREFIX}target:`;
 
 export function normalizeTuttiAgentProvider(provider: string | null | undefined) {
   const normalized = provider?.trim().toLowerCase() ?? "";
@@ -1009,22 +1024,44 @@ export function normalizeTuttiAgentProvider(provider: string | null | undefined)
   return normalized.replace(/[^a-z0-9_.-]/g, "");
 }
 
-export function tuttiAgentParticipantId(provider: string) {
-  const normalized = normalizeTuttiAgentProvider(provider);
-  return normalized ? `${TUTTI_AGENT_PARTICIPANT_PREFIX}${normalized}` : "";
+export function normalizeTuttiAgentTargetId(agentTargetId: string | null | undefined) {
+  return agentTargetId?.trim() ?? "";
+}
+
+export function tuttiAgentParticipantId(agentTargetId: string) {
+  const normalized = normalizeTuttiAgentTargetId(agentTargetId);
+  return normalized ? `${TUTTI_AGENT_TARGET_PARTICIPANT_PREFIX}${encodeURIComponent(normalized)}` : "";
 }
 
 export function parseTuttiAgentParticipantId(participantId: string | null | undefined) {
   const trimmed = participantId?.trim() ?? "";
-  if (!trimmed.startsWith(TUTTI_AGENT_PARTICIPANT_PREFIX)) return "";
-  return normalizeTuttiAgentProvider(trimmed.slice(TUTTI_AGENT_PARTICIPANT_PREFIX.length));
+  if (!trimmed.startsWith(TUTTI_AGENT_TARGET_PARTICIPANT_PREFIX)) return "";
+  try {
+    return normalizeTuttiAgentTargetId(decodeURIComponent(trimmed.slice(TUTTI_AGENT_TARGET_PARTICIPANT_PREFIX.length)));
+  } catch {
+    return "";
+  }
 }
 
-export function defaultTuttiAgentParticipantName(provider: string) {
-  if (provider === "claude-code") return "Claude Code";
-  if (provider === "codex") return "Codex";
-  if (provider === "claude") return "Claude Code";
-  return provider || "Agent";
+/** Parses the provider-only participant IDs emitted before Agent targets became the stable identity. */
+export function parseLegacyTuttiAgentProviderParticipantId(participantId: string | null | undefined) {
+  const trimmed = participantId?.trim() ?? "";
+  if (
+    !trimmed.startsWith(TUTTI_AGENT_PARTICIPANT_PREFIX)
+    || trimmed.startsWith(TUTTI_AGENT_TARGET_PARTICIPANT_PREFIX)
+  ) return "";
+  try {
+    const decoded = decodeURIComponent(trimmed.slice(TUTTI_AGENT_PARTICIPANT_PREFIX.length)).trim().toLowerCase();
+    const normalized = normalizeTuttiAgentProvider(decoded);
+    if (!normalized) return "";
+    return decoded === normalized || (decoded === "claude" && normalized === "claude-code") ? normalized : "";
+  } catch {
+    return "";
+  }
+}
+
+export function defaultTuttiAgentParticipantName(displayNameOrTargetId: string) {
+  return displayNameOrTargetId.trim() || "Agent";
 }
 
 export {

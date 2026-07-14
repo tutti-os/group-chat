@@ -17,7 +17,7 @@ Run the standard smoke suite:
 pnpm smoke
 ```
 
-This runs the core IM flow, workspace materialization, and local-agent provider detection for Codex and Claude. To include real Codex/Claude turns:
+This runs the core IM flow, workspace materialization, and detection of the default Agent from the live Tutti Agent catalog. To include a real local Agent turn:
 
 ```bash
 pnpm smoke:real-local-agents
@@ -47,18 +47,23 @@ pnpm --filter @group-chat/server workspace:smoke
 
 This verifies identity workspace files, participant room workspace files, room instructions, raw conversation logs, distilled context, and local-user memory generated after a demo agent reply.
 
-Run provider detection without starting a real agent turn:
+Load the complete Agent catalog and validate its default target without starting a real turn:
 
 ```bash
-pnpm --filter @group-chat/server local-agent:smoke -- --provider codex --detect-only
-pnpm --filter @group-chat/server local-agent:smoke -- --provider claude --detect-only
+pnpm --filter @group-chat/server local-agent:smoke -- --detect-only
 ```
 
-Run an isolated end-to-end local-agent turn against the real CLI:
+Run an isolated end-to-end turn against the catalog default, or select an exact target returned by `GET /api/local-agent/agents`:
 
 ```bash
-pnpm --filter @group-chat/server local-agent:smoke -- --provider codex
-pnpm --filter @group-chat/server local-agent:smoke -- --provider claude
+pnpm --filter @group-chat/server local-agent:smoke
+pnpm --filter @group-chat/server local-agent:smoke -- --agent-id '<exact-agent-target-id>'
 ```
 
 The smoke script starts a temporary server with its own `GROUP_CHAT_HOME`, creates a room, adds a local agent participant, sends one message, waits for the assistant message to finish, prints the resulting block types, then cleans up.
+
+## Agent identity contract
+
+Group Chat selects, mentions, persists, resumes, and launches local Agents by the exact `agentTargetId` returned by the live Tutti Agent catalog. `providerId` is retained only as runtime-adapter metadata. Multiple Agent targets may share one provider. Legacy provider-only records are upgraded only when the complete catalog contains exactly one available, runtime-supported target for that provider; otherwise execution fails closed.
+
+The old provider-specific AgentGUI launchers are intentionally hidden. The composer builds its Agent list dynamically from `GET /api/local-agent/agents`, and target-scoped model, reasoning, speed, skill, and session state remain isolated by exact Agent ID.

@@ -45,10 +45,12 @@ import { ChatRepository } from "./chat-repository.js";
 import {
   createVirtualTuttiAgentParticipant,
   defaultTuttiAgentParticipantName,
-  localAgentProviderFromLauncherAppId,
+  localAgentTargetFromLauncherAppId,
   normalizeTuttiAgentName,
+  parseLegacyTuttiAgentProviderParticipantId,
   parseTuttiAgentParticipantId,
 } from "./tutti-agent-participant.js";
+import type { DetectContext, ManagedAgentInvocationCredentialHeaders } from "@tutti-os/agent-acp-kit";
 import {
   extractLocalFilePathsFromContent,
   inferMimeTypeForPath,
@@ -58,10 +60,20 @@ import {
 import { participantWorkspaceRoot, roomArtifactRoot } from "../local/paths.js";
 import { isWorkspaceAppOnlyTaskMessage, NO_REPLY_MARKER } from "../runtimes/local-agent-protocol.js";
 import { createRuntimeProviderRegistry } from "../runtimes/runtime-registry.js";
-import { RuntimeProviderUnsupportedError, type RuntimeReplyContext, type RuntimeStreamEvent } from "../runtimes/runtime-provider.js";
+import {
+  agentRunMatchesRuntimeDescriptor,
+  RuntimeProviderUnsupportedError,
+  type RuntimeReplyContext,
+  type RuntimeStreamEvent,
+} from "../runtimes/runtime-provider.js";
 import { EventHub } from "../ws/event-hub.js";
 
 const AUTO_IMPORT_RUN_FILE_MAX_BYTES = 50 * 1024 * 1024;
+
+interface RuntimeInvocationContext {
+  agentDetectContext?: DetectContext;
+  managedAgentHeaders?: ManagedAgentInvocationCredentialHeaders;
+}
 
 export class ChatService {
   private readonly workspaces = new AgentWorkspaceService();
@@ -69,12 +81,14 @@ export class ChatService {
   private readonly activeReplyKeys = new Set<string>();
   private readonly cancelledRunIds = new Set<string>();
   private readonly cancelledPrivateTaskIds = new Set<string>();
+  private readonly messageInvocationContexts = new Map<string, RuntimeInvocationContext>();
   private readonly activePrivateTasks = new Map<string, {
     participantId: string;
     cancel: (reason: string) => Promise<void> | void;
   }>();
   private recoveredReplyQueue = false;
   private bootstrapMaintenanceStarted = false;
+  private defaultAgentTargetId = "";
 
   constructor(
     private readonly repo: ChatRepository,
@@ -99,14 +113,36 @@ export class ChatService {
     return this.repo.listConversationMessagePage(conversationId, options);
   }
 
-  async listLocalAgentProviders() {
-    return {
-      providers: await this.runtimes.listLocalAgentProviders(),
-    };
+  async listLocalAgentTargets(detectContext?: DetectContext) {
+    const catalog = await this.runtimes.listLocalAgentTargets(detectContext);
+    this.defaultAgentTargetId = catalog.defaultAgentTargetId;
+    this.repo.syncLocalAgentCatalog({
+      agents: catalog.agents.map((agent) => ({
+        agentTargetId: agent.agentTargetId,
+        providerId: agent.providerId,
+        displayName: agent.displayName,
+        available: agent.available,
+        runtimeSupported: agent.runtimeSupported,
+        defaultModelId: agent.defaultModelId,
+      })),
+    });
+    return catalog;
   }
 
   createRoom(input: CreateRoomRequest) {
-    const bundle = this.repo.createRoom(input);
+    const defaultRuntimeProfileId = this.defaultAgentRuntimeProfile()?.id ?? null;
+    const bundle = this.repo.createRoom({
+      ...input,
+      ...(input.participants
+        ? {
+            participants: input.participants.map((participant) =>
+              participant.runtimeProfileId || !defaultRuntimeProfileId
+                ? participant
+                : { ...participant, runtimeProfileId: defaultRuntimeProfileId }
+            ),
+          }
+        : {}),
+    });
     this.materializeParticipants(bundle.conversation, bundle.participants);
     this.events.emit({
       type: "room.created",
@@ -266,7 +302,11 @@ export class ChatService {
     return this.workspaces.getContextUsage({ conversation, participant });
   }
 
-  async compactParticipantContext(conversationId: string, participantId: string) {
+  async compactParticipantContext(
+    conversationId: string,
+    participantId: string,
+    invocation: RuntimeInvocationContext = {},
+  ) {
     const conversation = this.repo.getConversation(conversationId);
     if (!conversation) throw new Error("Conversation not found");
     const participant = this.repo.getParticipant(participantId);
@@ -287,6 +327,8 @@ export class ChatService {
           userMessage: createSyntheticContextCompactMessage(conversation, participant),
           recentMessages: [],
           attachments: [],
+          agentDetectContext: invocation.agentDetectContext,
+          managedAgentHeaders: invocation.managedAgentHeaders,
         });
         const localCompaction = this.workspaces.compactConversationContext({ conversation, participant });
         return {
@@ -464,7 +506,7 @@ export class ChatService {
     return participant ? { participant, systemMessage } : null;
   }
 
-  sendMessage(conversationId: string, input: SendMessageRequest) {
+  sendMessage(conversationId: string, input: SendMessageRequest, invocation: RuntimeInvocationContext = {}) {
     const conversation = this.repo.getConversation(conversationId);
     if (!conversation) throw new Error("Conversation not found");
     const content = input.content.trim();
@@ -485,6 +527,7 @@ export class ChatService {
       status: "success",
       parentMessageId: input.parentMessageId ?? null,
     });
+    this.messageInvocationContexts.set(message.id, invocation);
     const blocks = [];
     const artifacts = [];
     this.repo.touchConversation(conversationId, content || "Attached files");
@@ -555,11 +598,16 @@ export class ChatService {
       order: resolveReplySpeakingOrder(conversation, mentions),
       seenParticipantIds: new Set(targets.map((participant) => participant.id)),
       mentionScoped: workspaceAppOnlyDispatch || isParticipantMentionScoped(message.mentions),
+      invocation,
     });
     return { message, blocks, artifacts, targets };
   }
 
-  runPrivateTask(conversationId: string, input: PrivateTaskRequest) {
+  runPrivateTask(
+    conversationId: string,
+    input: PrivateTaskRequest,
+    invocation: RuntimeInvocationContext = {},
+  ) {
     const conversation = this.repo.getConversation(conversationId);
     if (!conversation) throw new Error("Conversation not found");
     const participant = this.repo.getParticipant(input.participantId);
@@ -608,6 +656,7 @@ export class ChatService {
           ? [sourceMessage.id]
           : [],
       sourcePreview: compactTaskPreview(sourceMessage?.content ?? prompt),
+      invocation,
     });
 
     return { taskId };
@@ -628,7 +677,11 @@ export class ChatService {
     return { taskId, cancelled: true };
   }
 
-  async updateMessage(messageId: string, input: UpdateMessageRequest) {
+  async updateMessage(
+    messageId: string,
+    input: UpdateMessageRequest,
+    invocation: RuntimeInvocationContext = {},
+  ) {
     const current = this.repo.getMessage(messageId);
     if (!current) return null;
     const conversation = this.repo.getConversation(current.conversationId);
@@ -706,6 +759,7 @@ export class ChatService {
       order: resolveReplySpeakingOrder(conversation, result.message.mentions),
       seenParticipantIds: new Set(targets.map((participant) => participant.id)),
       mentionScoped: workspaceAppOnlyDispatch || isParticipantMentionScoped(result.message.mentions),
+      invocation,
     });
     return {
       message: result.message,
@@ -816,15 +870,22 @@ export class ChatService {
     const scope = resolveMentionTargetReferenceScope(mention);
     if (scope?.groupChatLocalAgentMention !== "true") return null;
 
-    const provider =
-      scope.groupChatRuntimeProvider?.trim()
-      || localAgentProviderFromLauncherAppId(mention.referenceEntityId)
+    const legacyProvider = scope.groupChatRuntimeProvider?.trim()
       || (mention.referenceProviderId === "agent-session" ? scope.provider?.trim() : "");
-    if (!provider) return null;
+    const agentTargetId = scope.groupChatAgentTargetId?.trim()
+      || localAgentTargetFromLauncherAppId(mention.referenceEntityId)
+      || this.resolveUniqueLegacyAgentTargetId(legacyProvider);
+    if (!agentTargetId) return null;
 
-    const runtimeProfileId = scope.groupChatRuntimeProfileId?.trim() || `local-agent:${provider}`;
-    const runtimeProfile = this.repo.getRuntimeProfile(runtimeProfileId);
-    if (runtimeProfile?.kind !== "local-agent" || runtimeProfile.provider !== provider) return null;
+    const runtimeProfileId = scope.groupChatRuntimeProfileId?.trim();
+    const scopedRuntimeProfile = runtimeProfileId ? this.repo.getRuntimeProfile(runtimeProfileId) : null;
+    const runtimeProfile = scopedRuntimeProfile?.kind === "local-agent"
+        && scopedRuntimeProfile.agentTargetId === agentTargetId
+      ? scopedRuntimeProfile
+      : this.repo.listRuntimeProfiles().find((profile) =>
+          profile.kind === "local-agent" && profile.agentTargetId === agentTargetId
+        ) ?? null;
+    if (runtimeProfile?.kind !== "local-agent" || runtimeProfile.agentTargetId !== agentTargetId || !runtimeProfile.enabled) return null;
 
     const participants = this.repo.listParticipants(conversation.id);
     const scopedParticipantId = scope.groupChatParticipantId?.trim();
@@ -841,7 +902,7 @@ export class ChatService {
     const requestedName =
       scope.groupChatParticipantLabel?.trim()
       || resolveMentionTargetReferenceLabel(mention)
-      || defaultTuttiAgentParticipantName(provider);
+      || defaultTuttiAgentParticipantName(runtimeProfile.displayName);
     const normalizedRequestedName = normalizeTuttiAgentName(requestedName);
     const existing = participants.find((participant) =>
       participant.kind === "ai"
@@ -859,15 +920,41 @@ export class ChatService {
     participantId: string | null | undefined,
     displayName?: string | null,
   ) {
-    const provider = parseTuttiAgentParticipantId(participantId);
-    if (!provider) return null;
-    const runtimeProfile = this.repo.getRuntimeProfile(`local-agent:${provider}`);
-    if (runtimeProfile?.kind !== "local-agent") return null;
+    const participantTargetId = parseTuttiAgentParticipantId(participantId);
+    const legacyProviderId = parseLegacyTuttiAgentProviderParticipantId(participantId);
+    if (!participantTargetId && !legacyProviderId) return null;
+    const profiles = this.repo.listRuntimeProfiles();
+    let runtimeProfile = profiles.find((profile) =>
+      profile.kind === "local-agent" && profile.agentTargetId === participantTargetId && profile.enabled
+    ) ?? null;
+    if (!runtimeProfile && legacyProviderId) {
+      const migratedTargetId = this.resolveUniqueLegacyAgentTargetId(legacyProviderId);
+      runtimeProfile = migratedTargetId
+        ? profiles.find((profile) =>
+            profile.kind === "local-agent" && profile.agentTargetId === migratedTargetId && profile.enabled
+          ) ?? null
+        : null;
+    }
+    if (!runtimeProfile) return null;
     return createVirtualTuttiAgentParticipant(
       conversation,
       runtimeProfile,
-      displayName?.trim() || defaultTuttiAgentParticipantName(provider),
+      displayName?.trim() || defaultTuttiAgentParticipantName(runtimeProfile.displayName),
     );
+  }
+
+  private resolveUniqueLegacyAgentTargetId(provider: string | null | undefined) {
+    const normalized = provider?.trim() ?? "";
+    if (!normalized) return "";
+    const canonical = normalized.toLowerCase() === "claude" ? "claude-code" : normalized.toLowerCase();
+    const matches = this.repo.listRuntimeProfiles().filter((profile) =>
+      profile.kind === "local-agent"
+      && (profile.provider.toLowerCase() === "claude" ? "claude-code" : profile.provider.toLowerCase()) === canonical
+      && profile.enabled
+      && Boolean(profile.agentTargetId)
+    );
+    const targets = [...new Set(matches.map((profile) => profile.agentTargetId).filter(Boolean))];
+    return targets.length === 1 ? targets[0]! : "";
   }
 
   private resolveEffectiveParticipant(
@@ -1075,10 +1162,11 @@ export class ChatService {
     userText: string,
   ) {
     if (!isWorkspaceAppOnlyTaskMessage({ userMessage: { content: userText, mentions } })) return null;
-    const runtimeProfile =
-      this.repo.getRuntimeProfile("local-agent:codex")
-      ?? this.repo.getRuntimeProfile("local-agent:claude-code")
-      ?? this.repo.getRuntimeProfile("local-agent:claude");
+    const runtimeProfile = this.repo.listRuntimeProfiles().find((profile) =>
+      profile.kind === "local-agent"
+      && profile.enabled
+      && profile.agentTargetId === this.defaultAgentTargetId
+    ) ?? null;
     if (runtimeProfile?.kind !== "local-agent" || !runtimeProfile.enabled) return null;
     const appMention = mentions.find((mention) =>
       mention.mentionType === "reference"
@@ -1087,7 +1175,7 @@ export class ChatService {
     );
     const displayName =
       appMention ? resolveMentionTargetReferenceLabel(appMention) || appMention.displayNameSnapshot.trim() : "";
-    return createVirtualTuttiAgentParticipant(conversation, runtimeProfile, displayName || defaultTuttiAgentParticipantName(runtimeProfile.provider));
+    return createVirtualTuttiAgentParticipant(conversation, runtimeProfile, displayName || defaultTuttiAgentParticipantName(runtimeProfile.displayName));
   }
 
   private async generateReplies(
@@ -1101,6 +1189,7 @@ export class ChatService {
       order: SpeakingOrder;
       seenParticipantIds: Set<string>;
       mentionScoped?: boolean;
+      invocation?: RuntimeInvocationContext;
     },
   ) {
     const orderedTargets = orderTargets(targets, options.order);
@@ -1108,7 +1197,7 @@ export class ChatService {
     if (effectiveOrder === "parallel") {
       const preacceptedRuns = new Map<string, AgentRun>();
       for (const participant of orderedTargets) {
-        const run = this.createAcceptedAgentRun(roomId, conversationId, userMessage, participant);
+        const run = this.createAcceptedAgentRun(roomId, conversationId, userMessage, participant, options.invocation);
         if (run) preacceptedRuns.set(participant.id, run);
       }
       const replies = await Promise.all(
@@ -1119,6 +1208,7 @@ export class ChatService {
             userMessage,
             participant,
             preacceptedRuns.get(participant.id) ?? null,
+            options.invocation,
           ),
         })),
       );
@@ -1129,7 +1219,7 @@ export class ChatService {
     }
 
     for (const participant of orderedTargets) {
-      const assistantMessage = await this.scheduleReply(roomId, conversationId, userMessage, participant);
+      const assistantMessage = await this.scheduleReply(roomId, conversationId, userMessage, participant, null, options.invocation);
       await this.generateFollowupReplies(roomId, conversationId, assistantMessage, options);
     }
   }
@@ -1144,6 +1234,7 @@ export class ChatService {
       order: SpeakingOrder;
       seenParticipantIds: Set<string>;
       mentionScoped?: boolean;
+      invocation?: RuntimeInvocationContext;
     },
   ) {
     if (!assistantMessage || options.currentRound >= options.maxRounds) return;
@@ -1161,6 +1252,7 @@ export class ChatService {
       maxRounds: options.maxRounds,
       order: options.order,
       seenParticipantIds: options.seenParticipantIds,
+      invocation: options.invocation,
     });
   }
 
@@ -1170,6 +1262,7 @@ export class ChatService {
     userMessage: Message,
     participant: Participant,
     preacceptedRun: AgentRun | null = null,
+    invocation?: RuntimeInvocationContext,
   ) {
     const key = replyScheduleKey(conversationId, participant.id);
     if (this.activeReplyKeys.has(key)) {
@@ -1196,13 +1289,16 @@ export class ChatService {
         }
         const latest = this.repo.getMessage(nextMessage.id);
         if (!latest || latest.status === "recalled") break;
+        const currentInvocation = this.messageInvocationContexts.get(latest.id) ?? invocation;
         const generated = await this.generateForParticipant(
           roomId,
           conversationId,
           latest,
           currentParticipant,
           nextMessage.id === userMessage.id ? preacceptedRun : null,
+          currentInvocation,
         );
+        this.messageInvocationContexts.delete(latest.id);
         if (nextMessage.id === userMessage.id) requestedReply = generated;
         const pending = this.repo.consumePendingReply(conversationId, participant.id);
         if (!pending) {
@@ -1242,6 +1338,7 @@ export class ChatService {
     conversationId: string,
     userMessage: Message,
     participant: Participant,
+    invocation?: RuntimeInvocationContext,
   ): AgentRun | null {
     const latestUserMessage = this.repo.getMessage(userMessage.id);
     if (!latestUserMessage || latestUserMessage.status === "recalled") return null;
@@ -1264,6 +1361,8 @@ export class ChatService {
       userMessage: latestUserMessage,
       recentMessages,
       attachments,
+      agentDetectContext: invocation?.agentDetectContext,
+      managedAgentHeaders: invocation?.managedAgentHeaders,
     };
     const runDescriptor = provider.describeRun(runtimeContext);
     const run = this.repo.createAgentRun({
@@ -1273,6 +1372,7 @@ export class ChatService {
       assistantMessageId: null,
       triggerMessageId: latestUserMessage.id,
       runtime: runDescriptor.runtime,
+      agentTargetId: runDescriptor.agentTargetId,
       provider: runDescriptor.provider,
       model: runDescriptor.model,
       visibility: latestUserMessage.visibility,
@@ -1301,6 +1401,7 @@ export class ChatService {
     userMessage: Message,
     participant: Participant,
     preacceptedRun: AgentRun | null = null,
+    invocation?: RuntimeInvocationContext,
   ): Promise<Message | null> {
     const latestUserMessage = this.repo.getMessage(userMessage.id);
     if (!latestUserMessage || latestUserMessage.status === "recalled") return null;
@@ -1328,8 +1429,23 @@ export class ChatService {
       userMessage: latestUserMessage,
       recentMessages,
       attachments,
+      agentDetectContext: invocation?.agentDetectContext,
+      managedAgentHeaders: invocation?.managedAgentHeaders,
     };
     const runDescriptor = provider.describeRun(runtimeContext);
+    if (preacceptedRun && !agentRunMatchesRuntimeDescriptor(preacceptedRun, runDescriptor)) {
+      const errorText = "Agent runtime selection changed before execution.";
+      const finalRun = this.repo.updateAgentRun(preacceptedRun.id, { status: "failed", error: errorText });
+      this.events.emit({
+        type: "run.failed",
+        roomId,
+        conversationId,
+        runId: preacceptedRun.id,
+        payload: { run: finalRun },
+      });
+      this.toolTokens.revokeRun(preacceptedRun.id);
+      return null;
+    }
     const run = preacceptedRun
       ?? this.repo.createAgentRun({
         roomId,
@@ -1338,6 +1454,7 @@ export class ChatService {
         assistantMessageId: null,
         triggerMessageId: latestUserMessage.id,
         runtime: runDescriptor.runtime,
+        agentTargetId: runDescriptor.agentTargetId,
         provider: runDescriptor.provider,
         model: runDescriptor.model,
         visibility: latestUserMessage.visibility,
@@ -1805,6 +1922,7 @@ export class ChatService {
     sourceMessageId: string | null;
     sourceMessageIds: string[];
     sourcePreview: string;
+    invocation: RuntimeInvocationContext;
   }) {
     const conversation = this.repo.getConversation(input.conversationId);
     if (!conversation) return;
@@ -1825,6 +1943,8 @@ export class ChatService {
       recentMessages,
       attachments,
       runId: runtimeRunId,
+      agentDetectContext: input.invocation.agentDetectContext,
+      managedAgentHeaders: input.invocation.managedAgentHeaders,
     };
     const now = new Date().toISOString();
     const buildTask = (partial: Pick<PrivateTaskSnapshot, "status" | "content" | "error" | "updatedAt">): PrivateTaskSnapshot => ({
@@ -1982,26 +2102,39 @@ export class ChatService {
     const current = identityId ? this.repo.getIdentity(identityId) : null;
     const runtimeProfileId =
       input.defaultRuntimeProfileId === undefined
-        ? current?.defaultRuntimeProfileId ?? null
+        ? current?.defaultRuntimeProfileId ?? this.defaultAgentRuntimeProfile()?.id ?? null
         : input.defaultRuntimeProfileId;
-    if (!runtimeProfileId || input.model === undefined) return input;
+    const resolvedInput = runtimeProfileId && runtimeProfileId !== input.defaultRuntimeProfileId
+      ? { ...input, defaultRuntimeProfileId: runtimeProfileId }
+      : input;
+    if (!runtimeProfileId || input.model === undefined) return resolvedInput;
     const baseProfile = this.repo.getRuntimeProfile(runtimeProfileId);
-    if (!baseProfile) return input;
+    if (!baseProfile) return resolvedInput;
     const canonicalProfile = this.resolveCanonicalRuntimeProfile(baseProfile);
     const resolvedProfile = this.repo.ensureRuntimeProfileForModel(canonicalProfile, input.model);
-    return { ...input, defaultRuntimeProfileId: resolvedProfile.id };
+    return { ...resolvedInput, defaultRuntimeProfileId: resolvedProfile.id };
+  }
+
+  private defaultAgentRuntimeProfile() {
+    if (!this.defaultAgentTargetId) return null;
+    const profile = this.repo.listRuntimeProfiles().find((profile) =>
+      profile.kind === "local-agent"
+      && profile.agentTargetId === this.defaultAgentTargetId
+      && profile.enabled
+    ) ?? null;
+    return profile ? this.resolveCanonicalRuntimeProfile(profile) : null;
   }
 
   private resolveCanonicalRuntimeProfile(profile: RuntimeProfile) {
-    if (profile.kind === "local-agent" && profile.id === `local-agent:${profile.provider}`) return profile;
+    if (profile.kind !== "local-agent" || !profile.agentTargetId) return profile;
     const canonical = this.repo
       .listRuntimeProfiles()
-      .find(
-        (item) =>
-          item.kind === "local-agent" &&
-          item.provider === profile.provider &&
-          item.id === `local-agent:${item.provider}`,
-      );
+      .filter((item) => item.kind === "local-agent" && item.agentTargetId === profile.agentTargetId)
+      .sort((left, right) =>
+        left.id.length - right.id.length
+        || left.createdAt.localeCompare(right.createdAt)
+        || left.id.localeCompare(right.id)
+      )[0];
     return canonical ?? profile;
   }
 
@@ -2480,7 +2613,8 @@ function shouldSynthesizeAgentClonePlanningSummary(input: {
 }) {
   return input.providerId === "local-agent"
     && input.runtimeProfile?.kind === "local-agent"
-    && !parseTuttiAgentParticipantId(input.participant.id);
+    && !parseTuttiAgentParticipantId(input.participant.id)
+    && !parseLegacyTuttiAgentProviderParticipantId(input.participant.id);
 }
 
 function formatToolResultContent(event: Extract<RuntimeStreamEvent, { type: "tool_result" }>) {

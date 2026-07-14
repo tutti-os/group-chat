@@ -1,5 +1,13 @@
 # Group Chat 对齐任务计划
 
+## 2026-07 Agent ID migration
+
+- Local Agent selection is catalog-driven. The app loads the complete catalog from `GET /api/local-agent/agents` and persists the exact `agentTargetId` on runtime profiles, participants, runs, and provider-local session metadata.
+- `providerId` is open adapter metadata, not a selectable identity. Same-provider Agent targets remain distinct throughout mention resolution, composer options, skill loading, execution, and resume.
+- Provider-specific launcher assumptions are no longer exposed in the composer or AgentGUI dispatch path. Agent mentions are generated dynamically from available catalog targets.
+- Legacy provider-only rows and session files migrate only when the complete live catalog contains exactly one available and runtime-supported target for that provider. Missing, unavailable, unknown, or ambiguous matches fail closed.
+- Runtime detection and the pre-launch check both resolve the exact target with the same request-scoped managed detection context. A target that changes between those checks is rejected rather than silently switching Agents.
+
 本文把 `/Users/niuma/code/group-chat/out` 中适合 `group-chat` 的方案拆成可执行任务。目标不是复刻 group-chat 的完整产品，而是对齐本项目的核心方向：本地 agent 组成 IM 群聊，支持房间、成员、@、文件引用、角色个性和群聊回复策略。
 
 ## 对齐原则
@@ -203,26 +211,25 @@ Group Chat 把附件作为 content blocks 注入，并在 agent prompt 中渲染
   - stdout 兼容普通文本和 JSONL 事件：`text_delta`、`final_text`、`no_reply`、`error`。
   - `no_reply` 会映射到 Group Chat 风格 `[NO_REPLY]`，由 ChatService 走统一取消投影。
 - 已完成：按 `ai-media-canvas` 方案接入 `@tutti-os/agent-acp-kit`。
-  - 无自定义 stdin 命令时，`local-agent:codex` / `local-agent:claude` / kit catalog 内 provider 走 `createLocalAgentRuntime`。
+  - 无自定义 stdin 命令时，完整 Tutti Agent catalog 中可用且 runtime-supported 的精确 `agentTargetId` 走 `createDefaultLocalAgentRuntime`；`providerId` 只选择底层 adapter。
   - kit 负责 provider detect、Codex/Claude/ACP preset、process supervisor、JSONL/ACP/plain transport、MCP config delivery、provider-native resume metadata 和 normalized `AgentEvent`。
   - host 仍负责 IM 语义：run/message 投影、participant workspace、prompt envelope、tool token、tool gateway、`[NO_REPLY]` 取消投影。
   - 每次 run 会传入近期 durable history、system prompt、run-scoped MCP server、workspace cwd 和 provider resume metadata。
   - participant reasoning effort 可在房间成员编辑中设置；host 会写入 workspace 指令，并在 kit run 时传给支持 reasoning 的本地 provider。
-  - provider session metadata 写入 participant workspace `.group-chat/local-agent-sessions/{conversationId}.json`，下一轮同 provider 优先 `resume: { mode: "provider" }`，否则 fresh。
+  - Agent session metadata 写入 participant workspace `.group-chat/local-agent-sessions/{conversationId}.json`，下一轮仅允许同一精确 `agentTargetId` 使用 provider-native resume，否则 fresh。
   - 保留自定义命令桥：`GROUP_CHAT_LOCAL_AGENT_COMMAND` / `GROUP_CHAT_LOCAL_AGENT_CODEX_COMMAND` / `GROUP_CHAT_LOCAL_AGENT_CLAUDE_COMMAND` 仍走 `group-chat.local-agent.v1` stdin/stdout 协议。
-- 已完成：provider 可用性探测 API 和 UI 状态提示。
-  - `GET /api/local-agent/providers` 直接复用 kit detect，返回 provider、displayName、available、authState、executablePath、version、configDir、models 和不可用原因。
+- 已完成：Agent catalog 可用性探测 API 和 UI 状态提示。
+  - `GET /api/local-agent/agents` 返回完整 Agent 列表，保留精确 `agentTargetId`、catalog default、runtime support、availability、target-scoped composer options，以及开放的 provider adapter metadata。
   - Team member 默认 runtime 选择器和房间 participant runtime 编辑器会展示 `Ready` / `Needs setup`。
-  - Team 页面增加 Local providers 面板，按当前 `RuntimeProfile` 展示 Codex/Claude 等已配置 provider 的 readiness、version、model count、executable path，并支持手动刷新。
-  - Settings 页面增加 Runtime 基础页，集中展示 runtime profiles、local provider readiness，并提供手动刷新入口。
-  - UI 仍以本项目的 `RuntimeProfile` 为事实源；provider detect 只作为安装/认证/可用性提示，不把模型管理耦合进聊天业务。
+  - Team 和 Settings 页面从 catalog 动态展示当前 Agents，不预设 Codex、Claude 或固定 provider 集合，并支持手动刷新。
+  - UI 仍以本项目的 `RuntimeProfile` 为持久化事实源；catalog 是 Agent ID、安装/认证/可用性和 composer options 的实时事实源。
 - 已完成首版：kit thinking/tool 事件投影。
   - runtime provider 可以输出结构化 `RuntimeStreamEvent`，保留 kit 的 `thinking_delta`、`tool_call`、`tool_result`、`file_write`、`stderr` 等事件。
   - `ChatService` 把事件投影成 host-owned `MessageBlock`：`reasoning`、`tool_call`、`tool_result`、`artifact`、`error`，主回复仍写入 `main_text` 和 message content。
   - 前端消息流对 reasoning/tool/error block 做轻量事件卡片展示，不把 tool 事件混进普通 assistant 正文。
   - `[NO_REPLY]` 探测仍只看文本前缀；若 agent 先输出辅助事件再沉默，辅助 block 会被收尾，取消消息仍不展示。
 - 已完成：真实 CLI 兼容性 smoke 入口和本机回归。
-  - `pnpm --filter @group-chat/server local-agent:smoke -- --provider <codex|claude>` 会启动隔离 `GROUP_CHAT_HOME` 的临时后端，创建房间、identity、participant，发送一条消息并验证 assistant 成功完成。
+  - `pnpm --filter @group-chat/server local-agent:smoke -- --agent-id <agentTargetId>` 会启动隔离 `GROUP_CHAT_HOME` 的临时后端，创建房间、identity、participant，发送一条消息并验证 assistant 成功完成；省略参数时使用 catalog default。
   - 本机已验证 `codex-cli 0.139.0`：完整链路成功，最终内容 `group-chat smoke ok`，并真实产生多组 `tool_call` / `tool_result` blocks。
   - 本机已验证 `Claude Code 2.1.169`：完整链路成功，最终内容 `group-chat smoke ok`。
 - 已完成首版：active run cancellation。
@@ -288,32 +295,32 @@ Group Chat 把附件作为 content blocks 注入，并在 agent prompt 中渲染
 1. P0-B 结构化 @：直接影响群聊策略，是产品体感最强的第一步。
 2. P0-A 删除房间内 agent：补齐房间管理闭环。
 3. P0-C 文件引用注入：让“引用文件聊天”不仅能展示，也能被 agent 理解。
-4. P0-D Agent 个性文件：为本地 Codex/Claude 接入铺路。
+4. P0-D Agent 个性文件：为 catalog-discovered 本地 Agent 接入铺路。
 5. P0-E runtime 抽象：把 demo 迁到统一 runtime provider，再接真实 local agent。
 6. P1 listen mode：先解决多个 agent 什么时候接话。
 
 ## 当前代码差距
 
 - `ReplyPolicy`、participant listen mode、`[NO_REPLY]` 取消投影、trigger coalescing、持久化 reply queue、启动恢复、agent-to-agent follow-up rounds、speaking order 执行语义已存在。
-- `RuntimeProfile` 已 seed `local-agent:codex` / `local-agent:claude`，local-agent provider 已支持本地命令桥、稳定 stdin/stdout 协议和按 `ai-media-canvas` 方案接入的 `@tutti-os/agent-acp-kit`。
+- `RuntimeProfile` 由完整 Agent catalog 按精确 `agentTargetId` 同步，不再 seed 固定 Codex/Claude profile；legacy provider-only profile 只在唯一可用、runtime-supported target 时迁移，否则保持 disabled 并 fail closed。
 - 已有 agent workspace 文件、成功回复后的 raw memory 写入、确定性 memory 提炼/压缩和 `DISTILLED_CONTEXT.md` 注入；后续可继续接入 LLM distill，把启发式摘要升级为模型摘要。
-- 已有 structured attachment prompt context、Room files shelf、本地 agent tool gateway、run-scoped tool token、stdio MCP tool wrapping、local-agent 命令桥、JSONL 输出事件、kit-driven Codex/Claude/ACP provider、ACP prompt envelope、workspace-local provider resume metadata、provider detection UI、Settings Runtime 页、thinking/tool event block 展示和真实 Codex/Claude CLI smoke 回归入口。
+- 已有 structured attachment prompt context、Room files shelf、本地 agent tool gateway、run-scoped tool token、stdio MCP tool wrapping、local-agent 命令桥、JSONL 输出事件、catalog-driven open provider adapters、ACP prompt envelope、Agent-ID-scoped resume metadata、Agent catalog UI、Settings Runtime 页、thinking/tool event block 展示和按 Agent ID 的真实 CLI smoke 回归入口。
 - 已有 GUI 房间设置编辑、ConversationSidebar 房间搜索、添加成员时配置关键属性、Composer 回复目标预览、selected 模式手动选择 responders、conversation collaboration rules 首版、规则模板、审计历史、participant room-specific instructions 和 GUI Run Inspector。
 - `Tutti CLI gateway` 本期暂缓；当前阶段优先 GUI 场景和本地 agent 群聊体验。
 
 ## 回归入口
 
 - `pnpm smoke`
-  - 聚合运行 core flow、workspace materialization、Codex/Claude provider detect-only，适合作为常规本地验收入口。
-- `pnpm smoke:real-local-agents`
-  - 在 `pnpm smoke` 基础上额外运行真实 Codex/Claude local-agent 完整回归。
+  - 聚合运行 core flow、workspace materialization 和 live Agent catalog default target detect-only，适合作为常规本地验收入口。
+- `pnpm smoke:real-local-agents -- --agent-ids <id[,id...]>`
+  - 在 `pnpm smoke` 基础上额外运行指定 Agent ID（或 catalog default）的完整回归。
 - `pnpm e2e`
   - 构建前端并启动隔离 `GROUP_CHAT_HOME` 的临时后端，通过浏览器验证创建 team member、创建 local-agent member、Settings Runtime 页、创建 room、编辑房间设置、搜索房间、编辑 reply speaking order、selected 模式手动选择 responders、添加/删除 participant、添加 participant 时配置 room-specific settings、Composer 回复目标预览、GUI Run Inspector、@ mention 菜单、附件上传/移除、Room files shelf、房间文件二次引用/移除、发送消息、demo agent 回复和删除 room。
 - `pnpm --filter @group-chat/server core:smoke`
   - 通过公开 HTTP API 验证创建房间、更新房间设置、更新 reply policy、创建 identity、添加 participants、上传附件、结构化 @ 单个 agent、附件 message block、房间文件二次引用不破坏历史附件、active run cancellation、删除 participant 和删除 room。
 - `pnpm --filter @group-chat/server workspace:smoke`
   - 验证 identity workspace 文件、participant room workspace 文件、room-specific instructions、reasoning effort、raw conversation log、`DISTILLED_CONTEXT.md`、conversation summary 和 local-user memory 在 demo agent 回复后生成。
-- `pnpm --filter @group-chat/server local-agent:smoke -- --provider codex`
-  - 使用真实 Codex CLI 验证 kit-driven local-agent 主链、run/message/block 投影和 run-scoped tool gateway。
-- `pnpm --filter @group-chat/server local-agent:smoke -- --provider claude`
-  - 使用真实 Claude Code 验证 kit-driven local-agent 主链。
+- `pnpm --filter @group-chat/server local-agent:smoke -- --detect-only`
+  - 从 live Agent catalog 读取当前完整 Agent 列表，并验证 default target 可检测，不启动真实 turn。
+- `pnpm --filter @group-chat/server local-agent:smoke -- --agent-id '<exact-agent-target-id>'`
+  - 使用 catalog 返回的精确 Agent ID 验证 kit-driven local-agent 主链、run/message/block 投影和 run-scoped tool gateway。

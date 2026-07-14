@@ -300,7 +300,7 @@ test("workspace app mentions keep structured context for the mentioned agent", a
   }
 });
 
-test("workspace app-only task routes to a local app dispatcher", async () => {
+test("workspace app-only task fails closed before an Agent catalog is loaded", async () => {
   const home = await mkdtemp(join(tmpdir(), "group-chat-workspace-app-only-"));
   const agentScript = join(home, "agent-command.mjs");
   const checkScript = join(home, "check-workspace-app-only.ts");
@@ -369,28 +369,10 @@ test("workspace app-only task routes to a local app dispatcher", async () => {
           maxReplyRounds: 1,
         });
 
-        assert.equal(result.targets.length, 1);
-        assert.equal(result.targets[0].runtimeProfileId, "local-agent:codex");
-        assert.equal(result.targets[0].displayName, "产品原型设计");
+        assert.equal(result.targets.length, 0);
         assert.equal(result.message.mentions.length, 1);
         assert.equal(result.message.mentions[0].mentionType, "reference");
-
-        const deadline = Date.now() + 5_000;
-        while (Date.now() < deadline) {
-          const snapshot = service.bootstrap();
-          const assistant = snapshot.messages.find((message) =>
-            message.conversationId === conversation.id
-            && message.role === "assistant"
-            && message.content === "app-agent-ok"
-          );
-          if (assistant) {
-            closeDb();
-            return;
-          }
-          await new Promise((resolve) => setTimeout(resolve, 50));
-        }
         closeDb();
-        assert.fail("timed out waiting for app-only dispatcher reply");
       }
       main().catch((error) => {
         console.error(error);
@@ -563,6 +545,10 @@ test("codex local agent skips Tutti skill bundle for simple participant mentions
   await writeFile(
     fakeTutti,
     `#!/usr/bin/env node
+      if (process.argv.join(" ").includes("agent list")) {
+        console.log(JSON.stringify({ schemaVersion: 1, defaultAgentTargetId: "agent-1", agents: [{ id: "agent-1", provider: "codex", name: "Primary Agent", availability: { status: "available", reasonCode: "ready", detail: "" } }] }));
+        process.exit(0);
+      }
       console.error("Tutti skill bundle should not be loaded for simple participant mentions");
       process.exit(2);
     `,
@@ -708,6 +694,10 @@ test("codex local agent continues when required Tutti skill bundle command is un
   await writeFile(
     fakeTutti,
     `#!/usr/bin/env node
+      if (process.argv.join(" ").includes("agent list")) {
+        console.log(JSON.stringify({ schemaVersion: 1, defaultAgentTargetId: "agent-1", agents: [{ id: "agent-1", provider: "codex", name: "Primary Agent", availability: { status: "available", reasonCode: "ready", detail: "" } }] }));
+        process.exit(0);
+      }
       console.error("unknown command: " + process.argv.slice(2).join(" "));
       process.exit(2);
     `,
@@ -874,6 +864,10 @@ test("codex local agent falls back to minimal context after repeated context win
   await writeFile(
     fakeTutti,
     `#!/usr/bin/env node
+      if (process.argv.join(" ").includes("agent list")) {
+        console.log(JSON.stringify({ schemaVersion: 1, defaultAgentTargetId: "agent-1", agents: [{ id: "agent-1", provider: "codex", name: "Primary Agent", availability: { status: "available", reasonCode: "ready", detail: "" } }] }));
+        process.exit(0);
+      }
       const repeated = "PROMPT_INJECTION_MARKER ".repeat(200);
       console.log(JSON.stringify({
         provider: "codex",
@@ -1372,13 +1366,15 @@ test("virtual Tutti agent replies keep native process without synthetic tool thi
         const { ChatRepository } = await import(${JSON.stringify(chatRepositoryModuleUrl)});
         const { EventHub } = await import(${JSON.stringify(eventHubModuleUrl)});
         const { AgentToolTokenStore } = await import(${JSON.stringify(tokenStoreModuleUrl)});
-        const service = new ChatService(new ChatRepository(), new EventHub(), new AgentToolTokenStore());
+        const repo = new ChatRepository();
+        const service = new ChatService(repo, new EventHub(), new AgentToolTokenStore());
+        repo.syncLocalAgentCatalog({ agents: [{ agentTargetId: "agent-1", providerId: "codex", displayName: "Primary Agent", available: true, runtimeSupported: true }] });
         service.runtimes = {
           getProvider() {
             return {
               id: "local-agent",
               canHandle: () => true,
-              describeRun: () => ({ runtime: "local-agent", provider: "codex", model: "codex:default" }),
+              describeRun: () => ({ runtime: "local-agent", agentTargetId: "agent-1", provider: "codex", model: "default" }),
               detect: async () => ({ available: true }),
               cancel: async () => ({ cancelled: false }),
               async *streamReply() {
@@ -1394,29 +1390,29 @@ test("virtual Tutti agent replies keep native process without synthetic tool thi
         service.bootstrap();
         const { conversation } = service.createRoom({ title: "Tutti agent process", description: "" });
         service.sendMessage(conversation.id, {
-          content: "[Codex](mention://workspace-app/agent-codex?workspaceId=ws-1) 处理一下",
+          content: "[Primary Agent](mention://agent-session/agent-1?workspaceId=ws-1) 处理一下",
           mentions: [{
             mentionType: "reference",
-            participantId: "tutti-at:workspace-app:agent-codex",
-            referenceProviderId: "workspace-app",
-            referenceEntityId: "agent-codex",
-            displayNameSnapshot: "Codex",
+            participantId: "tutti-at:agent-session:agent-1",
+            referenceProviderId: "agent-session",
+            referenceEntityId: "agent-1",
+            displayNameSnapshot: "Primary Agent",
             referenceScope: {
               workspaceId: "ws-1",
               groupChatLocalAgentMention: "true",
-              groupChatRuntimeProvider: "codex",
-              groupChatRuntimeProfileId: "local-agent:codex",
+              groupChatAgentTargetId: "agent-1",
+              groupChatRuntimeProfileId: "local-agent:agent-1",
             },
             referenceInsert: {
               kind: "mention",
               mention: {
-                entityId: "agent-codex",
-                label: "Codex",
+                entityId: "agent-1",
+                label: "Primary Agent",
                 scope: {
                   workspaceId: "ws-1",
                   groupChatLocalAgentMention: "true",
-                  groupChatRuntimeProvider: "codex",
-                  groupChatRuntimeProfileId: "local-agent:codex",
+                  groupChatAgentTargetId: "agent-1",
+                  groupChatRuntimeProfileId: "local-agent:agent-1",
                 },
               },
             },
@@ -1428,11 +1424,11 @@ test("virtual Tutti agent replies keep native process without synthetic tool thi
         const deadline = Date.now() + 5_000;
         while (Date.now() < deadline) {
           snapshot = service.bootstrap();
-          const run = snapshot.agentRuns.find((item) => item.participantId === "tutti-agent:codex");
+          const run = snapshot.agentRuns.find((item) => item.participantId === "tutti-agent:target:agent-1");
           if (run?.status === "completed") break;
           await new Promise((resolve) => setTimeout(resolve, 25));
         }
-        const run = snapshot.agentRuns.find((item) => item.participantId === "tutti-agent:codex");
+        const run = snapshot.agentRuns.find((item) => item.participantId === "tutti-agent:target:agent-1");
         assert.equal(run?.status, "completed");
         const events = snapshot.agentRunEvents.filter((event) => event.runId === run.id);
         const thinking = events.find((event) => event.type === "thinking_delta");

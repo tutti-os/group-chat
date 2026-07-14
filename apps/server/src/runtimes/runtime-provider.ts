@@ -1,12 +1,18 @@
 import type {
   Artifact,
+  AgentRun,
   Conversation,
   Identity,
-  LocalAgentProviderStatus,
+  LocalAgentTargetStatusResponse,
   Message,
   Participant,
   RuntimeProfile,
 } from "@group-chat/shared";
+import type {
+  DetectContext,
+  ManagedAgentInvocationCredentialHeaders,
+  ManagedAgentRunContext,
+} from "@tutti-os/agent-acp-kit";
 
 export interface RuntimeReplyContext {
   runId?: string;
@@ -21,12 +27,26 @@ export interface RuntimeReplyContext {
   userMessage: Message;
   recentMessages: Message[];
   attachments: Artifact[];
+  agentDetectContext?: DetectContext;
+  managedAgentHeaders?: ManagedAgentInvocationCredentialHeaders;
+  managedAgentRunContext?: ManagedAgentRunContext;
 }
 
 export interface RuntimeRunDescriptor {
   runtime: string;
+  agentTargetId: string | null;
   provider: string;
   model: string;
+}
+
+export function agentRunMatchesRuntimeDescriptor(
+  run: Pick<AgentRun, "runtime" | "agentTargetId" | "provider" | "model">,
+  descriptor: RuntimeRunDescriptor,
+) {
+  return run.runtime === descriptor.runtime
+    && run.agentTargetId === descriptor.agentTargetId
+    && run.provider === descriptor.provider
+    && run.model === descriptor.model;
 }
 
 export type RuntimeStreamEvent =
@@ -52,7 +72,7 @@ export interface RuntimeProvider {
   canHandle(runtimeProfile: RuntimeProfile | null): boolean;
   describeRun(context: RuntimeReplyContext): RuntimeRunDescriptor;
   detect(context: RuntimeReplyContext): Promise<{ available: boolean; reason?: string }>;
-  listLocalAgentProviders?(): Promise<LocalAgentProviderStatus[]>;
+  listLocalAgentTargets?(detectContext?: DetectContext): Promise<LocalAgentTargetStatusResponse>;
   streamReply(context: RuntimeReplyContext): AsyncIterable<string | RuntimeStreamEvent>;
   compactContext?(context: RuntimeReplyContext): Promise<void>;
   cancel(runId: string): Promise<{ cancelled: boolean; reason?: string }>;

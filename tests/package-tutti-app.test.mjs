@@ -59,7 +59,7 @@ test("createManifest returns the Tutti package manifest contract", () => {
     author: {
       name: "Tutti",
     },
-    tags: ["local-first", "agent", "chat", "team"],
+    tags: ["local-first", "agent", "agent-catalog", "chat", "team"],
   });
 });
 

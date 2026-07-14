@@ -33,6 +33,10 @@ try {
   server.stderr.on("data", (chunk) => process.stderr.write(prefixLines("server", chunk)));
 
   await waitForHealth(baseUrl, timeoutMs);
+  const catalog = await api("/api/local-agent/agents");
+  const defaultAgent = catalog.agents.find((agent) => agent.agentTargetId === catalog.defaultAgentTargetId && agent.available);
+  assert(defaultAgent, "live Agent catalog has no available default target");
+  const runtimeProfileId = findRuntimeProfileId(await api("/api/bootstrap"), defaultAgent.agentTargetId);
   const roomBundle = await api("/api/rooms", {
     method: "POST",
     body: JSON.stringify({
@@ -69,10 +73,10 @@ try {
     }),
   });
 
-  const agentA = await createIdentity("Agent Smoke A", "A1", "local-agent:codex");
-  const agentB = await createIdentity("Agent Smoke B", "B1", "local-agent:codex");
-  const agentAParticipant = await addParticipant(conversation.id, agentA.identity.id, "local-agent:codex");
-  const agentBParticipant = await addParticipant(conversation.id, agentB.identity.id, "local-agent:codex");
+  const agentA = await createIdentity("Agent Smoke A", "A1", runtimeProfileId);
+  const agentB = await createIdentity("Agent Smoke B", "B1", runtimeProfileId);
+  const agentAParticipant = await addParticipant(conversation.id, agentA.identity.id, runtimeProfileId);
+  const agentBParticipant = await addParticipant(conversation.id, agentB.identity.id, runtimeProfileId);
 
   const artifactResult = await api(`/api/conversations/${conversation.id}/artifacts`, {
     method: "POST",
@@ -354,6 +358,12 @@ function parseArgs(argv) {
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+function findRuntimeProfileId(snapshot, agentTargetId) {
+  const profile = snapshot.runtimeProfiles.find((item) => item.agentTargetId === agentTargetId && item.enabled);
+  assert(profile, `missing runtime profile for Agent target ${agentTargetId}`);
+  return profile.id;
 }
 
 function delay(ms) {

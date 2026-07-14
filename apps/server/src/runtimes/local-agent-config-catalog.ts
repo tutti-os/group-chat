@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { LocalAgentProviderModel, LocalAgentProviderStatus, ReasoningEffort } from "@group-chat/shared";
+import type { LocalAgentProviderModel, LocalAgentTargetStatus, ReasoningEffort } from "@group-chat/shared";
 
 const REASONING_EFFORTS = new Set<ReasoningEffort>(["low", "medium", "high", "xhigh"]);
 
@@ -82,14 +82,14 @@ function parseCodexModelsCache(configDir: string): LocalAgentProviderModel[] {
   }
 }
 
-function needsModelCatalogEnrichment(provider: LocalAgentProviderStatus) {
+function needsModelCatalogEnrichment(provider: LocalAgentTargetStatus) {
   if (!provider.available) return false;
   if (provider.models.length === 0) return true;
   return provider.models.length === 1 && provider.models[0]?.id === "default";
 }
 
-export function enrichLocalAgentProviderStatus(provider: LocalAgentProviderStatus): LocalAgentProviderStatus {
-  if (provider.provider !== "codex" || !provider.configDir || !needsModelCatalogEnrichment(provider)) {
+export function enrichLocalAgentProviderStatus(provider: LocalAgentTargetStatus): LocalAgentTargetStatus {
+  if (provider.providerId !== "codex" || !provider.configDir || !needsModelCatalogEnrichment(provider)) {
     return provider;
   }
 

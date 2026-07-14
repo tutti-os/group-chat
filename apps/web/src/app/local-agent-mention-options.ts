@@ -1,6 +1,4 @@
 import type { Identity, LocalAgentProviderStatus, Participant, RuntimeProfile } from "@group-chat/shared";
-import { localAgentLauncherAppId } from "./agent-launcher-mentions.js";
-import { isAgentLauncherAvailable } from "./agent-launcher-availability.js";
 import { defaultIdentityNameForRuntime, listCanonicalRuntimeProfiles, localAgentStatus } from "./runtime.js";
 import type { TuttiAtQueryResult } from "./tutti-bridge.js";
 import { readCachedTuttiWorkspaceId } from "./tutti-bridge.js";
@@ -25,47 +23,28 @@ export function localAgentMentionSubtitle(
 }
 
 export function buildLocalAgentLauncherReference(option: LocalAgentMentionOption): TuttiAtQueryResult {
-  const appId = localAgentLauncherAppId(option.runtimeProfile.provider);
   const localAgentScope: Record<string, string> = {
     groupChatLocalAgentMention: "true",
-    groupChatRuntimeProvider: option.runtimeProfile.provider,
+    groupChatAgentTargetId: option.runtimeProfile.agentTargetId ?? "",
     groupChatRuntimeProfileId: option.runtimeProfile.id,
   };
   if (option.participant) {
     localAgentScope.groupChatParticipantId = option.participant.id;
     localAgentScope.groupChatParticipantLabel = option.label;
   }
-  if (appId) {
-    const scope: Record<string, string> = { ...localAgentScope };
-    const workspaceId = readCachedTuttiWorkspaceId()?.trim();
-    if (workspaceId) scope.workspaceId = workspaceId;
-    return {
-      providerId: "workspace-app",
-      itemId: appId,
-      label: option.label,
-      subtitle: option.subtitle,
-      insert: {
-        kind: "mention",
-        mention: {
-          entityId: appId,
-          label: option.label,
-          scope,
-        },
-      },
-    };
-  }
-
-  const scope: Record<string, string> = { provider: option.runtimeProfile.provider, ...localAgentScope };
+  const scope: Record<string, string> = { ...localAgentScope };
+  const workspaceId = readCachedTuttiWorkspaceId()?.trim();
+  if (workspaceId) scope.workspaceId = workspaceId;
 
   return {
     providerId: "agent-session",
-    itemId: option.runtimeProfile.id,
+    itemId: option.runtimeProfile.agentTargetId ?? option.runtimeProfile.id,
     label: option.label,
     subtitle: option.subtitle,
     insert: {
       kind: "mention",
       mention: {
-        entityId: option.runtimeProfile.id,
+        entityId: option.runtimeProfile.agentTargetId ?? option.runtimeProfile.id,
         label: option.label,
         scope,
       },
@@ -92,7 +71,7 @@ export function findParticipantForLocalAgentProfile(
       : null;
     if (
       runtime?.kind === "local-agent"
-      && runtime.provider === profile.provider
+      && runtime.agentTargetId === profile.agentTargetId
       && candidateNames.has(normalizeLocalAgentDisplayName(participant.displayName))
     ) {
       return participant;
@@ -121,14 +100,7 @@ export function buildLocalAgentMentionOptions(
   for (const profile of listCanonicalRuntimeProfiles(runtimeProfiles)) {
     if (profile.kind !== "local-agent") continue;
     const status = localAgentStatus(profile, localAgentProviders);
-    const launcherAppId = localAgentLauncherAppId(profile.provider);
-    if (launcherAppId && !isAgentLauncherAvailable(
-      launcherAppId,
-      availableLauncherAppIds,
-      status?.available === true,
-      agentGuiBridgeAvailable,
-    )) continue;
-    if (!launcherAppId && !status?.available) continue;
+    if (!status?.available) continue;
 
     const label = defaultIdentityNameForRuntime(profile, localAgentProviders);
     const subtitle = status
@@ -143,6 +115,7 @@ export function buildLocalAgentMentionOptions(
 
     const haystack = [
       label,
+      profile.agentTargetId ?? "",
       profile.provider,
       profile.id,
       profile.displayName,

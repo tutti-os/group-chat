@@ -8,6 +8,7 @@ export interface LocalAgentContextWindowUsage {
 }
 
 export interface StoredLocalAgentSession {
+  agentTargetId?: string;
   provider: string;
   providerSessionId?: string;
   resumeToken?: string;
@@ -57,6 +58,7 @@ export class LocalAgentSessionStore {
   updateUsage(
     conversationId: string,
     input: {
+      agentTargetId: string;
       provider: string;
       model: string | null;
       usage: unknown;
@@ -65,6 +67,7 @@ export class LocalAgentSessionStore {
     const contextWindow = extractContextWindowUsage(input.usage);
     this.write(conversationId, {
       provider: input.provider,
+      agentTargetId: input.agentTargetId,
       model: input.model,
       usage: input.usage,
       contextWindow,
@@ -72,9 +75,10 @@ export class LocalAgentSessionStore {
     });
   }
 
-  markCompacted(conversationId: string, input: { provider: string; model: string | null }) {
+  markCompacted(conversationId: string, input: { agentTargetId: string; provider: string; model: string | null }) {
     this.write(conversationId, {
       provider: input.provider,
+      agentTargetId: input.agentTargetId,
       model: input.model,
       compactedAt: new Date().toISOString(),
     });
