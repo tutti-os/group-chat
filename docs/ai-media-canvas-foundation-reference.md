@@ -45,13 +45,13 @@
 - `AgentRunService`：创建、取消、消费 run，维护内存中的 active run。
 - `AgentRunOrchestrator`：负责 run/message/event 的产品语义，处理事件投影、持久化、发布、assistant message 更新。
 - `Runtime Control Plane`：选择 runtime，处理 runtime 可用性、并发、health、lease。
-- `Runtime Provider`：具体执行 agent，例如 `server-deepagent` 或 `local-agent:codex`。
+- `Runtime Provider`：具体执行 agent，例如 `server-deepagent` 或由精确 `agentTargetId` 驱动的 `local-agent`；provider 名称只作为 adapter metadata。
 - `Event Adapter`：把底层 agent events 统一映射为应用的 `StreamEvent`。
 
 `ai-media-canvas` 中的运行时类型大致是：
 
 - `server-deepagent`：服务端直接拥有 agent loop，使用 deepagents/LangChain 工具。
-- `local-agent`：服务端启动用户本机 CLI agent，通过 `@tutti-os/agent-acp-kit` 适配 Codex、Claude 等 provider。
+- `local-agent`：服务端从完整 Tutti Agent catalog 选择精确 Agent target，再通过 `@tutti-os/agent-acp-kit` 的开放 provider adapter 启动用户本机 CLI agent。
 
 新应用应保留这类抽象，即使 P0 只实现一个 runtime，也不要把上层产品逻辑写死在某个 CLI 或 SDK 上。
 

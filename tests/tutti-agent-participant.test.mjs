@@ -28,6 +28,7 @@ const conversation = {
 const runtimeProfile = {
   id: "local-agent:codex",
   kind: "local-agent",
+  agentTargetId: "workspace/agent:primary",
   provider: "codex",
   model: "codex:default",
   displayName: "Codex Local Agent",
@@ -42,19 +43,24 @@ const runtimeProfile = {
 test("virtual Tutti agent participants use stable non-clone ids", async () => {
   const {
     createVirtualTuttiAgentParticipant,
-    localAgentProviderFromLauncherAppId,
+    localAgentTargetFromLauncherAppId,
+    parseLegacyTuttiAgentProviderParticipantId,
     parseTuttiAgentParticipantId,
     tuttiAgentParticipantId,
   } = await loadModule();
 
-  assert.equal(localAgentProviderFromLauncherAppId("agent-codex"), "codex");
-  assert.equal(tuttiAgentParticipantId("codex"), "tutti-agent:codex");
-  assert.equal(parseTuttiAgentParticipantId("tutti-agent:codex"), "codex");
+  assert.equal(localAgentTargetFromLauncherAppId("agent-target:workspace/agent:primary"), "workspace/agent:primary");
+  assert.equal(tuttiAgentParticipantId("workspace/agent:primary"), "tutti-agent:target:workspace%2Fagent%3Aprimary");
+  assert.equal(parseTuttiAgentParticipantId("tutti-agent:target:workspace%2Fagent%3Aprimary"), "workspace/agent:primary");
+  assert.equal(parseTuttiAgentParticipantId("tutti-agent:codex"), "");
+  assert.equal(parseLegacyTuttiAgentProviderParticipantId("tutti-agent:codex"), "codex");
+  assert.equal(parseLegacyTuttiAgentProviderParticipantId("tutti-agent:target:codex"), "");
 
   const participant = createVirtualTuttiAgentParticipant(conversation, runtimeProfile);
-  assert.equal(participant.id, "tutti-agent:codex");
+  assert.equal(participant.id, "tutti-agent:target:workspace%2Fagent%3Aprimary");
   assert.equal(participant.conversationId, "conversation-1");
-  assert.equal(participant.displayName, "Codex");
+  assert.equal(participant.displayName, "Codex Local Agent");
+  assert.equal(participant.agentTargetId, "workspace/agent:primary");
   assert.equal(participant.runtimeProfileId, "local-agent:codex");
   assert.equal(participant.identityId, null);
   assert.equal(participant.status, "active");

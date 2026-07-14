@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { Bot, Loader2 } from "lucide-react";
-import { defaultTuttiAgentParticipantName, isLocalUserMessage, parseTuttiAgentParticipantId, resolveAgentRunVisibility, type AgentRun,
+import { defaultTuttiAgentParticipantName, isLocalUserMessage, parseLegacyTuttiAgentProviderParticipantId, parseTuttiAgentParticipantId, resolveAgentRunVisibility, type AgentRun,
   type ChatSnapshot,
   type Conversation,
   type ConversationMessagesPage,
@@ -29,7 +29,7 @@ import {
   deleteParticipant,
   deleteRoom,
   fetchConversationMessages,
-  fetchLocalAgentProviders,
+  fetchLocalAgentTargets,
   fetchSnapshot,
   type SendMessageResponse,
   sendMessage,
@@ -160,10 +160,11 @@ interface TimelinePageWindow {
   hasMore: boolean;
 }
 
-/** Virtual Tutti agent participants (id like "tutti-agent:codex") are never persisted to state.participants, so derive their label from the id instead of falling back to a generic name. */
+/** Virtual Agent participants are not persisted, so use the exact target id as the final label fallback. */
 function tuttiAgentParticipantDisplayName(participantId: string | null | undefined) {
-  const provider = parseTuttiAgentParticipantId(participantId);
-  return provider ? defaultTuttiAgentParticipantName(provider) : null;
+  const agentTargetId = parseTuttiAgentParticipantId(participantId)
+    || parseLegacyTuttiAgentProviderParticipantId(participantId);
+  return agentTargetId ? defaultTuttiAgentParticipantName(agentTargetId) : null;
 }
 
 export function App() {
@@ -246,8 +247,25 @@ export function App() {
   const refreshLocalAgentProviders = useCallback(async () => {
     setRefreshingLocalAgentProviders(true);
     try {
-      const result = await fetchLocalAgentProviders();
-      setLocalAgentProviders((current) => sameLocalAgentProviders(current, result.providers) ? current : result.providers);
+      const result = await fetchLocalAgentTargets();
+      const agents = result.defaultAgentTargetId
+        ? [...result.agents].sort((left, right) =>
+            Number(right.agentTargetId === result.defaultAgentTargetId)
+            - Number(left.agentTargetId === result.defaultAgentTargetId)
+          )
+        : result.agents;
+      setLocalAgentProviders((current) => sameLocalAgentProviders(current, agents) ? current : agents);
+      const snapshot = await fetchSnapshot(MESSAGE_PAGE_SIZE);
+      lastSeqRef.current = Math.max(lastSeqRef.current, snapshot.lastSeq);
+      const nextState = normalizeSnapshot(snapshot);
+      setState((current) => current.lastSeq > snapshot.lastSeq
+        ? {
+            ...current,
+            runtimeProfiles: nextState.runtimeProfiles,
+            participants: nextState.participants,
+            identities: nextState.identities,
+          }
+        : nextState);
     } catch {
       // Keep the last known provider list; transient bridge errors should not make the @ menu jump.
     } finally {

@@ -15,7 +15,7 @@ async function loadModule() {
   return import(`${pathToFileURL(output)}?t=${Date.now()}`);
 }
 
-test("keeps the latest Dock agent list available synchronously after reload", async () => {
+test("filters legacy provider launchers out of Dock discovery and cache", async () => {
   const storage = new Map();
   globalThis.localStorage = {
     getItem: (key) => storage.get(key) ?? null,
@@ -38,11 +38,11 @@ test("keeps the latest Dock agent list available synchronously after reload", as
   };
 
   const first = await loadModule();
-  assert.deepEqual([...await first.fetchAvailableAgentLauncherAppIds({ force: true })], ["agent-codex"]);
+  assert.deepEqual([...await first.fetchAvailableAgentLauncherAppIds({ force: true })], []);
 
   delete globalThis.window.tuttiExternal.at;
   const reloaded = await loadModule();
-  assert.deepEqual([...reloaded.readCachedAvailableAgentLauncherAppIds()], ["agent-codex"]);
+  assert.deepEqual([...reloaded.readCachedAvailableAgentLauncherAppIds()], []);
 
   delete globalThis.window;
   delete globalThis.localStorage;

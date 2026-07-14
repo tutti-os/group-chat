@@ -7,6 +7,7 @@ import { ChatRepository } from "./chat-repository.js";
 import {
   createVirtualTuttiAgentParticipant,
   defaultTuttiAgentParticipantName,
+  parseLegacyTuttiAgentProviderParticipantId,
   parseTuttiAgentParticipantId,
 } from "./tutti-agent-participant.js";
 
@@ -62,15 +63,31 @@ export class AgentToolGateway {
   private resolveToolParticipant(participantId: string, conversationId: string) {
     const participant = this.repo.getParticipant(participantId);
     if (participant) return participant;
-    const provider = parseTuttiAgentParticipantId(participantId);
-    if (!provider) return null;
-    const runtimeProfile = this.repo.getRuntimeProfile(`local-agent:${provider}`);
+    const participantTargetId = parseTuttiAgentParticipantId(participantId);
+    const legacyProviderId = parseLegacyTuttiAgentProviderParticipantId(participantId);
+    if (!participantTargetId && !legacyProviderId) return null;
+    const profiles = this.repo.listRuntimeProfiles().filter((profile) =>
+      profile.kind === "local-agent" && profile.enabled && Boolean(profile.agentTargetId)
+    );
+    let runtimeProfile = profiles.find((profile) => profile.agentTargetId === participantTargetId) ?? null;
+    if (!runtimeProfile && legacyProviderId) {
+      const providerId = canonicalProviderId(legacyProviderId);
+      const providerTargets = [...new Set(
+        profiles
+          .filter((profile) => canonicalProviderId(profile.provider) === providerId)
+          .map((profile) => profile.agentTargetId)
+          .filter((targetId): targetId is string => Boolean(targetId)),
+      )];
+      runtimeProfile = providerTargets.length === 1
+        ? profiles.find((profile) => profile.agentTargetId === providerTargets[0]) ?? null
+        : null;
+    }
     const conversation = this.repo.getConversation(conversationId);
     if (!conversation || runtimeProfile?.kind !== "local-agent") return null;
     return createVirtualTuttiAgentParticipant(
       conversation,
       runtimeProfile,
-      defaultTuttiAgentParticipantName(provider),
+      defaultTuttiAgentParticipantName(runtimeProfile.displayName),
     );
   }
 
@@ -161,4 +178,9 @@ export class AgentToolGateway {
 
     return { artifact };
   }
+}
+
+function canonicalProviderId(providerId: string) {
+  const normalized = providerId.trim().toLowerCase();
+  return normalized === "claude" ? "claude-code" : normalized;
 }

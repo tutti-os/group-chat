@@ -475,7 +475,13 @@ function readTextFile(path: string) {
 
 function buildContextUsage(input: { conversation: Conversation; participant: Participant }): AgentContextUsage {
   const root = participantWorkspaceRoot(input.conversation.roomId, input.participant.id);
-  const providerSession = new LocalAgentSessionStore(root).read(input.conversation.id);
+  const storedProviderSession = new LocalAgentSessionStore(root).read(input.conversation.id);
+  const participantTargetId = input.participant.agentTargetId?.trim() ?? "";
+  const sessionTargetId = storedProviderSession?.agentTargetId?.trim() ?? "";
+  const providerSession = storedProviderSession
+    && (participantTargetId ? sessionTargetId === participantTargetId : !sessionTargetId)
+    ? storedProviderSession
+    : null;
   const contextWindow = providerSession?.contextWindow ?? null;
   const rawConversationLog = readTextFile(join(root, "conversations", `${input.conversation.id}.md`));
   const conversationSummary = readTextFile(join(root, "conversations", `${input.conversation.id}.summary.md`));

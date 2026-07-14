@@ -7,6 +7,10 @@ import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import fastifyWebsocket from "@fastify/websocket";
 import Fastify from "fastify";
+import {
+  createManagedAgentDetectContextFromHeaders,
+  type ManagedAgentInvocationCredentialHeaders,
+} from "@tutti-os/agent-acp-kit";
 import type {
   AddParticipantRequest,
   CreateIdentityRequest,
@@ -130,7 +134,9 @@ server.put<{ Body: Partial<StoredUserProfile> }>("/api/user-profile", async (req
   return { profile };
 });
 
-server.get("/api/local-agent/providers", async () => chat.listLocalAgentProviders());
+server.get("/api/local-agent/agents", async (request) =>
+  chat.listLocalAgentTargets(createManagedAgentDetectContextFromHeaders(request.headers))
+);
 
 server.post<{ Body: unknown }>("/tutti/cli/conversations/list", async (request, reply) =>
   sendCliOutput(reply, listConversationsCliOutput(chat.bootstrap(), normalizeCliEnvelope(request.body))),
@@ -244,7 +250,13 @@ server.post<{ Params: { conversationId: string }; Body: PrivateTaskRequest }>(
   "/api/conversations/:conversationId/private-tasks",
   async (request, reply) => {
     try {
-      return chat.runPrivateTask(request.params.conversationId, request.body ?? {});
+      const managedAgentHeaders = request.headers as ManagedAgentInvocationCredentialHeaders;
+      const agentDetectContext = createManagedAgentDetectContextFromHeaders(managedAgentHeaders);
+      await chat.listLocalAgentTargets(agentDetectContext);
+      return chat.runPrivateTask(request.params.conversationId, request.body ?? {}, {
+        agentDetectContext,
+        managedAgentHeaders,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to start private task";
       return reply.code(400).send({ error: message });
@@ -271,7 +283,15 @@ server.get<{ Params: { conversationId: string } }>(
 
 server.post<{ Params: { conversationId: string }; Body: SendMessageRequest }>(
   "/api/conversations/:conversationId/messages",
-  async (request) => chat.sendMessage(request.params.conversationId, request.body),
+  async (request) => {
+    const managedAgentHeaders = request.headers as ManagedAgentInvocationCredentialHeaders;
+    const agentDetectContext = createManagedAgentDetectContextFromHeaders(managedAgentHeaders);
+    await chat.listLocalAgentTargets(agentDetectContext);
+    return chat.sendMessage(request.params.conversationId, request.body, {
+      agentDetectContext,
+      managedAgentHeaders,
+    });
+  },
 );
 
 server.get<{ Params: { conversationId: string }; Querystring: { limit?: string; cursor?: string } }>(
@@ -290,7 +310,13 @@ server.patch<{ Params: { messageId: string }; Body: UpdateMessageRequest }>(
   "/api/messages/:messageId",
   async (request, reply) => {
     try {
-      const result = await chat.updateMessage(request.params.messageId, request.body);
+      const managedAgentHeaders = request.headers as ManagedAgentInvocationCredentialHeaders;
+      const agentDetectContext = createManagedAgentDetectContextFromHeaders(managedAgentHeaders);
+      await chat.listLocalAgentTargets(agentDetectContext);
+      const result = await chat.updateMessage(request.params.messageId, request.body, {
+        agentDetectContext,
+        managedAgentHeaders,
+      });
       if (!result) return reply.code(404).send({ error: "Message not found" });
       return result;
     } catch (error) {
@@ -427,7 +453,13 @@ server.post<{ Params: { conversationId: string; participantId: string } }>(
   "/api/conversations/:conversationId/participants/:participantId/context-compact",
   async (request, reply) => {
     try {
-      return await chat.compactParticipantContext(request.params.conversationId, request.params.participantId);
+      const managedAgentHeaders = request.headers as ManagedAgentInvocationCredentialHeaders;
+      const agentDetectContext = createManagedAgentDetectContextFromHeaders(managedAgentHeaders);
+      await chat.listLocalAgentTargets(agentDetectContext);
+      return await chat.compactParticipantContext(request.params.conversationId, request.params.participantId, {
+        agentDetectContext,
+        managedAgentHeaders,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to compact context";
       return reply.code(message.includes("not found") ? 404 : 400).send({ error: message });

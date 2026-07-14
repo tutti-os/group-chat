@@ -10,7 +10,7 @@ import type {
   ConversationMessagesPage,
   CreateIdentityRequest,
   CreateRoomRequest,
-  LocalAgentProviderStatusResponse,
+  LocalAgentTargetStatusResponse,
   Message,
   MessageBlock,
   Participant,
@@ -71,8 +71,8 @@ export async function saveUserProfileRemote(profile: RemoteUserProfile) {
   });
 }
 
-export async function fetchLocalAgentProviders(): Promise<LocalAgentProviderStatusResponse> {
-  return fetchJson("/api/local-agent/providers");
+export async function fetchLocalAgentTargets(): Promise<LocalAgentTargetStatusResponse> {
+  return fetchJson("/api/local-agent/agents");
 }
 
 export async function createRoom(input: CreateRoomRequest) {

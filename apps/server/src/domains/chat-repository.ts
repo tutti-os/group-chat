@@ -61,7 +61,6 @@ export interface ConversationMessagePage {
 
 export class ChatRepository {
   ensureSeedData() {
-    this.ensureRuntimeProfiles();
     const row = getDb().prepare(`SELECT COUNT(*) AS count FROM rooms`).get() as { count: number };
     if (row.count > 0) return;
     this.createRoom({
@@ -350,6 +349,7 @@ export class ChatRepository {
       displayName: string;
       kind: "human" | "ai";
       runtimeProfileId: string | null;
+      agentTargetId?: string | null;
       identityId?: string | null;
       roomInstructions?: string;
       listenMode?: ParticipantListenMode;
@@ -360,11 +360,13 @@ export class ChatRepository {
   ): Participant {
     const now = new Date().toISOString();
     const id = nanoid();
+    const profile = input.runtimeProfileId ? this.getRuntimeProfile(input.runtimeProfileId) : null;
+    const agentTargetId = input.agentTargetId ?? profile?.agentTargetId ?? null;
     getDb()
       .prepare(
         `INSERT INTO participants
-         (id, conversation_id, kind, display_name, avatar, runtime_profile_id, identity_id, room_instructions, status, listen_mode, sort_order, reasoning_effort, speed_mode, created_at, updated_at)
-         VALUES (?, ?, ?, ?, NULL, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)`,
+         (id, conversation_id, kind, display_name, avatar, runtime_profile_id, agent_target_id, identity_id, room_instructions, status, listen_mode, sort_order, reasoning_effort, speed_mode, created_at, updated_at)
+         VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -372,6 +374,7 @@ export class ChatRepository {
         input.kind,
         normalizeParticipantDisplayName(input.displayName, "Agent"),
         input.runtimeProfileId,
+        agentTargetId,
         input.identityId ?? null,
         input.roomInstructions?.trim() ?? "",
         input.listenMode ?? DEFAULT_PARTICIPANT_LISTEN_MODE,
@@ -389,6 +392,8 @@ export class ChatRepository {
     if (!identity) throw new Error("Identity not found");
     const runtimeProfileId = input.runtimeProfileId ?? identity.defaultRuntimeProfileId;
     if (!runtimeProfileId) throw new Error("Runtime profile is required");
+    const runtimeProfile = this.getRuntimeProfile(runtimeProfileId);
+    if (!runtimeProfile) throw new Error("Runtime profile not found");
     const participants = this.listParticipants(conversationId);
     const baseName = normalizeParticipantDisplayName(input.displayName ?? "", identity.name);
     const row = getDb()
@@ -398,6 +403,7 @@ export class ChatRepository {
       displayName: uniqueParticipantDisplayNameInRoom(baseName, participants),
       kind: "ai",
       runtimeProfileId,
+      agentTargetId: runtimeProfile.agentTargetId,
       identityId: identity.id,
       roomInstructions: input.roomInstructions,
       listenMode: input.listenMode ?? identity.defaultListenMode ?? DEFAULT_PARTICIPANT_LISTEN_MODE,
@@ -441,15 +447,20 @@ export class ChatRepository {
           ? current.speedMode
           : normalizeSpeedMode(input.speedMode),
     };
+    const nextProfile = next.runtimeProfileId ? this.getRuntimeProfile(next.runtimeProfileId) : null;
+    if (next.runtimeProfileId && !nextProfile) {
+      throw new Error("Runtime profile not found");
+    }
     getDb()
       .prepare(
         `UPDATE participants
-         SET display_name = ?, runtime_profile_id = ?, identity_id = ?, room_instructions = ?, listen_mode = ?, reasoning_effort = ?, speed_mode = ?, avatar = ?, updated_at = ?
+         SET display_name = ?, runtime_profile_id = ?, agent_target_id = ?, identity_id = ?, room_instructions = ?, listen_mode = ?, reasoning_effort = ?, speed_mode = ?, avatar = ?, updated_at = ?
          WHERE id = ?`,
       )
       .run(
         next.displayName,
         next.runtimeProfileId,
+        nextProfile?.agentTargetId ?? null,
         next.identityId,
         next.roomInstructions,
         next.listenMode,
@@ -472,10 +483,128 @@ export class ChatRepository {
     return rows.map(rowToRuntimeProfile);
   }
 
+  syncLocalAgentCatalog(input: {
+    agents: Array<{
+      agentTargetId: string;
+      providerId: string;
+      displayName: string;
+      available: boolean;
+      runtimeSupported: boolean;
+      defaultModelId?: string;
+    }>;
+  }): RuntimeProfile[] {
+    const db = getDb();
+    const now = new Date().toISOString();
+    const selectable = input.agents.filter((agent) => agent.available && agent.runtimeSupported);
+    const byProvider = new Map<string, typeof selectable>();
+    for (const agent of selectable) {
+      const providerId = canonicalLocalAgentProviderId(agent.providerId);
+      const matches = byProvider.get(providerId) ?? [];
+      matches.push(agent);
+      byProvider.set(providerId, matches);
+    }
+
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.prepare(`UPDATE runtime_profiles SET enabled = 0, updated_at = ? WHERE kind = 'local-agent' AND agent_target_id IS NOT NULL`)
+        .run(now);
+      for (const profile of this.listRuntimeProfiles().filter((item) => item.kind === "local-agent")) {
+        if (profile.agentTargetId) continue;
+        const matches = byProvider.get(canonicalLocalAgentProviderId(profile.provider)) ?? [];
+        if (matches.length === 1) {
+          const existingTargetProfile = db.prepare(
+            `SELECT id FROM runtime_profiles WHERE agent_target_id = ? AND id != ? ORDER BY created_at ASC LIMIT 1`,
+          ).get(matches[0]!.agentTargetId, profile.id) as { id: string } | undefined;
+          if (existingTargetProfile) {
+            db.prepare(`UPDATE identities SET default_runtime_profile_id = ?, updated_at = ? WHERE default_runtime_profile_id = ?`)
+              .run(existingTargetProfile.id, now, profile.id);
+            db.prepare(`UPDATE participants SET runtime_profile_id = ?, updated_at = ? WHERE runtime_profile_id = ?`)
+              .run(existingTargetProfile.id, now, profile.id);
+            db.prepare(`UPDATE runtime_profiles SET enabled = 0, updated_at = ? WHERE id = ?`).run(now, profile.id);
+          } else {
+            db.prepare(`UPDATE runtime_profiles SET agent_target_id = ?, enabled = 1, updated_at = ? WHERE id = ?`)
+              .run(matches[0]!.agentTargetId, now, profile.id);
+          }
+        } else {
+          db.prepare(`UPDATE runtime_profiles SET enabled = 0, updated_at = ? WHERE id = ?`).run(now, profile.id);
+        }
+      }
+
+      for (const agent of input.agents) {
+        const existing = db.prepare(`SELECT id FROM runtime_profiles WHERE agent_target_id = ? ORDER BY created_at ASC LIMIT 1`)
+          .get(agent.agentTargetId) as { id: string } | undefined;
+        // Keep exact-target profile IDs disjoint from legacy `local-agent:<provider>` IDs.
+        // An Agent target is allowed to have the same string as its provider, including
+        // when multiple targets share that provider, so reusing the legacy namespace
+        // would silently bind provider-only rows to one arbitrary target.
+        const candidateId = `local-agent-target:v1:${Buffer.from(agent.agentTargetId, "utf8").toString("hex")}`;
+        const candidateOwner = existing ? undefined : db.prepare(
+          `SELECT agent_target_id FROM runtime_profiles WHERE id = ?`,
+        ).get(candidateId) as { agent_target_id: string | null } | undefined;
+        const id = existing?.id
+          ?? (candidateOwner && candidateOwner.agent_target_id !== agent.agentTargetId
+            ? `local-agent-target:${nanoid()}`
+            : candidateId);
+        const model = agent.defaultModelId?.trim() || "default";
+        db.prepare(
+          `INSERT INTO runtime_profiles
+           (id, kind, agent_target_id, provider, model, display_name, enabled, trusted_mode, system_prompt_mode, capabilities, created_at, updated_at)
+           VALUES (?, 'local-agent', ?, ?, ?, ?, ?, 0, 'prompt-prefix', ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET agent_target_id = excluded.agent_target_id, provider = excluded.provider,
+             display_name = excluded.display_name, enabled = excluded.enabled, updated_at = excluded.updated_at`,
+        ).run(
+          id,
+          agent.agentTargetId,
+          agent.providerId,
+          model,
+          agent.displayName,
+          agent.available && agent.runtimeSupported ? 1 : 0,
+          json({ streaming: true, toolUse: true, reasoning: true, vision: false, resume: true }),
+          now,
+          now,
+        );
+        db.prepare(
+          `UPDATE runtime_profiles
+           SET provider = ?, display_name = ?, enabled = ?, updated_at = ?
+           WHERE kind = 'local-agent' AND agent_target_id = ?`,
+        ).run(
+          agent.providerId,
+          agent.displayName,
+          agent.available && agent.runtimeSupported ? 1 : 0,
+          now,
+          agent.agentTargetId,
+        );
+      }
+
+      db.prepare(
+        `UPDATE participants SET agent_target_id = (
+           SELECT runtime_profiles.agent_target_id FROM runtime_profiles WHERE runtime_profiles.id = participants.runtime_profile_id
+         ) WHERE runtime_profile_id IS NOT NULL`,
+      ).run();
+      for (const [providerId, matches] of byProvider) {
+        if (matches.length !== 1) continue;
+        db.prepare(`UPDATE agent_runs SET agent_target_id = ? WHERE agent_target_id IS NULL AND lower(provider) = ?`)
+          .run(matches[0]!.agentTargetId, providerId);
+        if (providerId === "claude-code") {
+          db.prepare(`UPDATE agent_runs SET agent_target_id = ? WHERE agent_target_id IS NULL AND provider = 'claude'`)
+            .run(matches[0]!.agentTargetId);
+        }
+      }
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+    return this.listRuntimeProfiles();
+  }
+
   ensureRuntimeProfileForModel(baseProfile: RuntimeProfile, model: string): RuntimeProfile {
     const normalizedModel = model.trim();
     if (!normalizedModel || baseProfile.model === normalizedModel) return baseProfile;
-    const id = `${baseProfile.id}__${modelSlug(normalizedModel)}`;
+    const modelId = baseProfile.kind === "local-agent"
+      ? Buffer.from(normalizedModel, "utf8").toString("hex")
+      : modelSlug(normalizedModel);
+    const id = `${baseProfile.id}__${modelId}`;
     const existing = this.getRuntimeProfile(id);
     if (existing) return existing;
     const now = new Date().toISOString();
@@ -489,12 +618,13 @@ export class ChatRepository {
     getDb()
       .prepare(
         `INSERT INTO runtime_profiles
-         (id, kind, provider, model, display_name, enabled, trusted_mode, system_prompt_mode, capabilities, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, kind, agent_target_id, provider, model, display_name, enabled, trusted_mode, system_prompt_mode, capabilities, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         profile.id,
         profile.kind,
+        profile.agentTargetId,
         profile.provider,
         profile.model,
         profile.displayName,
@@ -521,6 +651,7 @@ export class ChatRepository {
     const now = new Date().toISOString();
     const id = nanoid();
     const fallbackRuntime = this.getDefaultRuntimeProfileId();
+    if (input.defaultRuntimeProfileId) this.ensureLegacyRuntimeProfile(input.defaultRuntimeProfileId);
     getDb()
       .prepare(
         `INSERT INTO identities
@@ -549,6 +680,7 @@ export class ChatRepository {
   updateIdentity(identityId: string, input: UpdateIdentityRequest): Identity | null {
     const current = this.getIdentity(identityId);
     if (!current) return null;
+    if (input.defaultRuntimeProfileId) this.ensureLegacyRuntimeProfile(input.defaultRuntimeProfileId);
     const next = {
       name: input.name?.trim() || current.name,
       icon: input.icon !== undefined ? (input.icon.trim() || "") : current.icon,
@@ -590,6 +722,27 @@ export class ChatRepository {
         identityId,
       );
     return this.getIdentity(identityId);
+  }
+
+  private ensureLegacyRuntimeProfile(runtimeProfileId: string) {
+    if (this.getRuntimeProfile(runtimeProfileId)) return;
+    if (!runtimeProfileId.startsWith("local-agent:")) return;
+    const provider = runtimeProfileId.slice("local-agent:".length).trim();
+    if (!provider) return;
+    const now = new Date().toISOString();
+    getDb().prepare(
+      `INSERT OR IGNORE INTO runtime_profiles
+       (id, kind, agent_target_id, provider, model, display_name, enabled, trusted_mode, system_prompt_mode, capabilities, created_at, updated_at)
+       VALUES (?, 'local-agent', NULL, ?, ?, ?, 0, 0, 'prompt-prefix', ?, ?, ?)`,
+    ).run(
+      runtimeProfileId,
+      provider,
+      `${provider}:default`,
+      provider,
+      json({ streaming: true, toolUse: true, reasoning: true, vision: false, resume: true }),
+      now,
+      now,
+    );
   }
 
   identityUsageCount(identityId: string): number {
@@ -908,6 +1061,7 @@ export class ChatRepository {
     assistantMessageId: string | null;
     triggerMessageId?: string | null;
     runtime: string;
+    agentTargetId: string | null;
     provider: string;
     model: string;
     visibility?: AgentRun["visibility"];
@@ -917,8 +1071,8 @@ export class ChatRepository {
     getDb()
       .prepare(
         `INSERT INTO agent_runs
-         (id, conversation_id, room_id, participant_id, assistant_message_id, trigger_message_id, runtime, provider, model, visibility, status, resume_mode, created_at, updated_at, completed_at, error)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'accepted', 'fresh', ?, ?, NULL, NULL)`,
+         (id, conversation_id, room_id, participant_id, assistant_message_id, trigger_message_id, agent_target_id, runtime, provider, model, visibility, status, resume_mode, created_at, updated_at, completed_at, error)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'accepted', 'fresh', ?, ?, NULL, NULL)`,
       )
       .run(
         id,
@@ -927,6 +1081,7 @@ export class ChatRepository {
         input.participantId,
         input.assistantMessageId,
         input.triggerMessageId ?? null,
+        input.agentTargetId ?? null,
         input.runtime,
         input.provider,
         input.model,
@@ -1315,71 +1470,6 @@ export class ChatRepository {
     return linked;
   }
 
-  private ensureRuntimeProfiles() {
-    const now = new Date().toISOString();
-    const profiles: RuntimeProfile[] = [
-      {
-        id: "local-agent:codex",
-        kind: "local-agent",
-        provider: "codex",
-        model: "codex:default",
-        displayName: "Codex Local Agent",
-        enabled: true,
-        trustedMode: false,
-        systemPromptMode: "prompt-prefix",
-        capabilities: {
-          streaming: true,
-          toolUse: true,
-          reasoning: true,
-          vision: false,
-          resume: true,
-        },
-        createdAt: now,
-        updatedAt: now,
-      },
-      {
-        id: "local-agent:claude-code",
-        kind: "local-agent",
-        provider: "claude-code",
-        model: "claude-code:default",
-        displayName: "Claude Local Agent",
-        enabled: true,
-        trustedMode: false,
-        systemPromptMode: "prompt-prefix",
-        capabilities: {
-          streaming: true,
-          toolUse: true,
-          reasoning: true,
-          vision: false,
-          resume: true,
-        },
-        createdAt: now,
-        updatedAt: now,
-      },
-    ];
-    for (const profile of profiles) {
-      getDb()
-        .prepare(
-          `INSERT OR IGNORE INTO runtime_profiles
-           (id, kind, provider, model, display_name, enabled, trusted_mode, system_prompt_mode, capabilities, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          profile.id,
-          profile.kind,
-          profile.provider,
-          profile.model,
-          profile.displayName,
-          profile.enabled ? 1 : 0,
-          profile.trustedMode ? 1 : 0,
-          profile.systemPromptMode,
-          json(profile.capabilities),
-          profile.createdAt,
-          profile.updatedAt,
-        );
-    }
-  }
-
   upsertPrivateTask(task: PrivateTaskSnapshot) {
     getDb()
       .prepare(
@@ -1486,6 +1576,7 @@ function rowToParticipant(row: any): Participant {
     displayName: row.display_name,
     avatar: row.avatar,
     runtimeProfileId: row.runtime_profile_id,
+    agentTargetId: row.agent_target_id ?? null,
     identityId: row.identity_id,
     roomInstructions: row.room_instructions ?? "",
     status: row.status,
@@ -1502,6 +1593,7 @@ function rowToRuntimeProfile(row: any): RuntimeProfile {
   return {
     id: row.id,
     kind: row.kind,
+    agentTargetId: row.agent_target_id ?? null,
     provider: row.provider,
     model: row.model,
     displayName: row.display_name,
@@ -1601,6 +1693,7 @@ function rowToAgentRun(row: any): AgentRun {
     assistantMessageId: row.assistant_message_id,
     triggerMessageId: row.trigger_message_id ?? null,
     runtime: row.runtime,
+    agentTargetId: row.agent_target_id ?? null,
     provider: row.provider,
     model: row.model,
     status: row.status,
@@ -1720,6 +1813,11 @@ function normalizeSpeedMode(value: string | null | undefined) {
 function modelSlug(model: string) {
   const slug = model.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
   return slug.slice(0, 80) || "default";
+}
+
+function canonicalLocalAgentProviderId(providerId: string) {
+  const normalized = providerId.trim().toLowerCase();
+  return normalized === "claude" ? "claude-code" : normalized;
 }
 
 function removeRoomArtifactRoot(roomId: string, artifactRoot: string) {

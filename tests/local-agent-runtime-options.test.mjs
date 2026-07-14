@@ -24,6 +24,7 @@ function loadModule() {
 const codexProfile = {
   id: "local-agent:codex",
   kind: "local-agent",
+  agentTargetId: "agent:codex:primary",
   provider: "codex",
   model: "codex:default",
   displayName: "Codex Local Agent",
@@ -38,6 +39,7 @@ const codexProfile = {
 const claudeProfile = {
   ...codexProfile,
   id: "local-agent:claude-code",
+  agentTargetId: "agent:claude:primary",
   provider: "claude-code",
   model: "claude-code:default",
   displayName: "Claude Local Agent",
@@ -46,16 +48,42 @@ const claudeProfile = {
 test("default runtime skips available providers without a matching profile", async () => {
   const { preferredDefaultRuntimeProfile } = await loadModule();
   const providers = [
-    { provider: "cursor", available: true },
-    { provider: "claude-code", available: true },
+    { agentTargetId: "agent:cursor:primary", provider: "cursor", available: true },
+    { agentTargetId: "agent:claude:primary", provider: "claude-code", available: true },
   ];
 
   assert.equal(preferredDefaultRuntimeProfile([codexProfile, claudeProfile], providers), claudeProfile);
 });
 
+test("same-provider Agent targets keep independent runtime status", async () => {
+  const { localAgentStatus } = await loadModule();
+  const cloneProfile = { ...codexProfile, id: "local-agent:codex-clone", agentTargetId: "agent:codex:clone" };
+  const agents = [
+    { agentTargetId: "agent:codex:primary", provider: "codex", displayName: "Primary", available: true, models: [] },
+    { agentTargetId: "agent:codex:clone", provider: "codex", displayName: "Clone", available: false, models: [] },
+  ];
+  assert.equal(localAgentStatus(codexProfile, agents)?.displayName, "Primary");
+  assert.equal(localAgentStatus(cloneProfile, agents)?.displayName, "Clone");
+});
+
+test("Agent target ids containing model separators remain visible as canonical profiles", async () => {
+  const { listCanonicalRuntimeProfiles, resolveCanonicalRuntimeProfile } = await loadModule();
+  const base = {
+    ...codexProfile,
+    id: "local-agent-target:workspace__primary",
+    agentTargetId: "workspace__primary",
+    model: "gpt-default",
+  };
+  const variant = { ...base, id: `${base.id}__gpt-fast`, model: "gpt-fast" };
+
+  assert.deepEqual(listCanonicalRuntimeProfiles([base, variant]).map((profile) => profile.id), [base.id]);
+  assert.equal(resolveCanonicalRuntimeProfile(variant, [base, variant])?.id, base.id);
+});
+
 test("local agent model options use detected provider models instead of provider-prefixed defaults", async () => {
   const { listRuntimeModels, preferredRuntimeModelId, resolveRuntimeModelId } = await loadModule();
   const providers = [{
+    agentTargetId: "agent:codex:primary",
     provider: "codex",
     displayName: "Codex",
     available: true,
@@ -89,14 +117,14 @@ test("local agent model options normalize canonical default profiles to CLI defa
   assert.equal(preferredRuntimeModelId(codexProfile, []), "default");
 });
 
-test("codex speed options fall back to standard and fast", async () => {
+test("speed options do not infer provider-specific choices", async () => {
   const { listRuntimeSpeedOptions, resolveRuntimeSpeedMode } = await loadModule();
 
   assert.deepEqual(
     listRuntimeSpeedOptions(codexProfile, []).map((option) => option.id),
-    ["standard", "fast"],
+    ["standard"],
   );
-  assert.equal(resolveRuntimeSpeedMode(codexProfile, [], "fast"), "fast");
+  assert.equal(resolveRuntimeSpeedMode(codexProfile, [], "fast"), "standard");
   assert.equal(resolveRuntimeSpeedMode(codexProfile, [], "unknown"), "standard");
 });
 
@@ -110,6 +138,7 @@ test("local agent reasoning options follow provider options without auto", async
     { value: "xhigh", label: "Very high", description: "" },
   ];
   const providers = [{
+    agentTargetId: "agent:codex:primary",
     provider: "codex",
     displayName: "Codex",
     available: true,

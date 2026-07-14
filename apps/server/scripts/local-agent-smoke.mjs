@@ -9,7 +9,7 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "../../..");
 
 const args = parseArgs(process.argv.slice(2));
-const provider = args.provider ?? "codex";
+const requestedAgentTargetId = typeof args.agentId === "string" ? args.agentId.trim() : "";
 const port = Number(args.port ?? (9300 + Math.floor(Math.random() * 400)));
 const timeoutMs = Number(args.timeoutMs ?? 180_000);
 const prompt =
@@ -39,27 +39,29 @@ try {
   server.stderr.on("data", (chunk) => process.stderr.write(prefixLines("server", chunk)));
 
   await waitForHealth(baseUrl, timeoutMs);
-  const detections = await api(baseUrl, "/api/local-agent/providers");
-  const detection = detections.providers.find((item) => item.provider === provider);
-  if (!detection) throw new Error(`Provider ${provider} is not registered.`);
+  const catalog = await api(baseUrl, "/api/local-agent/agents");
+  const agentTargetId = requestedAgentTargetId || catalog.defaultAgentTargetId;
+  const detection = catalog.agents.find((item) => item.agentTargetId === agentTargetId);
+  if (!detection) throw new Error(`Agent target ${agentTargetId || "<default>"} is not in the live catalog.`);
   if (!detection.available) {
-    throw new Error(`Provider ${provider} is unavailable: ${detection.reason ?? "unknown reason"}`);
+    throw new Error(`Agent target ${agentTargetId} is unavailable: ${detection.reason ?? "unknown reason"}`);
   }
   logResult("detect", {
-    provider: detection.provider,
+    agentTargetId: detection.agentTargetId,
+    providerId: detection.providerId,
     displayName: detection.displayName,
     version: detection.version,
     executablePath: detection.executablePath,
     authState: detection.authState,
   });
   if (detectOnly) {
-    logResult("summary", { ok: true, provider, mode: "detect-only", home });
+    logResult("summary", { ok: true, agentTargetId, mode: "detect-only", home });
     process.exitCode = 0;
   } else {
     const roomBundle = await api(baseUrl, "/api/rooms", {
       method: "POST",
       body: JSON.stringify({
-        title: `Local ${provider} smoke`,
+        title: `Local ${detection.displayName} smoke`,
         description: "Temporary local-agent compatibility smoke room.",
       }),
     });
@@ -68,18 +70,18 @@ try {
       method: "POST",
       body: JSON.stringify({
         name: `${detection.displayName} Smoke`,
-        icon: provider.slice(0, 2).toUpperCase(),
+        icon: detection.displayName.slice(0, 2).toUpperCase(),
         systemPrompt:
           "You are running inside an automated group-chat smoke test. Keep the answer short and do not modify files unless explicitly asked.",
         stylePrompt: "",
-        defaultRuntimeProfileId: `local-agent:${provider}`,
+        defaultRuntimeProfileId: findRuntimeProfileId(await api(baseUrl, "/api/bootstrap"), agentTargetId),
       }),
     });
     await api(baseUrl, `/api/conversations/${conversationId}/participants`, {
       method: "POST",
       body: JSON.stringify({
         identityId: identityResult.identity.id,
-        runtimeProfileId: `local-agent:${provider}`,
+        runtimeProfileId: findRuntimeProfileId(await api(baseUrl, "/api/bootstrap"), agentTargetId),
       }),
     });
     await api(baseUrl, `/api/conversations/${conversationId}/messages`, {
@@ -101,7 +103,7 @@ try {
     });
     logResult("summary", {
       ok: true,
-      provider,
+      agentTargetId,
       elapsedMs: Date.now() - startedAt,
       home,
     });
@@ -114,6 +116,12 @@ try {
   if (!keepHome && !args.home) {
     await rm(home, { recursive: true, force: true });
   }
+}
+
+function findRuntimeProfileId(snapshot, agentTargetId) {
+  const profile = snapshot.runtimeProfiles.find((item) => item.agentTargetId === agentTargetId && item.enabled);
+  if (!profile) throw new Error(`No enabled runtime profile exists for Agent target ${agentTargetId}.`);
+  return profile.id;
 }
 
 function parseArgs(argv) {

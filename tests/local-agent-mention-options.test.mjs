@@ -24,6 +24,7 @@ function loadModule() {
 const runtimeProfile = {
   id: "local-agent:codex",
   kind: "local-agent",
+  agentTargetId: "agent:codex:primary",
   provider: "codex",
   model: "codex:default",
   displayName: "Codex Local Agent",
@@ -37,6 +38,8 @@ const runtimeProfile = {
 
 function providerStatus(available, displayName = "Codex") {
   return {
+    agentTargetId: "agent:codex:primary",
+    providerId: "codex",
     provider: "codex",
     displayName,
     available,
@@ -69,7 +72,7 @@ test("lists Tutti agents using the same availability fallbacks as the forward me
     new Set(),
     true,
   );
-  assert.deepEqual(bridgeOptions.map((option) => option.label), ["Codex"]);
+  assert.deepEqual(bridgeOptions, []);
 
   const unavailableOptions = buildLocalAgentMentionOptions(
     [runtimeProfile],
@@ -91,6 +94,7 @@ test("local Tutti agent launcher references retain the matching room participant
     displayName: "Codex CLI",
     avatar: null,
     runtimeProfileId: "local-agent:codex",
+    agentTargetId: "agent:codex:primary",
     identityId: null,
     roomInstructions: "",
     status: "active",
@@ -111,13 +115,14 @@ test("local Tutti agent launcher references retain the matching room participant
     new Set(),
   );
 
-  assert.equal(options[0]?.label, "Codex");
+  assert.equal(options[0]?.label, "Codex CLI");
   assert.equal(options[0]?.participant?.id, "participant-codex");
   const reference = buildLocalAgentLauncherReference(options[0]);
-  assert.equal(reference.providerId, "workspace-app");
-  assert.equal(reference.itemId, "agent-codex");
+  assert.equal(reference.providerId, "agent-session");
+  assert.equal(reference.itemId, "agent:codex:primary");
+  assert.equal(reference.insert.mention.scope.groupChatAgentTargetId, "agent:codex:primary");
   assert.equal(reference.insert.mention.scope.groupChatParticipantId, "participant-codex");
-  assert.equal(reference.insert.mention.scope.groupChatParticipantLabel, "Codex");
+  assert.equal(reference.insert.mention.scope.groupChatParticipantLabel, "Codex CLI");
 });
 
 test("local Tutti agent launcher does not bind custom personas that share the runtime", async () => {
@@ -129,6 +134,7 @@ test("local Tutti agent launcher does not bind custom personas that share the ru
     displayName: "产品",
     avatar: null,
     runtimeProfileId: "local-agent:codex",
+    agentTargetId: "agent:codex:primary",
     identityId: "identity-product",
     roomInstructions: "",
     status: "active",
@@ -152,6 +158,6 @@ test("local Tutti agent launcher does not bind custom personas that share the ru
   assert.equal(options[0]?.participant, null);
   const reference = buildLocalAgentLauncherReference(options[0]);
   assert.equal(reference.insert.mention.scope.groupChatLocalAgentMention, "true");
-  assert.equal(reference.insert.mention.scope.groupChatRuntimeProvider, "codex");
+  assert.equal(reference.insert.mention.scope.groupChatAgentTargetId, "agent:codex:primary");
   assert.equal(reference.insert.mention.scope.groupChatParticipantId, undefined);
 });

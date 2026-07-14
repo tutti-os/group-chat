@@ -16,7 +16,7 @@ function loadDispatchModule() {
   return import(`${pathToFileURL("/tmp/agent-gui-dispatch.test.mjs")}?t=${Date.now()}`);
 }
 
-test("resolveAgentGuiDispatchFromMentions keeps workspace-app references in prompt", async () => {
+test("provider-specific workspace-app launchers no longer dispatch AgentGUI", async () => {
   const { resolveAgentGuiDispatchFromMentions } = await loadDispatchModule();
   const codexHref = "mention://workspace-app/agent-codex?workspaceId=ws-1";
   const radarHref = "mention://workspace-app/daily-product-radar?workspaceId=ws-1";
@@ -37,15 +37,10 @@ test("resolveAgentGuiDispatchFromMentions keeps workspace-app references in prom
   ];
 
   const dispatch = resolveAgentGuiDispatchFromMentions(content, mentions, { workspaceId: "ws-1" });
-  assert.ok(dispatch);
-  assert.equal(dispatch.provider, "codex");
-  assert.match(dispatch.prompt, /帮我看看/);
-  assert.match(dispatch.prompt, /里面说了什么/);
-  assert.doesNotMatch(dispatch.prompt, /\[Codex\]\(mention:\/\/workspace-app\/agent-codex/);
-  assert.match(dispatch.prompt, /\[每日产品雷达\]\(mention:\/\/workspace-app\/daily-product-radar/);
+  assert.equal(dispatch, null);
 });
 
-test("resolveAgentGuiDispatchFromMentions upgrades bare message links for agent gui", async () => {
+test("legacy provider launcher does not upgrade bare message links", async () => {
   const { resolveAgentGuiDispatchFromMentions } = await loadDispatchModule();
   const content = "[Codex](mention://workspace-app/agent-codex?workspaceId=ws-1) 你看看 group-chat://message/msg-1 这些东西";
   const mentions = [
@@ -58,13 +53,10 @@ test("resolveAgentGuiDispatchFromMentions upgrades bare message links for agent 
   ];
 
   const dispatch = resolveAgentGuiDispatchFromMentions(content, mentions, { workspaceId: "ws-1" });
-  assert.ok(dispatch);
-  assert.doesNotMatch(dispatch.prompt, /agent-codex/);
-  assert.doesNotMatch(dispatch.prompt, /(?<!\])group-chat:\/\/message\/msg-1/);
-  assert.match(dispatch.prompt, /mention:\/\/workspace-app\/group-chat\?[^)]*messageId=msg-1/);
+  assert.equal(dispatch, null);
 });
 
-test("resolveAgentGuiDispatchFromMentions upgrades summary links for agent gui", async () => {
+test("legacy provider launcher does not upgrade summary links", async () => {
   const { resolveAgentGuiDispatchFromMentions } = await loadDispatchModule();
   const content = "[Codex](mention://workspace-app/agent-codex?workspaceId=ws-1) group-chat://summary/task-1";
   const mentions = [{
@@ -75,8 +67,7 @@ test("resolveAgentGuiDispatchFromMentions upgrades summary links for agent gui",
   }];
 
   const dispatch = resolveAgentGuiDispatchFromMentions(content, mentions, { workspaceId: "ws-1" });
-  assert.ok(dispatch);
-  assert.match(dispatch.prompt, /mention:\/\/workspace-app\/group-chat\?[^)]*summaryTaskId=task-1/);
+  assert.equal(dispatch, null);
 });
 
 test("resolveAgentGuiDispatchFromMentions ignores room custom agent participant mentions", async () => {

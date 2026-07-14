@@ -1,51 +1,33 @@
 import type { Participant, RuntimeProfile } from "@group-chat/shared";
 
 export type TuttiAgentGuiProvider = string;
+export const RUNTIME_PROVIDER_TO_GUI: Record<string, string> = {};
 
-export const RUNTIME_PROVIDER_TO_GUI: Record<string, string> = {
-  claude: "claude-code",
-  "claude-code": "claude-code",
-  codex: "codex",
-  cursor: "cursor",
-  opencode: "opencode",
-  hermes: "hermes",
-  openclaw: "openclaw",
-};
-
-export const AGENT_LAUNCHER_APP_IDS = {
-  codex: "agent-codex",
-  claude: "agent-claude-code",
-} as const;
-
-export const AGENT_LAUNCHER_APP_ID_TO_GUI: Record<string, string> = {
-  "agent-claude-code": "claude-code",
-  "agent-codex": "codex",
-};
-
-export function localAgentLauncherAppId(provider: string): string | null {
-  return AGENT_LAUNCHER_APP_IDS[provider.trim().toLowerCase() as keyof typeof AGENT_LAUNCHER_APP_IDS] ?? null;
+/**
+ * Provider-specific AgentGUI launchers are intentionally no longer exposed.
+ * Local Agent selection and mentions are driven by exact catalog target ids.
+ */
+export function localAgentLauncherAppId(_agentTargetId: string): string | null {
+  return null;
 }
 
-export function isAgentLauncherAppId(entityId: string | null | undefined): boolean {
-  return Boolean(entityId?.trim() && entityId.trim() in AGENT_LAUNCHER_APP_ID_TO_GUI);
+export function isAgentLauncherAppId(_entityId: string | null | undefined): boolean {
+  return false;
 }
 
-export function resolveAgentGuiProviderFromAppId(entityId: string | null | undefined): TuttiAgentGuiProvider | null {
-  if (!entityId?.trim()) return null;
-  return AGENT_LAUNCHER_APP_ID_TO_GUI[entityId.trim()] ?? null;
+export function resolveAgentGuiProviderFromAppId(
+  _entityId: string | null | undefined,
+): TuttiAgentGuiProvider | null {
+  return null;
 }
 
 export function resolveAgentGuiProviderFromRuntimeProvider(
-  provider: string | null | undefined,
+  _provider: string | null | undefined,
 ): TuttiAgentGuiProvider | null {
-  if (!provider?.trim()) return null;
-  const normalized = provider.trim().toLowerCase();
-  return RUNTIME_PROVIDER_TO_GUI[normalized] ?? normalized;
+  return null;
 }
 
-export function resolveAgentLauncherRuntimeProvider(entityId: string | null | undefined): string | null {
-  if (entityId?.trim() === AGENT_LAUNCHER_APP_IDS.codex) return "codex";
-  if (entityId?.trim() === AGENT_LAUNCHER_APP_IDS.claude) return "claude-code";
+export function resolveAgentLauncherRuntimeProvider(_entityId: string | null | undefined): string | null {
   return null;
 }
 
@@ -65,8 +47,8 @@ export function resolveParticipantRuntimeProvider(
 }
 
 export function isAgentLauncherParticipant(
-  participant: Participant,
-  runtimeProfiles: RuntimeProfile[] | undefined,
+  _participant: Participant,
+  _runtimeProfiles: RuntimeProfile[] | undefined,
 ): boolean {
-  return Boolean(resolveAgentGuiProviderFromRuntimeProvider(resolveParticipantRuntimeProvider(participant, runtimeProfiles)));
+  return false;
 }

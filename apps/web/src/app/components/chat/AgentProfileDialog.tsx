@@ -54,9 +54,9 @@ export function AgentProfileDialog(props: {
   const draftParticipant = useMemo(
     () =>
       isAddMode && setupIdentity && props.conversationId
-        ? createDraftParticipant(setupIdentity, props.conversationId, props.roomParticipants ?? [])
+        ? createDraftParticipant(setupIdentity, props.conversationId, props.roomParticipants ?? [], props.runtimeProfiles)
         : null,
-    [isAddMode, props.conversationId, props.roomParticipants, setupIdentity],
+    [isAddMode, props.conversationId, props.roomParticipants, props.runtimeProfiles, setupIdentity],
   );
   const formParticipant = participant ?? draftParticipant;
   const [avatar, setAvatar] = useState<string | null>(formParticipant?.avatar ?? setupIdentity?.icon ?? null);
@@ -263,6 +263,7 @@ function createDraftParticipant(
   identity: Identity,
   conversationId: string,
   roomParticipants: Participant[],
+  runtimeProfiles: RuntimeProfile[],
 ): Participant {
   const now = new Date().toISOString();
   return {
@@ -272,6 +273,7 @@ function createDraftParticipant(
     displayName: uniqueParticipantDisplayNameInRoom(identity.name, roomParticipants),
     avatar: null,
     runtimeProfileId: identity.defaultRuntimeProfileId,
+    agentTargetId: runtimeProfiles.find((profile) => profile.id === identity.defaultRuntimeProfileId)?.agentTargetId ?? null,
     identityId: identity.id,
     roomInstructions: "",
     status: "active",

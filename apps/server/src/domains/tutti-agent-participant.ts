@@ -1,6 +1,7 @@
 import {
   DEFAULT_PARTICIPANT_LISTEN_MODE,
   defaultTuttiAgentParticipantName,
+  parseLegacyTuttiAgentProviderParticipantId,
   parseTuttiAgentParticipantId,
   tuttiAgentParticipantId,
   type Conversation,
@@ -8,12 +9,16 @@ import {
   type RuntimeProfile,
 } from "@group-chat/shared";
 
-export { defaultTuttiAgentParticipantName, parseTuttiAgentParticipantId, tuttiAgentParticipantId };
+export {
+  defaultTuttiAgentParticipantName,
+  parseLegacyTuttiAgentProviderParticipantId,
+  parseTuttiAgentParticipantId,
+  tuttiAgentParticipantId,
+};
 
-export function localAgentProviderFromLauncherAppId(appId: string | null | undefined) {
-  if (appId?.trim() === "agent-codex") return "codex";
-  if (appId?.trim() === "agent-claude-code") return "claude-code";
-  return "";
+export function localAgentTargetFromLauncherAppId(appId: string | null | undefined) {
+  const value = appId?.trim() ?? "";
+  return value.startsWith("agent-target:") ? value.slice("agent-target:".length) : "";
 }
 
 export function normalizeTuttiAgentName(value: string) {
@@ -23,10 +28,10 @@ export function normalizeTuttiAgentName(value: string) {
 export function createVirtualTuttiAgentParticipant(
   conversation: Pick<Conversation, "id">,
   runtimeProfile: RuntimeProfile,
-  displayName = defaultTuttiAgentParticipantName(runtimeProfile.provider),
+  displayName = defaultTuttiAgentParticipantName(runtimeProfile.displayName),
 ): Participant | null {
-  if (runtimeProfile.kind !== "local-agent") return null;
-  const participantId = tuttiAgentParticipantId(runtimeProfile.provider);
+  if (runtimeProfile.kind !== "local-agent" || !runtimeProfile.agentTargetId) return null;
+  const participantId = tuttiAgentParticipantId(runtimeProfile.agentTargetId);
   if (!participantId) return null;
   const now = new Date().toISOString();
   return {
@@ -36,6 +41,7 @@ export function createVirtualTuttiAgentParticipant(
     displayName,
     avatar: null,
     runtimeProfileId: runtimeProfile.id,
+    agentTargetId: runtimeProfile.agentTargetId,
     identityId: null,
     roomInstructions: "",
     status: "active",

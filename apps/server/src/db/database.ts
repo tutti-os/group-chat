@@ -60,6 +60,7 @@ function migrate(database: DatabaseSync) {
       display_name TEXT NOT NULL,
       avatar TEXT,
       runtime_profile_id TEXT,
+      agent_target_id TEXT,
       identity_id TEXT,
       room_instructions TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL DEFAULT 'active',
@@ -77,6 +78,7 @@ function migrate(database: DatabaseSync) {
     CREATE TABLE IF NOT EXISTS runtime_profiles (
       id TEXT PRIMARY KEY,
       kind TEXT NOT NULL,
+      agent_target_id TEXT,
       provider TEXT NOT NULL,
       model TEXT NOT NULL,
       display_name TEXT NOT NULL,
@@ -170,6 +172,7 @@ function migrate(database: DatabaseSync) {
       room_id TEXT NOT NULL,
       participant_id TEXT,
       assistant_message_id TEXT,
+      agent_target_id TEXT,
       runtime TEXT NOT NULL,
       provider TEXT NOT NULL,
       model TEXT NOT NULL,
@@ -274,6 +277,9 @@ function migrate(database: DatabaseSync) {
   ensureColumn(database, "participants", "listen_mode", "TEXT NOT NULL DEFAULT 'passive'");
   ensureColumn(database, "participants", "room_instructions", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(database, "participants", "speed_mode", "TEXT");
+  ensureColumn(database, "participants", "agent_target_id", "TEXT");
+  ensureColumn(database, "runtime_profiles", "agent_target_id", "TEXT");
+  ensureColumn(database, "agent_runs", "agent_target_id", "TEXT");
   ensureColumn(database, "conversations", "collaboration_rules", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(database, "conversations", "collaboration_rules_version", "INTEGER NOT NULL DEFAULT 1");
   ensureColumn(database, "rooms", "avatar", "TEXT");

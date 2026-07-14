@@ -34,6 +34,10 @@ try {
   server.stderr.on("data", (chunk) => process.stderr.write(prefixLines("server", chunk)));
 
   await waitForHealth(timeoutMs);
+  const catalog = await api("/api/local-agent/agents");
+  const defaultAgent = catalog.agents.find((agent) => agent.agentTargetId === catalog.defaultAgentTargetId && agent.available);
+  assert(defaultAgent, "live Agent catalog has no available default target");
+  const runtimeProfileId = findRuntimeProfileId(await api("/api/bootstrap"), defaultAgent.agentTargetId);
   const roomBundle = await api("/api/rooms", {
     method: "POST",
     body: JSON.stringify({
@@ -49,14 +53,14 @@ try {
       icon: "WS",
       systemPrompt: "You are a workspace materialization smoke-test agent.",
       stylePrompt: "Keep replies short.",
-      defaultRuntimeProfileId: "local-agent:codex",
+      defaultRuntimeProfileId: runtimeProfileId,
     }),
   });
   const participantResult = await api(`/api/conversations/${conversation.id}/participants`, {
     method: "POST",
     body: JSON.stringify({
       identityId: identityResult.identity.id,
-      runtimeProfileId: "local-agent:codex",
+      runtimeProfileId,
       listenMode: "active",
       reasoningEffort: "high",
       roomInstructions: "Workspace smoke participant instructions.",
@@ -235,6 +239,12 @@ function safePathSegment(value) {
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+function findRuntimeProfileId(snapshot, agentTargetId) {
+  const profile = snapshot.runtimeProfiles.find((item) => item.agentTargetId === agentTargetId && item.enabled);
+  assert(profile, `missing runtime profile for Agent target ${agentTargetId}`);
+  return profile.id;
 }
 
 function delay(ms) {

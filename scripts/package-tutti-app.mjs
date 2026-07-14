@@ -28,7 +28,7 @@ const MANIFEST_LOCALIZATIONS = {
     metadata: {
       name: "群聊",
       description: "founder做的群聊应用，我们尝试过阻止上线但失败了，所以很高兴用户能多多反馈bug - tutti全体成员",
-      tags: ["本地优先", "Agent", "群聊", "团队"],
+      tags: ["本地优先", "Agent", "Agent 列表", "群聊", "团队"],
     },
   },
 };
@@ -71,7 +71,7 @@ export function createManifest({ version }) {
     author: {
       name: "Tutti",
     },
-    tags: ["local-first", "agent", "chat", "team"],
+    tags: ["local-first", "agent", "agent-catalog", "chat", "team"],
   };
 }
 
