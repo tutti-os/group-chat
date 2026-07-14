@@ -20,21 +20,35 @@ export function mergeAgentCatalogSnapshot<TState extends AgentCatalogState>(
   current: TState,
   snapshot: Pick<TState, "identities" | "lastSeq" | "participants" | "runtimeProfiles">,
 ): TState {
+  const snapshotIsAuthoritative = snapshot.lastSeq >= current.lastSeq;
   return {
     ...current,
-    identities: mergeCatalogEntities(current.identities, snapshot.identities),
-    participants: mergeCatalogEntities(current.participants, snapshot.participants),
-    runtimeProfiles: mergeCatalogEntities(current.runtimeProfiles, snapshot.runtimeProfiles),
+    identities: mergeCatalogEntities(current.identities, snapshot.identities, {
+      acceptSnapshotOnly: snapshotIsAuthoritative,
+      retainCurrentOnly: !snapshotIsAuthoritative,
+    }),
+    participants: mergeCatalogEntities(current.participants, snapshot.participants, {
+      acceptSnapshotOnly: snapshotIsAuthoritative,
+      retainCurrentOnly: !snapshotIsAuthoritative,
+    }),
+    runtimeProfiles: mergeCatalogEntities(current.runtimeProfiles, snapshot.runtimeProfiles, {
+      acceptSnapshotOnly: true,
+      retainCurrentOnly: !snapshotIsAuthoritative,
+    }),
   };
 }
 
-function mergeCatalogEntities<TEntity extends CatalogEntity>(current: TEntity[], snapshot: TEntity[]) {
+function mergeCatalogEntities<TEntity extends CatalogEntity>(
+  current: TEntity[],
+  snapshot: TEntity[],
+  options: { acceptSnapshotOnly: boolean; retainCurrentOnly: boolean },
+) {
   const currentById = new Map(current.map((entity) => [entity.id, entity]));
-  const merged = snapshot.map((entity) => {
+  const merged = snapshot.flatMap((entity) => {
     const existing = currentById.get(entity.id);
     currentById.delete(entity.id);
-    if (!existing) return entity;
-    return (existing.updatedAt ?? "") > (entity.updatedAt ?? "") ? existing : entity;
+    if (!existing) return options.acceptSnapshotOnly ? [entity] : [];
+    return [(existing.updatedAt ?? "") > (entity.updatedAt ?? "") ? existing : entity];
   });
-  return [...merged, ...currentById.values()];
+  return options.retainCurrentOnly ? [...merged, ...currentById.values()] : merged;
 }

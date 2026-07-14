@@ -38,14 +38,22 @@ test("Agent refresh never rolls back newer WS state or replaces timeline data", 
       { id: "profile-shared", updatedAt: "2026-07-15T11:00:00.000Z", model: "stale" },
       { id: "profile-catalog", updatedAt: "2026-07-15T13:00:00.000Z", model: "new catalog target" },
     ],
-    participants: [{ id: "participant-shared", updatedAt: "2026-07-15T11:00:00.000Z", status: "active" }],
-    identities: [{ id: "identity-shared", updatedAt: "2026-07-15T11:00:00.000Z", name: "stale" }],
+    participants: [
+      { id: "participant-shared", updatedAt: "2026-07-15T11:00:00.000Z", status: "active" },
+      { id: "participant-deleted-by-ws", updatedAt: "2026-07-15T11:00:00.000Z", status: "active" },
+    ],
+    identities: [
+      { id: "identity-shared", updatedAt: "2026-07-15T11:00:00.000Z", name: "stale" },
+      { id: "identity-deleted-by-ws", updatedAt: "2026-07-15T11:00:00.000Z", name: "deleted" },
+    ],
   };
   const staleMerged = mergeAgentCatalogSnapshot(current, stale);
   assert.equal(staleMerged.runtimeProfiles.find((item) => item.id === "profile-shared")?.model, "ws-new");
   assert.equal(staleMerged.runtimeProfiles.find((item) => item.id === "profile-catalog")?.model, "new catalog target");
   assert.equal(staleMerged.participants[0]?.status, "inactive");
   assert.equal(staleMerged.identities[0]?.name, "WS new");
+  assert.equal(staleMerged.participants.some((item) => item.id === "participant-deleted-by-ws"), false);
+  assert.equal(staleMerged.identities.some((item) => item.id === "identity-deleted-by-ws"), false);
   assert.deepEqual(staleMerged.messages, current.messages);
   assert.deepEqual(staleMerged.messageBlocks, current.messageBlocks);
   assert.equal(staleMerged.lastSeq, current.lastSeq);
@@ -63,4 +71,17 @@ test("Agent refresh never rolls back newer WS state or replaces timeline data", 
   assert.deepEqual(merged.messages, current.messages);
   assert.deepEqual(merged.messageBlocks, current.messageBlocks);
   assert.equal(merged.lastSeq, current.lastSeq);
+
+  const authoritative = mergeAgentCatalogSnapshot({
+    ...current,
+    participants: [...current.participants, { id: "participant-removed", updatedAt: "2026-07-15T10:00:00.000Z" }],
+    identities: [...current.identities, { id: "identity-removed", updatedAt: "2026-07-15T10:00:00.000Z" }],
+    runtimeProfiles: [...current.runtimeProfiles, { id: "profile-removed", updatedAt: "2026-07-15T10:00:00.000Z" }],
+  }, {
+    ...sameSequence,
+    lastSeq: 13,
+  });
+  assert.equal(authoritative.participants.some((item) => item.id === "participant-removed"), false);
+  assert.equal(authoritative.identities.some((item) => item.id === "identity-removed"), false);
+  assert.equal(authoritative.runtimeProfiles.some((item) => item.id === "profile-removed"), false);
 });

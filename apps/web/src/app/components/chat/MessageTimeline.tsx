@@ -1,8 +1,8 @@
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Braces, BrainCircuit, CheckSquare, ChevronDown, ChevronRight, ChevronsDown, Copy, Edit3, Ear, FileText, MoreHorizontal, Reply, RotateCcw, SendHorizontal, Terminal, Trash2, Wrench, X } from "lucide-react";
+import { Braces, BrainCircuit, CheckSquare, ChevronsDown, Copy, Edit3, Ear, FileText, MoreHorizontal, Reply, RotateCcw, Terminal, Trash2, Wrench, X } from "lucide-react";
 import { Button } from "@tutti-os/ui-system";
 import type { Artifact, AgentRun, AgentRunEvent, Conversation, Identity, Message, MessageBlock, Participant, Room, RuntimeProfile } from "@group-chat/shared";
 import { isLocalUserMessage, resolveMessageVisibility, enrichAssistantContentWithWorkspaceResourceLinks, resolveTriggerUserMentions, stripAssistantSkillDetails } from "@group-chat/shared";
@@ -12,12 +12,11 @@ import { formatBytes, formatMessageStatus, formatMessageTime, truncateMiddle } f
 import { TuttiMessageLinkIcon } from "../../tutti-reference-icons.js";
 import type { LocalUserProfile } from "../../user-profile.js";
 import { UserAvatar, type UserAvatarSize } from "../ui/UserAvatar.js";
-import { getRuntimeProviderAvatarStyle, resolveAgentAvatarFromContext } from "../../identity-avatar.js";
+import { resolveAgentAvatarFromContext } from "../../identity-avatar.js";
 import { AgentAvatar } from "../ui/AgentAvatar.js";
 import { HoverTooltip } from "../ui/HoverTooltip.js";
 import { WHISPER_FEATURE_ENABLED } from "../../feature-flags.js";
 import type { BackgroundTask } from "../../background-tasks.js";
-import type { TuttiAgentGuiProvider } from "../../agent-gui-dispatch.js";
 import {
   collectSummaryTaskIds,
   copyMessagesToClipboard,
@@ -56,14 +55,6 @@ const TIMELINE_LOAD_BEFORE_MIN_PX = 96;
 
 type CopyTipPosition = { x: number; y: number };
 type CopyMessageInput = { position: CopyTipPosition; anchorEl?: HTMLElement | null; menuCopy?: boolean };
-
-export type AgentForwardTarget = {
-  provider: TuttiAgentGuiProvider;
-  runtimeProvider: string;
-  label: string;
-  subtitle: string;
-  available: boolean;
-};
 
 const MessageBodyCopyContext = createContext<((input: CopyMessageInput) => void) | null>(null);
 
@@ -276,7 +267,6 @@ export function MessageTimeline(props: {
   allParticipants: Participant[];
   identities: Identity[];
   runtimeProfiles: RuntimeProfile[];
-  agentForwardTargets: AgentForwardTarget[];
   conversations: Conversation[];
   rooms: Room[];
   participantsCount: number;
@@ -295,9 +285,7 @@ export function MessageTimeline(props: {
   onInsertSummaryLink?: (taskId: string) => void;
   onEnsureSummaryTask: (taskId: string) => Promise<BackgroundTask | null>;
   summaryTasks: BackgroundTask[];
-  onQuoteMessages: (messages: Message[], mode?: "quote" | "summary" | "send-to-app" | "send-to-agent") => void;
-  onForwardMessagesToAgent: (messages: Message[], provider: TuttiAgentGuiProvider) => void | Promise<void>;
-  onForwardSummaryToAgent: (task: BackgroundTask, provider: TuttiAgentGuiProvider) => void | Promise<void>;
+  onQuoteMessages: (messages: Message[], mode?: "quote" | "summary" | "send-to-app") => void;
   onStartSummary: (messages: Message[], participant: Participant) => void | Promise<void>;
   openBackgroundTask: BackgroundTask | null;
   onCloseBackgroundTaskPanel: () => void;
@@ -925,7 +913,6 @@ export function MessageTimeline(props: {
           participant={resolveMessageAgentParticipant(message, props.participants, props.allParticipants)}
           identities={props.identities}
           runtimeProfiles={props.runtimeProfiles}
-          agentForwardTargets={props.agentForwardTargets}
           userProfile={props.userProfile}
           onOpenUserProfile={props.onOpenUserProfile}
           onViewThinking={props.onViewThinking}
@@ -958,7 +945,6 @@ export function MessageTimeline(props: {
           }}
           onCloseMenu={closeOpenMessageMenu}
           onQuoteMessage={() => props.onQuoteMessages([message], "quote")}
-          onForwardToAgent={(provider) => props.onForwardMessagesToAgent([message], provider)}
           onSummarizeMessage={() => requestSummary([message])}
           onCopyMessage={(input) => void copyMessages([message], input.position, input.anchorEl)}
           onCopyMessageLink={(position) => void copyMessageLink(message.id, position)}
@@ -987,11 +973,6 @@ export function MessageTimeline(props: {
                 props.onQuoteMessages(selectedMessages, "quote");
                 exitSelectionMode();
               }}
-              onForwardToAgent={(provider) => {
-                void props.onForwardMessagesToAgent(selectedMessages, provider);
-                exitSelectionMode();
-              }}
-              agentForwardTargets={props.agentForwardTargets}
               onSummarize={() => {
                 requestSummary(selectedMessages);
                 exitSelectionMode();
@@ -1061,8 +1042,6 @@ export function MessageTimeline(props: {
           onOpenSummaryLink={props.onOpenSummaryLink}
           onEnsureSummaryTask={props.onEnsureSummaryTask}
           onOpenAgentProfile={props.onOpenAgentProfile}
-          agentForwardTargets={props.agentForwardTargets}
-          onForwardToAgent={(provider) => props.onForwardSummaryToAgent(props.openBackgroundTask!, provider)}
           onCopy={(position) => {
             const task = props.openBackgroundTask!;
             const sourceMessages = resolveSourceMessages(task, props.allMessages);
@@ -1394,7 +1373,6 @@ function MessageRow(props: {
   conversations: Conversation[];
   rooms: Room[];
   participant: Participant | null;
-  agentForwardTargets: AgentForwardTarget[];
   onOpenAgentProfile: (participant: Participant) => void;
   onMentionParticipant: (participant: Participant) => void;
   onOpenArtifact: (artifact: Artifact) => void;
@@ -1413,7 +1391,6 @@ function MessageRow(props: {
   onOpenMenu: (anchor: HTMLElement) => void;
   onCloseMenu: () => void;
   onQuoteMessage: () => void;
-  onForwardToAgent: (provider: TuttiAgentGuiProvider) => void | Promise<void>;
   onSummarizeMessage: () => void;
   onCopyMessage: (input: CopyMessageInput) => void;
   onCopyMessageLink: (position: CopyTipPosition) => void;
@@ -1570,8 +1547,6 @@ function MessageRow(props: {
       createdAt={props.message.createdAt}
       onReply={props.onQuoteMessage}
       onCopy={props.onCopyMessage}
-      agentForwardTargets={props.agentForwardTargets}
-      onForwardToAgent={props.onForwardToAgent}
       onOpenMenu={props.onOpenMenu}
       onCloseMenu={props.onCloseMenu}
       onShowActions={props.onShowActions}
@@ -1584,8 +1559,6 @@ function MessageRow(props: {
             onClose={props.onCloseMenu}
             onSummarize={props.onSummarizeMessage}
             onViewThinking={() => props.onViewThinking(props.message)}
-            agentForwardTargets={props.agentForwardTargets}
-            onForwardToAgent={props.onForwardToAgent}
             onCopyLink={props.onCopyMessageLink}
             onEdit={props.onEditMessage}
             onDelete={props.onDeleteMessage}
@@ -1763,8 +1736,6 @@ function MessageActionBar(props: {
   onMeasure: (size: { width: number; height: number }) => void;
   onReply: () => void;
   onCopy: (position: CopyTipPosition) => void;
-  agentForwardTargets: AgentForwardTarget[];
-  onForwardToAgent: (provider: TuttiAgentGuiProvider) => void | Promise<void>;
   onOpenMenu: (anchor: HTMLElement) => void;
   onCloseMenu: () => void;
   onDismissActions: () => void;
@@ -1809,14 +1780,6 @@ function MessageActionBar(props: {
         props.onCloseMenu();
         props.onCopy({ x: event.clientX, y: event.clientY });
       }}><Copy size={13} /></IconAction>
-      <ForwardToAgentAction
-        targets={props.agentForwardTargets}
-        onForward={(provider) => void props.onForwardToAgent(provider)}
-        active={Boolean((props.visible || props.menuOpen) && props.position)}
-        moreMenuOpen={props.menuOpen}
-        onCloseMenu={props.onCloseMenu}
-        onDismissActions={props.onDismissActions}
-      />
       <IconAction
         title={t("common.more")}
         onClick={(event) => {
@@ -1835,74 +1798,12 @@ function MessageActionBar(props: {
   );
 }
 
-function ForwardToAgentAction(props: {
-  targets: AgentForwardTarget[];
-  onForward: (provider: TuttiAgentGuiProvider) => void;
-  active: boolean;
-  moreMenuOpen: boolean;
-  onCloseMenu: () => void;
-  onDismissActions: () => void;
-}) {
-  const { anchorRef, closeMenu, open, toggleMenu } = useForwardSubmenuHover(props.onDismissActions);
-
-  useEffect(() => {
-    if (!props.active) closeMenu();
-  }, [closeMenu, props.active]);
-
-  useEffect(() => {
-    if (props.moreMenuOpen) closeMenu();
-  }, [closeMenu, props.moreMenuOpen]);
-
-  return (
-    <div
-      ref={anchorRef}
-      className={"[position:relative] [display:inline-grid]"}
-    >
-      <HoverTooltip label={t("messageActions.forwardTo")} side="top" sideOffset={8}>
-        <button
-          type="button"
-          className={MESSAGE_ACTION_BAR_BUTTON_CLASS}
-          aria-label={t("messageActions.forwardTo")}
-          aria-expanded={open}
-          onClick={() => {
-            props.onCloseMenu();
-            toggleMenu();
-          }}
-        >
-          <SendHorizontal
-            size={13}
-            className={"[transition:transform_0.14s_ease]"}
-            style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
-          />
-        </button>
-      </HoverTooltip>
-      {open ? (
-        <div
-          className={"[position:absolute] [left:50%] [top:100%] [z-index:40] [transform:translateX(-50%)] before:[content:''] before:[position:absolute] before:[bottom:100%] before:[left:0] before:[right:0] before:[height:8px]"}
-        >
-          <AgentForwardSubmenu
-            variant="inline"
-            attach="below"
-            targets={props.targets}
-            onForward={(provider) => {
-              closeMenu();
-              props.onForward(provider);
-            }}
-          />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function MessageMoreMenu(props: {
   message: Message;
   selectionMode: boolean;
   onClose: () => void;
   onSummarize: () => void;
   onViewThinking: () => void;
-  agentForwardTargets: AgentForwardTarget[];
-  onForwardToAgent: (provider: TuttiAgentGuiProvider) => void | Promise<void>;
   onCopyLink: (position: CopyTipPosition) => void;
   onEdit: () => void;
   onDelete: () => Promise<unknown>;
@@ -1988,13 +1889,6 @@ function MessageMoreMenu(props: {
       role="menu"
       onPointerDown={(event) => event.stopPropagation()}
     >
-      {!isRemoved ? (
-        <ForwardToAgentMenuItem
-          targets={props.agentForwardTargets}
-          onForward={(provider) => void run(() => props.onForwardToAgent(provider))}
-          onLayoutChange={applyMenuPosition}
-        />
-      ) : null}
       {!isRemoved ? <MenuButton icon={<CheckSquare size={14} />} label={t("messageActions.select")} onClick={() => void run(props.onSelect)} /> : null}
       <MenuButton icon={<BrainCircuit size={14} />} label={t("messageActions.summarize")} onClick={() => void run(props.onSummarize)} />
       {isAssistant ? <MenuButton icon={<BrainCircuit size={14} />} label={t("messageActions.viewThinking")} onClick={() => void run(props.onViewThinking)} /> : null}
@@ -2014,289 +1908,11 @@ function MessageMoreMenu(props: {
   );
 }
 
-const AGENT_FORWARD_SUBMENU_WIDTH_PX = 230;
-const AGENT_FORWARD_SUBMENU_Z_INDEX = MESSAGE_MORE_MENU_Z_INDEX + 1;
-
-function useForwardSubmenuHover(onOutsideDismiss?: () => void) {
-  const anchorRef = useRef<HTMLDivElement | null>(null);
-  const closeTimerRef = useRef<number | null>(null);
-  const [open, setOpen] = useState(false);
-
-  const clearCloseTimer = useCallback(() => {
-    if (closeTimerRef.current !== null) {
-      window.clearTimeout(closeTimerRef.current);
-      closeTimerRef.current = null;
-    }
-  }, []);
-  const openMenu = useCallback(() => {
-    clearCloseTimer();
-    setOpen(true);
-  }, [clearCloseTimer]);
-  const toggleMenu = useCallback(() => {
-    clearCloseTimer();
-    setOpen((current) => !current);
-  }, [clearCloseTimer]);
-  const closeMenu = useCallback(() => {
-    clearCloseTimer();
-    setOpen(false);
-  }, [clearCloseTimer]);
-  const scheduleClose = useCallback(() => {
-    clearCloseTimer();
-    closeTimerRef.current = window.setTimeout(() => setOpen(false), 120);
-  }, [clearCloseTimer]);
-
-  useEffect(() => () => clearCloseTimer(), [clearCloseTimer]);
-
-  useEffect(() => {
-    if (!open) return;
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (anchorRef.current?.contains(target)) return;
-      if (target instanceof Element && target.closest("[data-agent-forward-submenu]")) return;
-      closeMenu();
-      onOutsideDismiss?.();
-    };
-    document.addEventListener("pointerdown", handlePointerDown);
-    return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [closeMenu, onOutsideDismiss, open]);
-
-  return { anchorRef, closeMenu, open, openMenu, scheduleClose, toggleMenu };
-}
-
-function measureAgentForwardSubmenuStyle(
-  anchor: HTMLElement,
-  placement: "above" | "right",
-): CSSProperties {
-  const rect = anchor.getBoundingClientRect();
-  const viewportPadding = 12;
-  const menuWidth = AGENT_FORWARD_SUBMENU_WIDTH_PX;
-  const estimatedHeight = 120;
-
-  if (placement === "above") {
-    return {
-      top: Math.max(viewportPadding, rect.top - 8),
-      left: Math.min(Math.max(viewportPadding, rect.left), window.innerWidth - menuWidth - viewportPadding),
-      transform: "translateY(-100%)",
-    };
-  }
-
-  let left = rect.right + 6;
-  if (left + menuWidth > window.innerWidth - viewportPadding) {
-    left = Math.max(viewportPadding, rect.left - menuWidth - 6);
-  }
-  let top = rect.top;
-  if (top + estimatedHeight > window.innerHeight - viewportPadding) {
-    top = Math.max(viewportPadding, window.innerHeight - viewportPadding - estimatedHeight);
-  }
-  return { top, left };
-}
-
-function ForwardToAgentMenuItem(props: {
-  targets: AgentForwardTarget[];
-  onForward: (provider: TuttiAgentGuiProvider) => void;
-  onLayoutChange?: () => void;
-}) {
-  const { anchorRef, closeMenu, open, toggleMenu } = useForwardSubmenuHover();
-
-  useLayoutEffect(() => {
-    if (!open) return;
-    props.onLayoutChange?.();
-  }, [open, props.onLayoutChange]);
-
-  return (
-    <div
-      ref={anchorRef}
-      className={"[min-width:0] [overflow:hidden]"}
-    >
-      <button
-        type="button"
-        className={`[display:grid] [width:100%] [min-width:0] [height:34px] [grid-template-columns:14px_max-content_14px] [align-items:center] [column-gap:8px] [border:0] [padding:0_9px] [color:var(--text-primary)] [font-size:11px] [font-weight:650] [text-align:left] [&:hover]:[background:var(--transparency-hover)] ${open ? "[border-radius:8px_8px_0_0] [background:var(--transparency-block)]" : "[border-radius:8px] [background:transparent]"}`}
-        role="menuitem"
-        aria-expanded={open}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          toggleMenu();
-        }}
-      >
-        <SendHorizontal size={14} />
-        <span className={"[min-width:max-content] [white-space:nowrap]"}>{t("messageActions.forwardTo")}</span>
-        {open ? <ChevronDown size={14} className={"[justify-self:end] [color:var(--text-secondary)]"} /> : <ChevronRight size={14} className={"[justify-self:end] [color:var(--text-secondary)]"} />}
-      </button>
-      {open ? (
-        <AgentForwardSubmenu
-          variant="inline"
-          targets={props.targets}
-          onForward={(provider) => {
-            closeMenu();
-            props.onForward(provider);
-          }}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-function ForwardToAgentToolbarItem(props: {
-  targets: AgentForwardTarget[];
-  onForward: (provider: TuttiAgentGuiProvider) => void;
-}) {
-  const { anchorRef, closeMenu, open, toggleMenu } = useForwardSubmenuHover();
-  const [menuStyle, setMenuStyle] = useState<CSSProperties>({ visibility: "hidden" });
-
-  useLayoutEffect(() => {
-    if (!open) return;
-    const anchor = anchorRef.current;
-    if (!anchor) return;
-    setMenuStyle(measureAgentForwardSubmenuStyle(anchor, "above"));
-  }, [anchorRef, open]);
-
-  return (
-    <div
-      ref={anchorRef}
-      className={"[position:relative] [flex-shrink:0]"}
-    >
-      <ToolbarButton
-        icon={(
-          <SendHorizontal
-            size={14}
-            className={"[transition:transform_0.14s_ease]"}
-            style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
-          />
-        )}
-        label={t("messageActions.forwardTo")}
-        onClick={toggleMenu}
-      />
-      {open ? createPortal(
-        <AgentForwardSubmenu
-          targets={props.targets}
-          onForward={(provider) => {
-            closeMenu();
-            props.onForward(provider);
-          }}
-          className={"[position:fixed] [display:grid]"}
-          style={{ ...menuStyle, zIndex: AGENT_FORWARD_SUBMENU_Z_INDEX }}
-        />,
-        document.body,
-      ) : null}
-    </div>
-  );
-}
-
-function AgentForwardSubmenu(props: {
-  targets: AgentForwardTarget[];
-  onForward: (provider: TuttiAgentGuiProvider) => void;
-  variant?: "floating" | "inline";
-  attach?: "below" | "inline";
-  className?: string;
-  style?: CSSProperties;
-  onMouseEnter?: () => void;
-  onMouseLeave?: () => void;
-}) {
-  const isInline = props.variant === "inline";
-  const attachBelow = props.attach === "below";
-  const shellClass = isInline
-    ? attachBelow
-      ? "[display:grid] [gap:0] [min-width:180px] [width:max-content] [overflow:hidden] [padding:2px] [border:1px_solid_var(--border-1)] [border-radius:8px] [background:var(--white-stationary)] [box-shadow:0_12px_32px_color-mix(in_srgb,var(--black-stationary)_12%,transparent)]"
-      : "[display:grid] [gap:0] [min-width:0] [overflow:hidden] [padding:0_2px_2px] [border:0] [border-radius:0_0_8px_8px] [background:var(--transparency-block)]"
-    : "[min-width:230px] [gap:0] [padding:3px] [border:1px_solid_var(--border-1)] [border-radius:10px] [background:var(--white-stationary)] [box-shadow:0_18px_46px_color-mix(in_srgb,var(--black-stationary)_14%,transparent)] [display:grid]";
-  const inlineItemClass = (index: number) => [
-    "[display:flex] [width:100%] [min-width:0] [height:34px] [align-items:center] [gap:8px]",
-    "[border:0] [border-radius:6px] [padding:0_8px] [color:var(--text-primary)] [background:transparent]",
-    "[font-size:11px] [font-weight:650] [text-align:left]",
-    "hover:[background:var(--transparency-hover)] disabled:[opacity:0.45] disabled:[cursor:not-allowed]",
-    index > 0 ? "[border-top:1px_solid_color-mix(in_srgb,var(--black-stationary)_6%,transparent)]" : "",
-  ].join(" ");
-  const floatingItemClass = (index: number) => [
-    "[display:grid] [grid-template-columns:32px_minmax(0,_1fr)] [align-items:center] [gap:9px]",
-    "[min-height:40px] [border:0] [border-radius:9px] [padding:5px_8px] [color:var(--text-primary)] [background:transparent]",
-    "[text-align:left] hover:[background:var(--background-panel)] disabled:[opacity:0.45] disabled:[cursor:not-allowed]",
-    index > 0 ? "[border-top:1px_solid_var(--line-focus-window)]" : "",
-  ].join(" ");
-  return (
-    <div
-      className={`${shellClass} ${props.className ?? ""}`}
-      data-agent-forward-submenu
-      style={props.style}
-      role="menu"
-      onPointerDown={(event) => event.stopPropagation()}
-      onMouseEnter={props.onMouseEnter}
-      onMouseLeave={props.onMouseLeave}
-    >
-      {props.targets.length ? props.targets.map((target, index) => (
-        <button
-          key={target.provider}
-          type="button"
-          className={isInline ? inlineItemClass(index) : floatingItemClass(index)}
-          role="menuitem"
-          disabled={!target.available}
-          onClick={() => props.onForward(target.provider)}
-        >
-          <AgentForwardAvatar target={target} compact={isInline} />
-          {isInline ? (
-            <span className={"[min-width:0] [flex:1_1_auto] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]"}>
-              {target.label}
-            </span>
-          ) : (
-            <span className={"[display:grid] [min-width:0] [gap:1px]"}>
-              <strong className={"[overflow:hidden] [font-size:11px] [font-weight:650] [line-height:16px] [text-overflow:ellipsis] [white-space:nowrap]"}>
-                {target.label}
-              </strong>
-              <span className={"[overflow:hidden] [color:var(--text-secondary)] [font-size:11px] [line-height:14px] [text-overflow:ellipsis] [white-space:nowrap]"}>
-                {target.subtitle}
-              </span>
-            </span>
-          )}
-        </button>
-      )) : (
-        <p className={`[margin:0] [color:var(--text-secondary)] [font-size:11px] [line-height:18px] ${isInline ? "[padding:0_9px] [height:34px] [display:flex] [align-items:center]" : "[padding:8px]"}`}>
-          {t("messageActions.noTuttiAgentsAvailable")}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function AgentForwardAvatar(props: { target: AgentForwardTarget; compact?: boolean }) {
-  const size = props.compact ? 18 : 32;
-  const radius = props.compact ? 6 : 10;
-  const contentSize = size + 2;
-  const style = getRuntimeProviderAvatarStyle(props.target.runtimeProvider);
-  if (style?.iconUrl) {
-    return (
-      <span
-        className={"[display:grid] [overflow:hidden] [place-items:center] [flex-shrink:0] [background:var(--background-panel)]"}
-        style={{ width: size, height: size, borderRadius: radius }}
-      >
-        <img src={style.iconUrl} alt="" className={"[object-fit:cover]"} style={{ width: contentSize, height: contentSize }} />
-      </span>
-    );
-  }
-  return (
-    <span
-      className={"[display:grid] [place-items:center] [flex-shrink:0] [font-weight:750]"}
-      style={{
-        width: size,
-        height: size,
-        borderRadius: radius,
-        fontSize: (props.compact ? 9 : 11) + 2,
-        background: style?.background ?? "var(--text-primary)",
-        color: style?.color ?? "var(--white-stationary)",
-      }}
-    >
-      {style?.label ?? "AI"}
-    </span>
-  );
-}
-
 function BulkMessageToolbar(props: {
   count: number;
   onCopy: (input: CopyMessageInput) => void;
   onCopyMessageLink: (position: CopyTipPosition) => void;
   onQuote: () => void;
-  onForwardToAgent: (provider: TuttiAgentGuiProvider) => void;
-  agentForwardTargets: AgentForwardTarget[];
   onSummarize: () => void;
   onDelete: () => void;
   onClose: () => void;
@@ -2314,7 +1930,6 @@ function BulkMessageToolbar(props: {
           <ToolbarButton icon={<Reply size={14} />} label={t("messageActions.quote")} onClick={props.onQuote} />
         </span>
         <span className={"[display:flex] [flex-shrink:0] [align-items:center] [gap:7px] [border-left:1px_solid_var(--border-1)] [padding-left:10px] max-[760px]:[padding-left:7px]"}>
-          <ForwardToAgentToolbarItem targets={props.agentForwardTargets} onForward={props.onForwardToAgent} />
           <ToolbarButton icon={<BrainCircuit size={14} />} label={t("messageActions.summarize")} onClick={props.onSummarize} />
         </span>
         <span className={"[display:flex] [flex-shrink:0] [align-items:center] [gap:7px] [border-left:1px_solid_var(--border-1)] [padding-left:10px] max-[760px]:[padding-left:7px]"}>
@@ -2414,8 +2029,6 @@ function SummaryPanel(props: {
   onOpenSummaryLink: (taskId: string) => void;
   onEnsureSummaryTask: (taskId: string) => Promise<BackgroundTask | null>;
   onOpenAgentProfile: (participant: Participant) => void;
-  agentForwardTargets: AgentForwardTarget[];
-  onForwardToAgent: (provider: TuttiAgentGuiProvider) => void | Promise<void>;
   onCopy: (position: CopyTipPosition) => void;
   onBackToSource: () => void;
   onClose: () => void;
@@ -2509,10 +2122,6 @@ function SummaryPanel(props: {
               <strong className={"[font-size:11px] [font-weight:750] [color:var(--text-secondary)]"}>{loading ? t("messageActions.summarizing") : t("messageActions.summaryResult")}</strong>
               {!loading && summaryContent ? (
                 <span className={"[display:flex] [align-items:center] [gap:6px]"}>
-                  <ForwardToAgentToolbarItem
-                    targets={props.agentForwardTargets}
-                    onForward={(provider) => void props.onForwardToAgent(provider)}
-                  />
                   <button
                     type="button"
                     className={"[height:28px] [border:0] [border-radius:8px] [padding:0_10px] [color:var(--text-primary)] [background:var(--transparency-hover)] [font-size:11px] [font-weight:650]"}
@@ -3054,8 +2663,6 @@ function MessageBodyShell(props: {
   createdAt?: string;
   onReply: () => void;
   onCopy: (input: CopyMessageInput) => void;
-  agentForwardTargets: AgentForwardTarget[];
-  onForwardToAgent: (provider: TuttiAgentGuiProvider) => void | Promise<void>;
   onOpenMenu: (anchor: HTMLElement) => void;
   onCloseMenu: () => void;
   onShowActions: () => void;
@@ -3252,8 +2859,6 @@ function MessageBodyShell(props: {
           onMeasure={updateActionBarSize}
           onReply={props.onReply}
           onCopy={(position) => invokeCopy({ position })}
-          agentForwardTargets={props.agentForwardTargets}
-          onForwardToAgent={props.onForwardToAgent}
           onOpenMenu={props.onOpenMenu}
           onCloseMenu={props.onCloseMenu}
           onDismissActions={props.onHideActions}

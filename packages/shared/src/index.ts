@@ -1016,6 +1016,16 @@ function participantDisplayNameCharUnits(char: string) {
 
 const TUTTI_AGENT_PARTICIPANT_PREFIX = "tutti-agent:";
 const TUTTI_AGENT_TARGET_PARTICIPANT_PREFIX = `${TUTTI_AGENT_PARTICIPANT_PREFIX}target:`;
+const LEGACY_AGENT_LAUNCHER_APP_IDS = new Set(["agent-codex", "agent-claude-code"]);
+
+/** Classifies retired provider launchers without restoring their launch behavior. */
+export function isLegacyAgentLauncherAppId(
+  providerId: string | null | undefined,
+  entityId: string | null | undefined,
+) {
+  return providerId?.trim() === "workspace-app"
+    && LEGACY_AGENT_LAUNCHER_APP_IDS.has(entityId?.trim() ?? "");
+}
 
 export function normalizeTuttiAgentProvider(provider: string | null | undefined) {
   const normalized = provider?.trim().toLowerCase() ?? "";
@@ -1067,9 +1077,9 @@ export function parseLegacyTuttiAgentProviderParticipantId(participantId: string
 
 export function defaultTuttiAgentParticipantName(displayNameOrTargetId: string) {
   const value = displayNameOrTargetId.trim();
-  const provider = normalizeTuttiAgentProvider(value);
-  if (provider === "claude-code") return "Claude Code";
-  if (provider === "codex") return "Codex";
+  const literalProvider = value.toLowerCase();
+  if (literalProvider === "claude" || literalProvider === "claude-code") return "Claude Code";
+  if (literalProvider === "codex") return "Codex";
   return value || "Agent";
 }
 

@@ -83,7 +83,7 @@ export class ChatService {
   private readonly activeReplyKeys = new Set<string>();
   private readonly cancelledRunIds = new Set<string>();
   private readonly cancelledPrivateTaskIds = new Set<string>();
-  private readonly messageInvocationContexts = new Map<string, RuntimeInvocationContext>();
+  private readonly messageInvocationContexts = new Map<string, Map<string, RuntimeInvocationContext>>();
   private readonly activePrivateTasks = new Map<string, {
     participantId: string;
     cancel: (reason: string) => Promise<void> | void;
@@ -444,6 +444,7 @@ export class ChatService {
 
   private async cancelRunsForParticipant(participantId: string, reason: string) {
     this.repo.deletePendingRepliesForParticipant(participantId);
+    this.deleteParticipantInvocationContexts(participantId);
     const runs = this.repo.listActiveAgentRunsForParticipant(participantId);
     await Promise.all(runs.map((run) => this.cancelRun(run.id, reason)));
   }
@@ -599,7 +600,7 @@ export class ChatService {
     );
     this.materializeParticipants(conversation, targets);
     if (targets.length > 0) {
-      this.messageInvocationContexts.set(message.id, invocation);
+      this.setMessageInvocationContexts(message.id, targets, invocation);
       void this.generateReplies(conversation.roomId, conversationId, message, targets, {
         currentRound: 1,
         maxRounds: input.maxReplyRounds
@@ -675,6 +676,10 @@ export class ChatService {
 
   getPrivateTask(taskId: string) {
     return this.repo.getPrivateTask(taskId);
+  }
+
+  getMessage(messageId: string) {
+    return this.repo.getMessage(messageId);
   }
 
   listPrivateTasksForConversation(conversationId: string) {
@@ -771,7 +776,7 @@ export class ChatService {
       invocation.defaultAgentTargetId,
     );
     if (targets.length > 0) {
-      this.messageInvocationContexts.set(result.message.id, invocation);
+      this.setMessageInvocationContexts(result.message.id, targets, invocation);
       void this.generateReplies(conversation.roomId, conversation.id, result.message, targets, {
         currentRound: 1,
         maxRounds: workspaceAppOnlyDispatch ? 1 : maxReplyRoundsForTrigger(conversation, result.message.mentions),
@@ -1313,20 +1318,25 @@ export class ChatService {
         const currentParticipant = this.resolveEffectiveParticipant(conversation, participant);
         if (!currentParticipant || currentParticipant.status !== "active") {
           this.repo.deletePendingRepliesForParticipant(participant.id);
+          this.deleteParticipantInvocationContexts(participant.id);
           break;
         }
         const latest = this.repo.getMessage(nextMessage.id);
         if (!latest || latest.status === "recalled") break;
-        const currentInvocation = this.messageInvocationContexts.get(latest.id) ?? invocation;
-        const generated = await this.generateForParticipant(
-          roomId,
-          conversationId,
-          latest,
-          currentParticipant,
-          nextMessage.id === userMessage.id ? preacceptedRun : null,
-          currentInvocation,
-        );
-        this.messageInvocationContexts.delete(latest.id);
+        const currentInvocation = this.messageInvocationContexts.get(latest.id)?.get(participant.id) ?? invocation;
+        let generated: Message | null;
+        try {
+          generated = await this.generateForParticipant(
+            roomId,
+            conversationId,
+            latest,
+            currentParticipant,
+            nextMessage.id === userMessage.id ? preacceptedRun : null,
+            currentInvocation,
+          );
+        } finally {
+          this.deleteMessageInvocationContext(latest.id, participant.id, currentInvocation);
+        }
         if (nextMessage.id === userMessage.id) requestedReply = generated;
         const pending = this.repo.consumePendingReply(conversationId, participant.id);
         if (!pending) {
@@ -1339,6 +1349,35 @@ export class ChatService {
       this.activeReplyKeys.delete(key);
     }
     return requestedReply;
+  }
+
+  private setMessageInvocationContexts(
+    messageId: string,
+    targets: Participant[],
+    invocation: RuntimeInvocationContext,
+  ) {
+    this.messageInvocationContexts.set(
+      messageId,
+      new Map(targets.map((target) => [target.id, invocation])),
+    );
+  }
+
+  private deleteMessageInvocationContext(
+    messageId: string,
+    participantId: string,
+    expectedInvocation: RuntimeInvocationContext | undefined,
+  ) {
+    const byParticipant = this.messageInvocationContexts.get(messageId);
+    if (!byParticipant || byParticipant.get(participantId) !== expectedInvocation) return;
+    byParticipant.delete(participantId);
+    if (byParticipant.size === 0) this.messageInvocationContexts.delete(messageId);
+  }
+
+  private deleteParticipantInvocationContexts(participantId: string) {
+    for (const [messageId, byParticipant] of this.messageInvocationContexts) {
+      byParticipant.delete(participantId);
+      if (byParticipant.size === 0) this.messageInvocationContexts.delete(messageId);
+    }
   }
 
   private resolveFollowupTargets(

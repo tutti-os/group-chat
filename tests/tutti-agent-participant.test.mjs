@@ -43,6 +43,7 @@ const runtimeProfile = {
 test("virtual Tutti agent participants use stable non-clone ids", async () => {
   const {
     createVirtualTuttiAgentParticipant,
+    defaultTuttiAgentParticipantName,
     localAgentTargetFromLauncherAppId,
     parseLegacyTuttiAgentProviderParticipantId,
     parseTuttiAgentParticipantId,
@@ -50,6 +51,12 @@ test("virtual Tutti agent participants use stable non-clone ids", async () => {
   } = await loadModule();
 
   assert.equal(localAgentTargetFromLauncherAppId("agent-target:workspace/agent:primary"), "workspace/agent:primary");
+  assert.equal(localAgentTargetFromLauncherAppId("agent-target: target with edges "), " target with edges ");
+  assert.equal(localAgentTargetFromLauncherAppId(" agent-target:workspace/agent:primary"), "");
+  assert.equal(defaultTuttiAgentParticipantName("codex"), "Codex");
+  assert.equal(defaultTuttiAgentParticipantName("claude"), "Claude Code");
+  assert.equal(defaultTuttiAgentParticipantName("codex/"), "codex/");
+  assert.equal(defaultTuttiAgentParticipantName("claude code"), "claude code");
   assert.equal(tuttiAgentParticipantId("workspace/agent:primary"), "tutti-agent:target:workspace%2Fagent%3Aprimary");
   assert.equal(parseTuttiAgentParticipantId("tutti-agent:target:workspace%2Fagent%3Aprimary"), "workspace/agent:primary");
   assert.equal(tuttiAgentParticipantId(" target with edges "), "tutti-agent:target:%20target%20with%20edges%20");

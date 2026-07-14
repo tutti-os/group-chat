@@ -94,7 +94,7 @@ function upgradeGroupChatOpenableReferenceLinks(
       } catch {
         // keep raw entity id
       }
-      if (provider === "workspace-app" && isAgentLauncherAppId(entityId)) {
+      if (isAgentLauncherAppId(provider, entityId)) {
         return label;
       }
       const mention = mentions.find((item) =>

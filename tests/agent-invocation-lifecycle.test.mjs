@@ -46,8 +46,35 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
       assert.equal(humanOnly.targets.length, 0);
       assert.equal(service.messageInvocationContexts.size, 0);
 
-      service.activeReplyKeys.add(conversation.id + ":" + participant.id);
-      const edited = await service.updateMessage(humanOnly.message.id, {
+      const observedCredentials = [];
+      let releaseFirstReply;
+      let markFirstReplyStarted;
+      let markSecondReplyFinished;
+      const firstReplyStarted = new Promise((resolve) => { markFirstReplyStarted = resolve; });
+      const secondReplyFinished = new Promise((resolve) => { markSecondReplyFinished = resolve; });
+      service.generateForParticipant = async (_roomId, _conversationId, _message, _participant, _run, invocation) => {
+        observedCredentials.push(invocation?.managedAgentHeaders?.["x-tutti-agent-invocation-credential"] ?? "missing");
+        if (observedCredentials.length === 1) {
+          markFirstReplyStarted();
+          await new Promise((resolve) => { releaseFirstReply = resolve; });
+        } else {
+          markSecondReplyFinished();
+        }
+        return null;
+      };
+      const first = service.sendMessage(conversation.id, {
+        content: "first for agent",
+        mentions: [{
+          mentionType: "participant",
+          participantId: participant.id,
+          displayNameSnapshot: participant.displayName,
+        }],
+      }, {
+        managedAgentHeaders: { "x-tutti-agent-invocation-credential": "first-secret" },
+        agentDetectContext: { managedAgentInvocation: { credential: "first-secret" } },
+      });
+      await firstReplyStarted;
+      const edited = await service.updateMessage(first.message.id, {
         content: "edited for agent",
         mentions: [{
           mentionType: "participant",
@@ -60,12 +87,16 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
       });
       assert.equal(edited?.targets[0]?.id, participant.id);
       await Promise.resolve();
-      const queuedInvocation = service.messageInvocationContexts.get(humanOnly.message.id);
+      const queuedInvocation = service.messageInvocationContexts.get(first.message.id)?.get(participant.id);
       assert.equal(
         queuedInvocation?.managedAgentHeaders?.["x-tutti-agent-invocation-credential"],
         "edited-secret",
       );
-      service.activeReplyKeys.delete(conversation.id + ":" + participant.id);
+      releaseFirstReply();
+      await secondReplyFinished;
+      await Promise.resolve();
+      assert.deepEqual(observedCredentials, ["first-secret", "edited-secret"]);
+      assert.equal(service.messageInvocationContexts.size, 0);
 
       const scopedRepo = new ChatRepository();
       const scopedService = new ChatService(scopedRepo, new EventHub(), new AgentToolTokenStore());

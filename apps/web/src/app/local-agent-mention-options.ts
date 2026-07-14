@@ -70,7 +70,7 @@ export function findParticipantForLocalAgentProfile(
       ? runtimeProfiles.find((item) => item.id === runtimeProfileId) ?? null
       : null;
     if (
-      participant.runtimeProfileId === runtime?.id
+      runtimeProfileId === runtime?.id
       &&
       runtime?.kind === "local-agent"
       && runtime.agentTargetId === profile.agentTargetId

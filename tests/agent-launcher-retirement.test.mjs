@@ -25,13 +25,22 @@ async function loadModule() {
 test("retired provider launcher ids stay classified as legacy references", async () => {
   const { isAgentLauncherAppId } = await loadModule();
 
-  assert.equal(isAgentLauncherAppId("agent-codex"), true);
-  assert.equal(isAgentLauncherAppId("agent-claude-code"), true);
-  assert.equal(isAgentLauncherAppId("agent-cursor"), false);
+  assert.equal(isAgentLauncherAppId("workspace-app", "agent-codex"), true);
+  assert.equal(isAgentLauncherAppId("workspace-app", "agent-claude-code"), true);
+  assert.equal(isAgentLauncherAppId("workspace-app", "agent-cursor"), false);
+  assert.equal(isAgentLauncherAppId("workspace-issue", "agent-codex"), false);
 });
 
 test("composer no longer queries provider launcher availability", () => {
   const source = readFileSync(path.join(rootDir, "apps/web/src/app/components/chat/Composer.tsx"), "utf8");
 
   assert.doesNotMatch(source, /agent-launcher-availability|fetchAgentLauncherAvailability/);
+});
+
+test("retired provider forwarding handlers and UI are removed", () => {
+  const appSource = readFileSync(path.join(rootDir, "apps/web/src/app/App.tsx"), "utf8");
+  const timelineSource = readFileSync(path.join(rootDir, "apps/web/src/app/components/chat/MessageTimeline.tsx"), "utf8");
+
+  assert.doesNotMatch(appSource, /agentForwardTargets|forwardMessagesToAgent|forwardSummaryToAgent/);
+  assert.doesNotMatch(timelineSource, /AgentForwardTarget|ForwardToAgent|onForwardToAgent/);
 });

@@ -682,7 +682,8 @@ function assertTargetProviderMatchesProfile(providerId: string, context: Runtime
 }
 
 function canonicalProviderId(providerId: string | null | undefined) {
-  return normalizeTuttiAgentProvider(providerId);
+  const normalized = providerId?.trim().toLowerCase() ?? "";
+  return normalized === "claude" ? "claude-code" : normalized;
 }
 
 function localAgentUnavailableReason(

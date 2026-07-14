@@ -1,7 +1,10 @@
-const LEGACY_AGENT_LAUNCHER_APP_IDS = new Set(["agent-codex", "agent-claude-code"]);
+import { isLegacyAgentLauncherAppId } from "@group-chat/shared";
 
-export function isAgentLauncherAppId(entityId: string | null | undefined): boolean {
-  return LEGACY_AGENT_LAUNCHER_APP_IDS.has(entityId?.trim() ?? "");
+export function isAgentLauncherAppId(
+  providerId: string | null | undefined,
+  entityId: string | null | undefined,
+): boolean {
+  return isLegacyAgentLauncherAppId(providerId, entityId);
 }
 
 export function formatAgentLauncherMentionLabel(label: string): string {

@@ -54,7 +54,7 @@ import { AgentRunPanel } from "./components/chat/AgentRunPanel.js";
 import { AgentThinkingPanel } from "./components/chat/AgentThinkingPanel.js";
 import { RoomAgentsDialog } from "./components/chat/RoomAgentsDialog.js";
 import { AgentProfileDialog } from "./components/chat/AgentProfileDialog.js";
-import { MessageTimeline, type AgentForwardTarget } from "./components/chat/MessageTimeline.js";
+import { MessageTimeline } from "./components/chat/MessageTimeline.js";
 import { DeleteMessageConfirmDialog } from "./components/chat/DeleteMessageConfirmDialog.js";
 import { InvitePeopleDialog } from "./components/chat/InvitePeopleDialog.js";
 import { Composer } from "./components/chat/Composer.js";
@@ -75,17 +75,13 @@ import { formatSummaryLink, primaryMessageLinkId, resolveAgentProfileParticipant
 import { attachmentLabel, subscribeI18n, t } from "./i18n/index.js";
 import { collectMessageProcess, resolveMessageRunId } from "./agent-thinking.js";
 import { UNREAD_FEATURE_ENABLED } from "./feature-flags.js";
-import { initTuttiWorkspaceContextCache, resolveArtifactAgentDraftHref } from "./tutti-bridge.js";
+import { initTuttiWorkspaceContextCache } from "./tutti-bridge.js";
 import { loadCachedSnapshot, saveCachedSnapshot } from "./bootstrap-cache.js";
 import { mergeAgentCatalogSnapshot } from "./agent-refresh-state.js";
-import { buildAgentGuiDraftPrompt } from "./agent-gui-draft-prompt.js";
-import { dispatchAgentGuiTask, type TuttiAgentGuiProvider } from "./agent-gui-dispatch.js";
 import { reportUserActive } from "./tutti-activity.js";
-import { formatMessageBodyForAgentForward, formatReferenceMentionMarkdown } from "./reference-mentions.js";
+import { formatReferenceMentionMarkdown } from "./reference-mentions.js";
 import { enrichMessageContentForCopy } from "./composer-paste-content.js";
-import { collectImageFileArtifactsForMessages } from "./message-artifacts.js";
 import { hasTimelineMessages } from "./message-timeline-state.js";
-import { groupAgentForwardSections } from "./agent-forward-format.js";
 
 const MIN_CONVERSATION_SIDEBAR_WIDTH = 240;
 const DEFAULT_CONVERSATION_SIDEBAR_WIDTH = MIN_CONVERSATION_SIDEBAR_WIDTH;
@@ -682,9 +678,6 @@ export function App() {
       : [],
     [currentConversation, state.agentRuns],
   );
-  // Provider-specific AgentGUI launchers are retired. Keep the existing
-  // timeline prop empty until forward-to-agent is rebuilt on exact Agent IDs.
-  const agentForwardTargets: AgentForwardTarget[] = [];
   const currentActiveRuns = useMemo(
     () => currentConversation
       ? visibleActiveRuns(
@@ -1420,7 +1413,7 @@ export function App() {
     }
   }, [deletePrompt]);
 
-  const requestComposerInsert = (messages: Message[], mode: "quote" | "summary" | "send-to-app" | "send-to-agent" = "quote") => {
+  const requestComposerInsert = (messages: Message[], mode: "quote" | "summary" | "send-to-app" = "quote") => {
     if (mode === "quote") {
       const quotes = messages
         .filter((message) => message.status !== "deleted" && message.status !== "recalled")
@@ -1476,47 +1469,6 @@ export function App() {
     }));
     setFocusComposerRequest((current) => ({ seq: (current?.seq ?? 0) + 1 }));
   }, []);
-
-  const forwardMessagesToAgent = async (messages: Message[], provider: TuttiAgentGuiProvider) => {
-    const visibleMessages = messages.filter((message) => message.status !== "deleted" && message.status !== "recalled");
-    if (!visibleMessages.length) return;
-    const content = formatMessagesForAgentForward(
-      visibleMessages,
-      state.messageBlocks,
-      state.artifacts,
-      state.participants,
-      state.identities,
-      userProfile.displayName,
-    );
-    const mentions = visibleMessages.flatMap((message) => message.mentions ?? []);
-    const prompt = buildAgentGuiDraftPrompt(content, mentions, {
-      artifacts: state.artifacts,
-      messages: state.messages,
-      participants: state.participants,
-      identities: state.identities,
-      userDisplayName: userProfile.displayName,
-      summaryTasks: backgroundTasks,
-    });
-    const opened = await dispatchAgentGuiTask({ provider, prompt });
-    if (!opened) {
-      window.alert(t("messageActions.forwardToAgentFailed"));
-    }
-  };
-
-  const forwardSummaryToAgent = async (task: BackgroundTask, provider: TuttiAgentGuiProvider) => {
-    const prompt = buildAgentGuiDraftPrompt(formatSummaryLink(task.id), [], {
-      artifacts: state.artifacts,
-      messages: state.messages,
-      participants: state.participants,
-      identities: state.identities,
-      userDisplayName: userProfile.displayName,
-      summaryTasks: backgroundTasks,
-    });
-    const opened = await dispatchAgentGuiTask({ provider, prompt });
-    if (!opened) {
-      window.alert(t("messageActions.forwardToAgentFailed"));
-    }
-  };
 
   const requestComposerEdit = (message: Message) => {
     setComposerRequest((current) => ({
@@ -1874,7 +1826,6 @@ export function App() {
                     conversations={state.conversations}
                     rooms={state.rooms}
                     participantsCount={currentAgents.length}
-                    agentForwardTargets={agentForwardTargets}
                     focusMessageRequest={focusMessageRequest}
                     scrollToBottomRequest={scrollToBottomRequest}
                     hasMoreBefore={Boolean(currentTimelinePageState?.hasMore)}
@@ -1913,8 +1864,6 @@ export function App() {
                     onEnsureSummaryTask={ensureBackgroundTask}
                     summaryTasks={backgroundTasks}
                     onQuoteMessages={requestComposerInsert}
-                    onForwardMessagesToAgent={(messages, provider) => void forwardMessagesToAgent(messages, provider)}
-                    onForwardSummaryToAgent={(task, provider) => void forwardSummaryToAgent(task, provider)}
                     onStartSummary={startBackgroundSummary}
                     openBackgroundTask={enrichedOpenBackgroundTask}
                     onCloseBackgroundTaskPanel={closeBackgroundTaskPanel}
@@ -2215,7 +2164,7 @@ function visibleActiveRuns(runs: AgentRun[], messagesById: Map<string, Message>)
   });
 }
 
-function formatMessagesForComposer(messages: Message[], mode: "quote" | "summary" | "send-to-app" | "send-to-agent") {
+function formatMessagesForComposer(messages: Message[], mode: "quote" | "summary" | "send-to-app") {
   const lines = messages
     .filter((message) => message.status !== "deleted" && message.status !== "recalled")
     .map((message) => {
@@ -2225,7 +2174,6 @@ function formatMessagesForComposer(messages: Message[], mode: "quote" | "summary
   const content = `${lines.join("\n")}\n`;
   if (mode === "summary") return t("app.summaryComposerPrompt", { content });
   if (mode === "send-to-app") return t("app.sendToAppPrompt", { content });
-  if (mode === "send-to-agent") return t("app.sendToAgentPrompt", { content });
   return `${lines.join("\n")}\n\n`;
 }
 
@@ -2267,43 +2215,6 @@ function formatMessageBlockForComposerQuote(
   return formatReferenceMentionMarkdown("file", artifact.id, artifact.filename);
 }
 
-function formatMessagesForAgentForward(
-  messages: Message[],
-  blocks: AppState["messageBlocks"],
-  artifacts: AppState["artifacts"],
-  participants: Participant[],
-  identities: Identity[],
-  userDisplayName: string,
-) {
-  const sections = messages
-    .filter((message) => message.status !== "deleted" && message.status !== "recalled")
-    .map((message) => {
-      const rawContent = message.content.trim();
-      const body = rawContent ? formatMessageBodyForAgentForward(rawContent, message.mentions ?? []) : "";
-      const messageArtifacts = collectImageFileArtifactsForMessages([message], blocks, artifacts);
-      const attachmentLines = messageArtifacts.map(formatArtifactForAgentForward).filter(Boolean);
-      const parts = [body, ...attachmentLines].filter(Boolean);
-      return {
-        senderKey: message.role === "user"
-          ? "user"
-          : message.senderParticipantId ?? `${message.role}:${message.senderName ?? ""}`,
-        senderLabel: messageSenderLabel(message, participants, identities, userDisplayName),
-        content: parts.length ? parts.join(" ") : attachmentLabel(),
-      };
-    });
-  return groupAgentForwardSections(sections);
-}
-
-function formatArtifactForAgentForward(artifact: AppState["artifacts"][number]) {
-  const href = resolveArtifactAgentDraftHref(artifact);
-  if (!href) return "";
-  const label = escapeMarkdownLabel(artifact.filename);
-  return `[${label}](${href})`;
-}
-
-function escapeMarkdownLabel(value: string) {
-  return value.replaceAll("\\", "\\\\").replaceAll("[", "\\[").replaceAll("]", "\\]");
-}
 
 function formatSummarySourcePreview(messages: Message[]) {
   const firstContent = messages[0]?.content.replace(/\s+/g, " ").trim().slice(0, 120) || attachmentLabel();

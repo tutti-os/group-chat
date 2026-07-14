@@ -274,7 +274,6 @@ server.post<{ Params: { conversationId: string }; Body: PrivateTaskRequest }>(
     try {
       const managedAgentHeaders = request.headers as ManagedAgentInvocationCredentialHeaders;
       const agentDetectContext = createManagedAgentDetectContextFromHeaders(managedAgentHeaders);
-      await chat.listLocalAgentTargets(agentDetectContext);
       return chat.runPrivateTask(request.params.conversationId, request.body ?? {}, {
         agentDetectContext,
         managedAgentHeaders,
@@ -337,9 +336,15 @@ server.patch<{ Params: { messageId: string }; Body: UpdateMessageRequest }>(
     try {
       const managedAgentHeaders = request.headers as ManagedAgentInvocationCredentialHeaders;
       const agentDetectContext = createManagedAgentDetectContextFromHeaders(managedAgentHeaders);
-      const catalog = request.body.status === "recalled"
+      const currentMessage = request.body.status === "recalled"
         ? null
-        : await chat.listLocalAgentTargets(agentDetectContext);
+        : chat.getMessage(request.params.messageId);
+      const catalog = currentMessage && messageRequiresAgentCatalog({
+          content: request.body.content ?? currentMessage.content,
+          mentions: request.body.mentions ?? currentMessage.mentions,
+        })
+        ? await chat.listLocalAgentTargets(agentDetectContext)
+        : null;
       const result = await chat.updateMessage(request.params.messageId, request.body, {
         agentDetectContext,
         ...(catalog ? { defaultAgentTargetId: catalog.defaultAgentTargetId } : {}),
@@ -736,8 +741,7 @@ function mentionRequiresAgentCatalog(mention: MentionTarget) {
   ) return true;
   if (mention.mentionType !== "reference") return false;
   const scope = resolveMentionTargetReferenceScope(mention);
-  return mention.referenceProviderId === "agent-session"
-    || scope?.groupChatLocalAgentMention === "true";
+  return scope?.groupChatLocalAgentMention === "true";
 }
 
 function sendCliOutput(

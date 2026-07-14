@@ -62,6 +62,13 @@ test("exact target selection rejects TOCTOU, unknown targets, and ambiguous prov
       recentMessages: [], attachments: [],
     };
     if (!(await provider.detect(context)).available) throw new Error("exact target should initially be available");
+    const malformedProvider = {
+      ...context,
+      runtimeProfile: { ...context.runtimeProfile, provider: "co dex" },
+    };
+    if ((await provider.detect(malformedProvider)).available) {
+      throw new Error("lossy provider metadata normalization selected another provider");
+    }
     await writeFile(${JSON.stringify(modeFile)}, "unavailable");
     try {
       for await (const _event of provider.streamReply(context)) {}
