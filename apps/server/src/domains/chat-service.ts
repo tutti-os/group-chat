@@ -458,13 +458,21 @@ export class ChatService {
   }
 
   private resolveRunRuntimeProfile(run: AgentRun) {
-    const descriptorProfile = this.repo.listRuntimeProfiles().find((profile) =>
+    const profiles = this.repo.listRuntimeProfiles();
+    const descriptorProfile = profiles.find((profile) =>
       profile.kind === run.runtime
       && profile.agentTargetId === run.agentTargetId
       && profile.provider === run.provider
       && profile.model === run.model
     );
     if (descriptorProfile) return descriptorProfile;
+    const targetProfile = run.agentTargetId
+      ? profiles.find((profile) =>
+          profile.kind === run.runtime
+          && profile.agentTargetId === run.agentTargetId
+        )
+      : null;
+    if (targetProfile) return targetProfile;
     const participant = run.participantId ? this.repo.getParticipant(run.participantId) : null;
     return participant ? this.resolveParticipantRuntimeProfile(participant) : null;
   }

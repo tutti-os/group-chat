@@ -304,7 +304,16 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       const scopedRepo = new ChatRepository();
-      const scopedService = new ChatService(scopedRepo, new EventHub(), new AgentToolTokenStore());
+      const scopedEvents = new EventHub();
+      const scopedEventMessages = [];
+      scopedEvents.addClient({
+        readyState: 1,
+        send(data) {
+          scopedEventMessages.push(JSON.parse(data));
+        },
+      });
+      const scopedTokens = new AgentToolTokenStore();
+      const scopedService = new ChatService(scopedRepo, scopedEvents, scopedTokens);
       scopedService.runtimes = {
         async listLocalAgentTargets(context) {
           const credential = context?.managedAgentInvocation?.credential;
@@ -371,6 +380,8 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
       let markVirtualRunStarted;
       let markVirtualStreamStopped;
       let cancelledVirtualRunId = null;
+      let virtualToolToken = null;
+      let demoProviderCancelCalls = 0;
       const virtualRunStarted = new Promise((resolve) => { markVirtualRunStarted = resolve; });
       const virtualStreamStopped = new Promise((resolve) => { markVirtualStreamStopped = resolve; });
       const virtualProvider = {
@@ -387,6 +398,7 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
           return { available: true };
         },
         async *streamReply(context) {
+          virtualToolToken = context.toolAccess?.token ?? null;
           markVirtualRunStarted(context.runId);
           await new Promise((resolve) => { releaseVirtualRun = resolve; });
           markVirtualStreamStopped();
@@ -401,8 +413,13 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
       };
       scopedService.runtimes = {
         getProvider(runtimeProfile) {
-          assert.equal(runtimeProfile?.id, virtualParticipant.runtimeProfileId);
-          return virtualProvider;
+          if (runtimeProfile?.kind === "local-agent") return virtualProvider;
+          return {
+            async cancel() {
+              demoProviderCancelCalls += 1;
+              return { cancelled: false };
+            },
+          };
         },
       };
       const virtualMessage = scopedRepo.createMessage({
@@ -420,11 +437,43 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
         { managedAgentHeaders: { "x-tutti-agent-invocation-credential": "virtual-secret" } },
       );
       const virtualRunId = await virtualRunStarted;
-      assert.equal(scopedRepo.getAgentRun(virtualRunId)?.status, "running");
+      const activeVirtualRun = scopedRepo.getAgentRun(virtualRunId);
+      assert.equal(activeVirtualRun?.status, "running");
+      assert.equal(activeVirtualRun?.provider, "codex");
+      assert.equal(activeVirtualRun?.model, "default");
+      assert.ok(virtualToolToken);
+      assert.equal(scopedTokens.authorize(virtualParticipant.id, { token: virtualToolToken }).runId, virtualRunId);
+      scopedRepo.syncLocalAgentCatalog({ agents: [{
+        agentTargetId: "target-a",
+        providerId: "provider-after-refresh",
+        displayName: "Target A Refreshed",
+        available: true,
+        runtimeSupported: true,
+        defaultModelId: "model-after-refresh",
+      }] });
+      const refreshedVirtualProfile = scopedRepo.getRuntimeProfile(virtualParticipant.runtimeProfileId);
+      assert.equal(refreshedVirtualProfile?.kind, "local-agent");
+      assert.equal(refreshedVirtualProfile?.agentTargetId, activeVirtualRun?.agentTargetId);
+      assert.notEqual(refreshedVirtualProfile?.provider, activeVirtualRun?.provider);
+      assert.notEqual(refreshedVirtualProfile?.model, activeVirtualRun?.model);
       assert.equal(scopedService.messageInvocationContexts.size > 0, true);
       const deletedVirtualRoom = await scopedService.deleteRoom(scopedRoom.room.id);
       assert.equal(deletedVirtualRoom?.id, scopedRoom.room.id);
       assert.equal(cancelledVirtualRunId, virtualRunId);
+      assert.equal(demoProviderCancelCalls, 0);
+      assert.equal(
+        scopedEventMessages.some((message) =>
+          message.type === "event"
+          && message.event?.type === "run.cancelled"
+          && message.event.runId === virtualRunId
+          && message.event.payload?.run?.status === "cancelled"
+        ),
+        true,
+      );
+      assert.throws(
+        () => scopedTokens.authorize(virtualParticipant.id, { token: virtualToolToken }),
+        /invalid or expired/,
+      );
       assert.equal(scopedService.messageInvocationContexts.size, 0);
       await virtualGeneration;
       closeDb();
