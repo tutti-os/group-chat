@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -20,6 +20,17 @@ test("Tutti CLI handlers expose public conversation data only", async (t) => {
   assert.equal(buildShared.status, 0, buildShared.stderr || buildShared.stdout);
 
   const server = await startServer(t);
+  const explicitNoDefaultRoom = await postJson(server.baseUrl, "/api/rooms", {
+    title: "Explicit no-default room",
+    participants: [{ displayName: "No default agent", runtimeProfileId: null }],
+  });
+  assert.equal(explicitNoDefaultRoom.status, 200);
+  assert.equal(explicitNoDefaultRoom.body.participants[0]?.runtimeProfileId, null);
+  await assert.rejects(
+    stat(server.agentDetectMarkerPath),
+    (error) => error?.code === "ENOENT",
+    "explicit no-default participants must not trigger Agent catalog detection",
+  );
   const list = await postJson(server.baseUrl, "/tutti/cli/conversations/list", {
     input: { limit: 1 },
     outputMode: "json",
@@ -326,6 +337,13 @@ test("Tutti CLI handlers expose public conversation data only", async (t) => {
 
 async function startServer(t) {
   const home = await mkdtemp(path.join(os.tmpdir(), "group-chat-tutti-cli-test-"));
+  const agentDetectMarkerPath = path.join(home, "agent-detect-invoked");
+  const fakeTuttiPath = path.join(home, "fake-tutti.mjs");
+  await writeFile(
+    fakeTuttiPath,
+    `#!/usr/bin/env node\nawait import("node:fs/promises").then(({ writeFile }) => writeFile(${JSON.stringify(agentDetectMarkerPath)}, process.argv.slice(2).join(" ")));\n`,
+  );
+  await chmod(fakeTuttiPath, 0o755);
   const port = 8900 + Math.floor(Math.random() * 800);
   const usesProcessGroup = process.platform !== "win32";
   const child = spawn("pnpm", ["--filter", "@group-chat/server", "exec", "tsx", "src/main.ts"], {
@@ -333,6 +351,7 @@ async function startServer(t) {
     env: {
       ...process.env,
       GROUP_CHAT_HOME: home,
+      GROUP_CHAT_TUTTI_CLI: fakeTuttiPath,
       HOST: "127.0.0.1",
       PORT: String(port),
     },
@@ -366,7 +385,13 @@ async function startServer(t) {
     }
     try {
       const response = await fetch(`${baseUrl}/api/health`);
-      if (response.ok) return { baseUrl, dbPath: path.join(home, "data", "group-chat.db") };
+      if (response.ok) {
+        return {
+          baseUrl,
+          dbPath: path.join(home, "data", "group-chat.db"),
+          agentDetectMarkerPath,
+        };
+      }
     } catch {
       // Keep polling until the Fastify listener is ready.
     }

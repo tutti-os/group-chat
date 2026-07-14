@@ -11,7 +11,7 @@ async function loadStateModule() {
   const build = spawnSync(
     "pnpm",
     ["--filter", "@group-chat/web", "exec", "esbuild", "src/app/state.ts", "--bundle", "--platform=browser", "--format=esm", `--outfile=${outfile}`],
-    { cwd: rootDir, encoding: "utf8", stdio: "pipe", env: { ...process.env, ESBUILD_WORKER: "false" } },
+    { cwd: rootDir, encoding: "utf8", stdio: "pipe", env: { ...process.env, ESBUILD_WORKER_THREADS: "0" } },
   );
   assert.equal(build.status, 0, build.stderr || build.stdout);
   return import(`${pathToFileURL(outfile)}?t=${Date.now()}`);

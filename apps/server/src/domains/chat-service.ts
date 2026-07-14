@@ -138,7 +138,7 @@ export class ChatService {
       ...(input.participants
         ? {
             participants: input.participants.map((participant) =>
-              participant.runtimeProfileId || !defaultRuntimeProfileId
+              participant.runtimeProfileId !== undefined
                 ? participant
                 : { ...participant, runtimeProfileId: defaultRuntimeProfileId }
             ),
@@ -155,7 +155,19 @@ export class ChatService {
     return bundle;
   }
 
-  deleteRoom(roomId: string) {
+  async deleteRoom(roomId: string) {
+    if (!this.repo.getRoom(roomId)) return null;
+    const bundle = this.repo.getRoomBundle(roomId);
+    const participantIds = new Set([
+      ...bundle.participants.map((participant) => participant.id),
+      ...this.repo.listPendingReplies()
+        .filter((item) => item.conversationId === bundle.conversation.id)
+        .map((item) => item.participantId),
+    ]);
+    await Promise.all([...participantIds].map((participantId) =>
+      this.cancelParticipantWork(participantId, "Room deleted")
+    ));
+    this.deleteConversationInvocationContexts(bundle.conversation.id);
     const result = this.repo.deleteRoom(roomId);
     if (result) {
       this.events.emit({
@@ -927,7 +939,7 @@ export class ChatService {
         item.id === scopedParticipantId
         && item.kind === "ai"
         && item.status !== "removed"
-        && item.runtimeProfileId === runtimeProfile.id
+        && this.resolveParticipantRuntimeProfile(item)?.id === runtimeProfile.id
       );
       if (participant) return participant;
     }
@@ -940,7 +952,7 @@ export class ChatService {
     const existing = participants.find((participant) =>
       participant.kind === "ai"
       && participant.status !== "removed"
-      && participant.runtimeProfileId === runtimeProfile.id
+      && this.resolveParticipantRuntimeProfile(participant)?.id === runtimeProfile.id
       && normalizeTuttiAgentName(participant.displayName) === normalizedRequestedName
     );
     if (existing) return existing;
@@ -993,8 +1005,26 @@ export class ChatService {
     conversation: Conversation,
     participant: Participant,
   ) {
-    return this.repo.getParticipant(participant.id)
-      ?? this.resolveVirtualTuttiAgentParticipant(conversation, participant.id, participant.displayName);
+    const persisted = this.repo.getParticipant(participant.id);
+    if (persisted) {
+      const runtimeProfile = this.resolveParticipantRuntimeProfile(persisted);
+      return runtimeProfile && !persisted.runtimeProfileId
+        ? {
+            ...persisted,
+            runtimeProfileId: runtimeProfile.id,
+            agentTargetId: runtimeProfile.agentTargetId,
+          }
+        : persisted;
+    }
+    return this.resolveVirtualTuttiAgentParticipant(conversation, participant.id, participant.displayName);
+  }
+
+  private resolveParticipantRuntimeProfile(participant: Participant) {
+    const runtimeProfileId = participant.runtimeProfileId
+      ?? (participant.identityId
+        ? this.repo.getIdentity(participant.identityId)?.defaultRuntimeProfileId
+        : null);
+    return runtimeProfileId ? this.repo.getRuntimeProfile(runtimeProfileId) : null;
   }
 
   private materializeExistingWorkspaces() {
@@ -1305,8 +1335,9 @@ export class ChatService {
     invocation?: RuntimeInvocationContext,
   ) {
     const key = replyScheduleKey(conversationId, participant.id);
-    const scheduledInvocation = invocation ?? {};
-    this.setMessageInvocationContext(userMessage.id, participant.id, scheduledInvocation);
+    if (invocation !== undefined) {
+      this.setMessageInvocationContext(userMessage.id, participant.id, invocation);
+    }
     if (this.activeReplyKeys.has(key)) {
       const displaced = this.repo.getPendingReply(conversationId, participant.id);
       this.repo.upsertPendingReply({
@@ -1425,6 +1456,14 @@ export class ChatService {
     for (const [messageId, byParticipant] of this.messageInvocationContexts) {
       byParticipant.delete(participantId);
       if (byParticipant.size === 0) this.messageInvocationContexts.delete(messageId);
+    }
+  }
+
+  private deleteConversationInvocationContexts(conversationId: string) {
+    for (const messageId of this.messageInvocationContexts.keys()) {
+      if (this.repo.getMessage(messageId)?.conversationId === conversationId) {
+        this.messageInvocationContexts.delete(messageId);
+      }
     }
   }
 
@@ -2216,13 +2255,15 @@ export class ChatService {
     defaultAgentTargetId = "",
   ): T {
     const current = identityId ? this.repo.getIdentity(identityId) : null;
-    const runtimeProfileId =
-      input.defaultRuntimeProfileId === undefined
-        ? current?.defaultRuntimeProfileId ?? this.defaultAgentRuntimeProfile(defaultAgentTargetId)?.id ?? null
-        : input.defaultRuntimeProfileId;
-    const resolvedInput = runtimeProfileId && runtimeProfileId !== input.defaultRuntimeProfileId
-      ? { ...input, defaultRuntimeProfileId: runtimeProfileId }
-      : input;
+    const runtimeProfileId = input.defaultRuntimeProfileId === undefined
+      ? current
+        ? current.defaultRuntimeProfileId
+        : this.defaultAgentRuntimeProfile(defaultAgentTargetId)?.id ?? null
+      : input.defaultRuntimeProfileId;
+    const resolvedInput = Object.prototype.hasOwnProperty.call(input, "defaultRuntimeProfileId")
+      && input.defaultRuntimeProfileId === runtimeProfileId
+      ? input
+      : { ...input, defaultRuntimeProfileId: runtimeProfileId };
     if (!runtimeProfileId || input.model === undefined) return resolvedInput;
     const baseProfile = this.repo.getRuntimeProfile(runtimeProfileId);
     if (!baseProfile) return resolvedInput;

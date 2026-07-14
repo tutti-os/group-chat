@@ -7,6 +7,7 @@ type AgentCatalogState = {
   identities: CatalogEntity[];
   lastSeq: number;
   participants: CatalogEntity[];
+  ready: boolean;
   runtimeProfiles: CatalogEntity[];
 };
 
@@ -18,8 +19,9 @@ type AgentCatalogState = {
  */
 export function mergeAgentCatalogSnapshot<TState extends AgentCatalogState>(
   current: TState,
-  snapshot: Pick<TState, "identities" | "lastSeq" | "participants" | "runtimeProfiles">,
+  snapshot: TState,
 ): TState {
+  if (!current.ready && snapshot.ready) return snapshot;
   const snapshotIsAuthoritative = snapshot.lastSeq >= current.lastSeq;
   return {
     ...current,

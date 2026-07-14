@@ -10,7 +10,7 @@ function loadTuttiBridgeModule() {
   const build = spawnSync(
     "pnpm",
     ["--filter", "@group-chat/web", "exec", "esbuild", "src/app/tutti-bridge.ts", "--bundle", "--platform=browser", "--format=esm", "--outfile=/tmp/tutti-bridge.test.mjs"],
-    { cwd: rootDir, encoding: "utf8", stdio: "pipe", env: { ...process.env, ESBUILD_WORKER: "false" } },
+    { cwd: rootDir, encoding: "utf8", stdio: "pipe", env: { ...process.env, ESBUILD_WORKER_THREADS: "0" } },
   );
   assert.equal(build.status, 0, build.stderr || build.stdout);
   return import(`${pathToFileURL("/tmp/tutti-bridge.test.mjs")}?t=${Date.now()}`);

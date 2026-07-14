@@ -172,10 +172,13 @@ export class ChatRepository {
 
     const participants: NonNullable<CreateRoomRequest["participants"]> = input.participants ?? [];
     participants.forEach((participant, index) => {
+      const runtimeProfileId = Object.prototype.hasOwnProperty.call(participant, "runtimeProfileId")
+        ? participant.runtimeProfileId ?? null
+        : this.getDefaultRuntimeProfileId();
       this.createParticipant(conversationId, {
         displayName: participant.displayName,
         kind: participant.kind ?? "ai",
-        runtimeProfileId: participant.runtimeProfileId ?? this.getDefaultRuntimeProfileId(),
+        runtimeProfileId,
         identityId: participant.identityId ?? null,
         roomInstructions: participant.roomInstructions,
         listenMode: DEFAULT_PARTICIPANT_LISTEN_MODE,
@@ -665,8 +668,10 @@ export class ChatRepository {
   createIdentity(input: CreateIdentityRequest): Identity {
     const now = new Date().toISOString();
     const id = nanoid();
-    const fallbackRuntime = this.getDefaultRuntimeProfileId();
-    if (input.defaultRuntimeProfileId) this.ensureLegacyRuntimeProfile(input.defaultRuntimeProfileId);
+    const defaultRuntimeProfileId = Object.prototype.hasOwnProperty.call(input, "defaultRuntimeProfileId")
+      ? input.defaultRuntimeProfileId ?? null
+      : this.getDefaultRuntimeProfileId();
+    if (defaultRuntimeProfileId) this.ensureLegacyRuntimeProfile(defaultRuntimeProfileId);
     getDb()
       .prepare(
         `INSERT INTO identities
@@ -679,7 +684,7 @@ export class ChatRepository {
         input.icon?.trim() || "",
         input.systemPrompt?.trim() || "",
         input.stylePrompt?.trim() || "",
-        input.defaultRuntimeProfileId ?? fallbackRuntime,
+        defaultRuntimeProfileId,
         input.defaultListenMode ?? DEFAULT_PARTICIPANT_LISTEN_MODE,
         normalizeReasoningEffort(input.defaultReasoningEffort),
         normalizeSpeedMode(input.defaultSpeedMode),

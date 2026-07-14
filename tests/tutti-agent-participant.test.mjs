@@ -15,7 +15,7 @@ function loadModule() {
       "src/domains/tutti-agent-participant.ts",
       "--bundle", "--platform=node", "--format=esm", `--outfile=${output}`,
     ],
-    { cwd: rootDir, encoding: "utf8", stdio: "pipe", env: { ...process.env, ESBUILD_WORKER: "false" } },
+    { cwd: rootDir, encoding: "utf8", stdio: "pipe", env: { ...process.env, ESBUILD_WORKER_THREADS: "0" } },
   );
   assert.equal(build.status, 0, build.stderr || build.stdout);
   return import(`${pathToFileURL(output)}?t=${Date.now()}`);

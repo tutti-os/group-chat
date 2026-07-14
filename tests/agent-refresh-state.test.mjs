@@ -25,6 +25,7 @@ async function loadModule() {
 test("Agent refresh never rolls back newer WS state or replaces timeline data", async () => {
   const { mergeAgentCatalogSnapshot, shouldAcceptAgentCatalogRefresh } = await loadModule();
   const current = {
+    ready: true,
     lastSeq: 12,
     messages: [{ id: "message-new" }],
     messageBlocks: [{ id: "block-new" }],
@@ -33,6 +34,7 @@ test("Agent refresh never rolls back newer WS state or replaces timeline data", 
     identities: [{ id: "identity-shared", updatedAt: "2026-07-15T12:00:00.000Z", name: "WS new" }],
   };
   const stale = {
+    ready: true,
     lastSeq: 11,
     runtimeProfiles: [
       { id: "profile-shared", updatedAt: "2026-07-15T11:00:00.000Z", model: "stale" },
@@ -59,6 +61,7 @@ test("Agent refresh never rolls back newer WS state or replaces timeline data", 
   assert.equal(staleMerged.lastSeq, current.lastSeq);
 
   const tiedStale = mergeAgentCatalogSnapshot(current, {
+    ready: true,
     lastSeq: 11,
     runtimeProfiles: [{ id: "profile-shared", updatedAt: "2026-07-15T12:00:00.000Z", model: "stale-tie" }],
     participants: [{ id: "participant-shared", updatedAt: "2026-07-15T12:00:00.000Z", status: "active" }],
@@ -69,6 +72,7 @@ test("Agent refresh never rolls back newer WS state or replaces timeline data", 
   assert.equal(tiedStale.identities[0]?.name, "WS new");
 
   const sameSequence = {
+    ready: true,
     lastSeq: 12,
     runtimeProfiles: [{ id: "profile-shared", updatedAt: "2026-07-15T13:00:00.000Z", model: "catalog-new" }],
     participants: [{ id: "participant-shared", updatedAt: "2026-07-15T13:00:00.000Z", status: "active" }],
@@ -94,6 +98,24 @@ test("Agent refresh never rolls back newer WS state or replaces timeline data", 
   assert.equal(authoritative.participants.some((item) => item.id === "participant-removed"), false);
   assert.equal(authoritative.identities.some((item) => item.id === "identity-removed"), false);
   assert.equal(authoritative.runtimeProfiles.some((item) => item.id === "profile-removed"), false);
+
+  const cold = {
+    ...current,
+    ready: false,
+    lastSeq: 0,
+    messages: [],
+    messageBlocks: [],
+    runtimeProfiles: [],
+    participants: [],
+    identities: [],
+  };
+  const initialized = {
+    ...current,
+    ready: true,
+    lastSeq: 3,
+    messages: [{ id: "message-from-successful-refresh" }],
+  };
+  assert.equal(mergeAgentCatalogSnapshot(cold, initialized), initialized);
 
   let acceptedGeneration = 0;
   assert.equal(shouldAcceptAgentCatalogRefresh(2, acceptedGeneration), true);

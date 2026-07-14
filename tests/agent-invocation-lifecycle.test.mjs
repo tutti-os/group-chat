@@ -241,6 +241,68 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
       assert.deepEqual(staleCredentials, ["stale-active-secret"]);
       assert.equal(repo.getPendingReply(conversation.id, participant.id), null);
 
+      const recoveredMessage = repo.createMessage({
+        conversationId: conversation.id,
+        role: "user",
+        content: "durable queued message without recoverable credentials",
+        status: "success",
+      });
+      repo.upsertPendingReply({
+        roomId: conversation.roomId,
+        conversationId: conversation.id,
+        participantId: participant.id,
+        messageId: recoveredMessage.id,
+      });
+      const recoveredService = new ChatService(repo, new EventHub(), new AgentToolTokenStore());
+      let recoveredRuns = 0;
+      recoveredService.generateForParticipant = async () => {
+        recoveredRuns += 1;
+        return null;
+      };
+      recoveredService.recoverReplyQueueOnce();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.equal(recoveredRuns, 0);
+      assert.equal(repo.getPendingReply(conversation.id, participant.id), null);
+      assert.equal(recoveredService.messageInvocationContexts.size, 0);
+
+      let releaseDeleteActive;
+      let markDeleteActiveStarted;
+      const deleteActiveStarted = new Promise((resolve) => { markDeleteActiveStarted = resolve; });
+      service.generateForParticipant = async () => {
+        markDeleteActiveStarted();
+        await new Promise((resolve) => { releaseDeleteActive = resolve; });
+        return null;
+      };
+      service.sendMessage(conversation.id, {
+        content: "active before room deletion",
+        mentions: [{
+          mentionType: "participant",
+          participantId: participant.id,
+          displayNameSnapshot: participant.displayName,
+        }],
+      }, {
+        managedAgentHeaders: { "x-tutti-agent-invocation-credential": "delete-active-secret" },
+      });
+      await deleteActiveStarted;
+      const deleteQueued = service.sendMessage(conversation.id, {
+        content: "queued before room deletion",
+        mentions: [{
+          mentionType: "participant",
+          participantId: participant.id,
+          displayNameSnapshot: participant.displayName,
+        }],
+      }, {
+        managedAgentHeaders: { "x-tutti-agent-invocation-credential": "delete-queued-secret" },
+      });
+      assert.equal(repo.getPendingReply(conversation.id, participant.id)?.messageId, deleteQueued.message.id);
+      assert.equal(service.messageInvocationContexts.size > 0, true);
+      const deletedRoom = await service.deleteRoom(conversation.roomId);
+      assert.equal(deletedRoom?.id, conversation.roomId);
+      assert.equal(repo.getPendingReply(conversation.id, participant.id), null);
+      assert.equal(service.messageInvocationContexts.size, 0);
+      releaseDeleteActive();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
       const scopedRepo = new ChatRepository();
       const scopedService = new ChatService(scopedRepo, new EventHub(), new AgentToolTokenStore());
       scopedService.runtimes = {

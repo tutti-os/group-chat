@@ -173,7 +173,9 @@ server.post<{ Body: unknown }>("/tutti/references/search", async (request, reply
 
 server.post<{ Body: CreateRoomRequest }>("/api/rooms", async (request) => {
   const input = request.body ?? {};
-  const needsDefaultAgent = input.participants?.some((participant) => !participant.runtimeProfileId) ?? false;
+  const needsDefaultAgent = input.participants?.some(
+    (participant) => participant.runtimeProfileId === undefined,
+  ) ?? false;
   const catalog = needsDefaultAgent
     ? await chat.listLocalAgentTargets(createManagedAgentDetectContextFromHeaders(request.headers))
     : null;
@@ -187,7 +189,7 @@ server.patch<{ Params: { roomId: string }; Body: UpdateRoomRequest }>("/api/room
 });
 
 server.delete<{ Params: { roomId: string } }>("/api/rooms/:roomId", async (request, reply) => {
-  const room = chat.deleteRoom(request.params.roomId);
+  const room = await chat.deleteRoom(request.params.roomId);
   if (!room) return reply.code(404).send({ error: "Room not found" });
   return { room };
 });
@@ -203,13 +205,9 @@ server.post<{ Body: CreateIdentityRequest }>("/api/identities", async (request) 
 server.patch<{ Params: { identityId: string }; Body: UpdateIdentityRequest }>(
   "/api/identities/:identityId",
   async (request) => {
-    const catalog = request.body.defaultRuntimeProfileId === undefined
-      ? await chat.listLocalAgentTargets(createManagedAgentDetectContextFromHeaders(request.headers))
-      : null;
     const identity = chat.updateIdentity(
       request.params.identityId,
       request.body,
-      catalog?.defaultAgentTargetId,
     );
     return { identity, runtimeProfile: chat.getRuntimeProfile(identity?.defaultRuntimeProfileId) };
   },
