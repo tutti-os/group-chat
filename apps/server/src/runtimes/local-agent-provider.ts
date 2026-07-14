@@ -23,11 +23,16 @@ import {
   type TuttiAgentCatalogEntry,
   type TuttiAgentSkillContext,
 } from "@tutti-os/agent-acp-kit/tutti";
-import type { LocalAgentTargetStatus, LocalAgentTargetStatusResponse, ReasoningEffort } from "@group-chat/shared";
-import { isMentionAllTrigger } from "@group-chat/shared";
+import {
+  isMentionAllTrigger,
+  normalizeTuttiAgentProvider,
+  type LocalAgentTargetStatus,
+  type LocalAgentTargetStatusResponse,
+  type ReasoningEffort,
+} from "@group-chat/shared";
 import { buildEffectiveRoleDescription } from "../domains/agent-instructions.js";
 import { participantWorkspaceRoot } from "../local/paths.js";
-import { enrichLocalAgentProviderStatus } from "./local-agent-config-catalog.js";
+import { enrichLocalAgentTargetStatus } from "./local-agent-config-catalog.js";
 import { acpPromptFromLocalAgentInput } from "./local-agent-acp.js";
 import { isContextWindowError, isRecoverableResumeError } from "./local-agent-resume-errors.js";
 import {
@@ -40,6 +45,7 @@ import {
 import type { RuntimeProvider, RuntimeReplyContext, RuntimeStreamEvent } from "./runtime-provider.js";
 import { RuntimeProviderUnsupportedError } from "./runtime-provider.js";
 import { buildLocalAgentProcessEnv } from "./local-agent-env.js";
+import { resolveLocalAgentCommand } from "./local-agent-command.js";
 import { LocalAgentSessionStore } from "./local-agent-session-store.js";
 
 type GroupChatLocalAgentProviderPlugin = LocalAgentProviderPlugin<"local-agent", string>;
@@ -117,6 +123,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
         .map((option) => parseReasoningEffort(option.value))
         .filter((effort): effort is ReasoningEffort => effort !== null)
         ?? undefined;
+      const configDir = readString(toRecord(detected), "configDir");
       const status: LocalAgentTargetStatus = {
         agentTargetId: agent.agentTargetId,
         providerId: agent.providerId,
@@ -128,6 +135,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
         authState: authStateFromCatalog(agent, detected?.authState),
         executablePath: "",
         version: detected?.supported ? "detected" : "not-installed",
+        ...(configDir ? { configDir } : {}),
         models: composer?.modelConfig.options.map((option) => ({
           id: option.value,
           label: option.label,
@@ -140,7 +148,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
         defaultSpeedMode: composer?.speedConfig.currentValue || composer?.speedConfig.defaultValue || undefined,
         reason: agent.availability.status === "available" && agent.runtimeSupported ? undefined : agent.availability.detail,
       };
-      return enrichLocalAgentProviderStatus(status);
+      return enrichLocalAgentTargetStatus(status);
     }));
     return { defaultAgentTargetId: catalog.defaultAgentTargetId, agents };
   }
@@ -153,7 +161,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
         runId: context.runId,
       });
     }
-    const command = resolveLocalAgentCommand(context, target.providerId);
+    const command = resolveLocalAgentCommand(target.providerId);
     if (command) {
       yield* this.streamCommandBridge(context, command);
       return;
@@ -225,7 +233,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
     const target = await this.resolveExactTargetForRun(context);
     const provider = target.providerId;
     const agentTargetId = target.agentTargetId;
-    if (resolveLocalAgentCommand(context, provider)) {
+    if (resolveLocalAgentCommand(provider)) {
       throw new Error("Configured local-agent command bridge does not expose provider session compaction.");
     }
     if (!this.localAgentRuntime.listProviders().some((item) => item.id === provider)) {
@@ -658,8 +666,8 @@ function toRuntimeStreamEvent(event: AgentEvent): RuntimeStreamEvent | null {
 }
 
 function exactAgentTargetId(context: RuntimeReplyContext) {
-  const profileTargetId = context.runtimeProfile?.agentTargetId?.trim() ?? "";
-  const participantTargetId = context.participant.agentTargetId?.trim() ?? "";
+  const profileTargetId = context.runtimeProfile?.agentTargetId ?? "";
+  const participantTargetId = context.participant.agentTargetId ?? "";
   if (profileTargetId && participantTargetId && profileTargetId !== participantTargetId) {
     throw new RuntimeProviderUnsupportedError("Participant and runtime profile Agent targets do not match.");
   }
@@ -674,14 +682,7 @@ function assertTargetProviderMatchesProfile(providerId: string, context: Runtime
 }
 
 function canonicalProviderId(providerId: string | null | undefined) {
-  const normalized = providerId?.trim().toLowerCase() ?? "";
-  return normalized === "claude" ? "claude-code" : normalized;
-}
-
-function resolveLocalAgentCommand(_context: RuntimeReplyContext, providerId: string) {
-  const provider = providerId.toUpperCase().replace(/[^A-Z0-9]/g, "_");
-  const providerSpecific = provider ? process.env[`GROUP_CHAT_LOCAL_AGENT_${provider}_COMMAND`] : undefined;
-  return providerSpecific || process.env.GROUP_CHAT_LOCAL_AGENT_COMMAND || "";
+  return normalizeTuttiAgentProvider(providerId);
 }
 
 function localAgentUnavailableReason(

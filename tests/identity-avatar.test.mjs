@@ -62,3 +62,16 @@ test("custom agent avatars still override runtime provider icons", async () => {
     { avatar: "https://example.test/avatar.png", provider: null },
   );
 });
+
+test("legacy virtual participants retain their provider-specific avatar", async () => {
+  const { resolveAgentAvatar } = await loadModule();
+
+  assert.deepEqual(
+    resolveAgentAvatar({ participantId: "tutti-agent:codex", runtimeProfile: null }),
+    { avatar: null, provider: "codex" },
+  );
+  assert.deepEqual(
+    resolveAgentAvatar({ participantId: "tutti-agent:claude", runtimeProfile: null }),
+    { avatar: null, provider: "claude-code" },
+  );
+});

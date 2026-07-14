@@ -1025,19 +1025,24 @@ export function normalizeTuttiAgentProvider(provider: string | null | undefined)
 }
 
 export function normalizeTuttiAgentTargetId(agentTargetId: string | null | undefined) {
-  return agentTargetId?.trim() ?? "";
+  return typeof agentTargetId === "string" ? agentTargetId : "";
 }
 
 export function tuttiAgentParticipantId(agentTargetId: string) {
   const normalized = normalizeTuttiAgentTargetId(agentTargetId);
-  return normalized ? `${TUTTI_AGENT_TARGET_PARTICIPANT_PREFIX}${encodeURIComponent(normalized)}` : "";
+  if (!normalized) return "";
+  try {
+    return `${TUTTI_AGENT_TARGET_PARTICIPANT_PREFIX}${encodeURIComponent(normalized)}`;
+  } catch {
+    return "";
+  }
 }
 
 export function parseTuttiAgentParticipantId(participantId: string | null | undefined) {
-  const trimmed = participantId?.trim() ?? "";
-  if (!trimmed.startsWith(TUTTI_AGENT_TARGET_PARTICIPANT_PREFIX)) return "";
+  const value = participantId ?? "";
+  if (!value.startsWith(TUTTI_AGENT_TARGET_PARTICIPANT_PREFIX)) return "";
   try {
-    return normalizeTuttiAgentTargetId(decodeURIComponent(trimmed.slice(TUTTI_AGENT_TARGET_PARTICIPANT_PREFIX.length)));
+    return normalizeTuttiAgentTargetId(decodeURIComponent(value.slice(TUTTI_AGENT_TARGET_PARTICIPANT_PREFIX.length)));
   } catch {
     return "";
   }
@@ -1061,7 +1066,11 @@ export function parseLegacyTuttiAgentProviderParticipantId(participantId: string
 }
 
 export function defaultTuttiAgentParticipantName(displayNameOrTargetId: string) {
-  return displayNameOrTargetId.trim() || "Agent";
+  const value = displayNameOrTargetId.trim();
+  const provider = normalizeTuttiAgentProvider(value);
+  if (provider === "claude-code") return "Claude Code";
+  if (provider === "codex") return "Codex";
+  return value || "Agent";
 }
 
 export {

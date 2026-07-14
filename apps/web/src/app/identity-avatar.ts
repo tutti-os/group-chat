@@ -51,10 +51,9 @@ export function resolveAgentAvatar(input: {
   avatar: string | null;
   provider: string | null;
 } {
-  const isVirtualTuttiAgent = Boolean(
-    parseTuttiAgentParticipantId(input.participantId)
-    || parseLegacyTuttiAgentProviderParticipantId(input.participantId),
-  );
+  const exactTargetId = parseTuttiAgentParticipantId(input.participantId);
+  const legacyProvider = parseLegacyTuttiAgentProviderParticipantId(input.participantId);
+  const isVirtualTuttiAgent = Boolean(exactTargetId || legacyProvider);
 
   const custom = input.avatar ?? input.icon;
   if (hasCustomRoomAvatar(custom)) {
@@ -63,7 +62,7 @@ export function resolveAgentAvatar(input: {
   if (input.runtimeProfile?.kind === "local-agent" && input.runtimeProfile.provider.trim()) {
     return { avatar: null, provider: input.runtimeProfile.provider };
   }
-  if (isVirtualTuttiAgent) return { avatar: null, provider: "local-agent" };
+  if (isVirtualTuttiAgent) return { avatar: null, provider: legacyProvider || "local-agent" };
   return { avatar: null, provider: null };
 }
 

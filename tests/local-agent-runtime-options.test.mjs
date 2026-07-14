@@ -80,6 +80,25 @@ test("Agent target ids containing model separators remain visible as canonical p
   assert.equal(resolveCanonicalRuntimeProfile(variant, [base, variant])?.id, base.id);
 });
 
+test("catalog canonical profile wins over an older migrated custom-model profile", async () => {
+  const { listCanonicalRuntimeProfiles } = await loadModule();
+  const migratedCustom = {
+    ...codexProfile,
+    id: "local-agent:codex__custom",
+    model: "custom-model",
+  };
+  const catalogCanonical = {
+    ...codexProfile,
+    id: "local-agent-target:v1:6167656e743a636f6465783a7072696d617279",
+    model: "catalog-default",
+  };
+
+  assert.deepEqual(
+    listCanonicalRuntimeProfiles([migratedCustom, catalogCanonical]).map((profile) => profile.id),
+    [catalogCanonical.id],
+  );
+});
+
 test("local agent model options use detected provider models instead of provider-prefixed defaults", async () => {
   const { listRuntimeModels, preferredRuntimeModelId, resolveRuntimeModelId } = await loadModule();
   const providers = [{

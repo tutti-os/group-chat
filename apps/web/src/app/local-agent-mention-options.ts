@@ -70,6 +70,8 @@ export function findParticipantForLocalAgentProfile(
       ? runtimeProfiles.find((item) => item.id === runtimeProfileId) ?? null
       : null;
     if (
+      participant.runtimeProfileId === runtime?.id
+      &&
       runtime?.kind === "local-agent"
       && runtime.agentTargetId === profile.agentTargetId
       && candidateNames.has(normalizeLocalAgentDisplayName(participant.displayName))
@@ -90,8 +92,6 @@ export function buildLocalAgentMentionOptions(
   participants: Participant[],
   identities: Identity[],
   query: string | null,
-  availableLauncherAppIds: ReadonlySet<string> = new Set(),
-  agentGuiBridgeAvailable = false,
 ): LocalAgentMentionOption[] {
   if (query === null) return [];
   const normalizedQuery = query.toLowerCase();
@@ -112,6 +112,13 @@ export function buildLocalAgentMentionOptions(
       defaultIdentityNameForRuntime(profile, localAgentProviders),
       profile.displayName,
     ]);
+    const participantProfile = participant?.runtimeProfileId
+      ? runtimeProfiles.find((item) => item.id === participant.runtimeProfileId) ?? null
+      : null;
+    const mentionProfile = participantProfile?.kind === "local-agent"
+        && participantProfile.agentTargetId === profile.agentTargetId
+      ? participantProfile
+      : profile;
 
     const haystack = [
       label,
@@ -131,7 +138,7 @@ export function buildLocalAgentMentionOptions(
       key: profile.id,
       label,
       subtitle,
-      runtimeProfile: profile,
+      runtimeProfile: mentionProfile,
       participant,
     });
   }

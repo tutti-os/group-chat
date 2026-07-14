@@ -77,22 +77,14 @@ import { collectMessageProcess, resolveMessageRunId } from "./agent-thinking.js"
 import { UNREAD_FEATURE_ENABLED } from "./feature-flags.js";
 import { initTuttiWorkspaceContextCache, resolveArtifactAgentDraftHref } from "./tutti-bridge.js";
 import { loadCachedSnapshot, saveCachedSnapshot } from "./bootstrap-cache.js";
+import { mergeAgentCatalogSnapshot } from "./agent-refresh-state.js";
 import { buildAgentGuiDraftPrompt } from "./agent-gui-draft-prompt.js";
 import { dispatchAgentGuiTask, type TuttiAgentGuiProvider } from "./agent-gui-dispatch.js";
-import { localAgentLauncherAppId, resolveAgentGuiProviderFromRuntimeProvider } from "./agent-launcher-mentions.js";
 import { reportUserActive } from "./tutti-activity.js";
-import {
-  fetchAvailableAgentLauncherAppIds,
-  isAgentLauncherAvailable,
-  readCachedAvailableAgentLauncherAppIds,
-  sameStringSet,
-} from "./agent-launcher-availability.js";
 import { formatMessageBodyForAgentForward, formatReferenceMentionMarkdown } from "./reference-mentions.js";
 import { enrichMessageContentForCopy } from "./composer-paste-content.js";
 import { collectImageFileArtifactsForMessages } from "./message-artifacts.js";
 import { hasTimelineMessages } from "./message-timeline-state.js";
-import { defaultIdentityNameForRuntime, listCanonicalRuntimeProfiles, localAgentStatus } from "./runtime.js";
-import { localAgentMentionSubtitle } from "./local-agent-mention-options.js";
 import { groupAgentForwardSections } from "./agent-forward-format.js";
 
 const MIN_CONVERSATION_SIDEBAR_WIDTH = 240;
@@ -173,9 +165,6 @@ export function App() {
     return cachedSnapshot ? normalizeSnapshot(cachedSnapshot) : emptyState;
   });
   const [localAgentProviders, setLocalAgentProviders] = useState<LocalAgentProviderStatus[]>([]);
-  const [availableAgentLauncherAppIds, setAvailableAgentLauncherAppIds] = useState<Set<string>>(
-    () => readCachedAvailableAgentLauncherAppIds(),
-  );
   const [refreshingLocalAgentProviders, setRefreshingLocalAgentProviders] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [profileMenuPlacement, setProfileMenuPlacement] = useState<"sidebar" | "mobile" | "chat">("sidebar");
@@ -256,27 +245,17 @@ export function App() {
         : result.agents;
       setLocalAgentProviders((current) => sameLocalAgentProviders(current, agents) ? current : agents);
       const snapshot = await fetchSnapshot(MESSAGE_PAGE_SIZE);
-      lastSeqRef.current = Math.max(lastSeqRef.current, snapshot.lastSeq);
       const nextState = normalizeSnapshot(snapshot);
-      setState((current) => current.lastSeq > snapshot.lastSeq
-        ? {
-            ...current,
-            runtimeProfiles: nextState.runtimeProfiles,
-            participants: nextState.participants,
-            identities: nextState.identities,
-          }
-        : nextState);
+      // Agent refresh is not a timeline/reconnect operation. Never advance the
+      // WS cursor or replace messages from this limited bootstrap snapshot.
+      // If WS state is newer, the catalog snapshot is stale and must not roll
+      // back participant, identity, or runtime-profile changes either.
+      setState((current) => mergeAgentCatalogSnapshot(current, nextState));
     } catch {
       // Keep the last known provider list; transient bridge errors should not make the @ menu jump.
     } finally {
       setRefreshingLocalAgentProviders(false);
     }
-  }, []);
-
-  const refreshAvailableAgentLauncherApps = useCallback((options?: { force?: boolean }) => {
-    void fetchAvailableAgentLauncherAppIds(options).then((ids) => {
-      setAvailableAgentLauncherAppIds((current) => sameStringSet(current, ids) ? current : new Set(ids));
-    });
   }, []);
 
   const mergeConversationMessagePage = useCallback((page: ConversationMessagesPage) => {
@@ -450,9 +429,6 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
-    const launcherRefreshTimers = [0, 250, 900, 1800].map((delayMs) => window.setTimeout(() => {
-      if (!cancelled) refreshAvailableAgentLauncherApps({ force: true });
-    }, delayMs));
     fetchSnapshot(MESSAGE_PAGE_SIZE)
       .then((snapshot) => {
         if (cancelled) return;
@@ -472,9 +448,8 @@ export function App() {
     void refreshLocalAgentProviders();
     return () => {
       cancelled = true;
-      launcherRefreshTimers.forEach((timer) => window.clearTimeout(timer));
     };
-  }, [refreshAvailableAgentLauncherApps, refreshLocalAgentProviders]);
+  }, [refreshLocalAgentProviders]);
 
   useEffect(() => {
     if (!state.ready) return;
@@ -707,36 +682,9 @@ export function App() {
       : [],
     [currentConversation, state.agentRuns],
   );
-  const agentForwardTargets = useMemo<AgentForwardTarget[]>(() => {
-    const agentGuiBridgeAvailable = Boolean(window.tuttiExternal?.workspace?.openFeature);
-    const targets = listCanonicalRuntimeProfiles(state.runtimeProfiles)
-      .filter((profile) => profile.kind === "local-agent")
-      .map((profile): AgentForwardTarget | null => {
-        const provider = resolveAgentGuiProviderFromRuntimeProvider(profile.provider);
-        if (!provider) return null;
-        const status = localAgentStatus(profile, localAgentProviders);
-        const launcherAppId = localAgentLauncherAppId(profile.provider);
-        if (launcherAppId && !isAgentLauncherAvailable(
-          launcherAppId,
-          availableAgentLauncherAppIds,
-          status?.available === true,
-          agentGuiBridgeAvailable,
-        )) return null;
-        if (!launcherAppId && !status?.available) return null;
-        const target: AgentForwardTarget = {
-          provider,
-          runtimeProvider: profile.provider,
-          label: defaultIdentityNameForRuntime(profile, localAgentProviders),
-          subtitle: status
-            ? localAgentMentionSubtitle(profile, status, localAgentProviders)
-            : defaultIdentityNameForRuntime(profile, localAgentProviders),
-          available: true,
-        };
-        return target;
-      })
-      .filter((target): target is AgentForwardTarget => Boolean(target));
-    return targets.sort((left, right) => left.label.localeCompare(right.label));
-  }, [availableAgentLauncherAppIds, localAgentProviders, state.runtimeProfiles]);
+  // Provider-specific AgentGUI launchers are retired. Keep the existing
+  // timeline prop empty until forward-to-agent is rebuilt on exact Agent IDs.
+  const agentForwardTargets: AgentForwardTarget[] = [];
   const currentActiveRuns = useMemo(
     () => currentConversation
       ? visibleActiveRuns(

@@ -32,6 +32,7 @@ test("exact target selection rejects TOCTOU, unknown targets, and ambiguous prov
   await writeFile(check, `
     async function main() {
     const { writeFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
     process.env.GROUP_CHAT_HOME = ${JSON.stringify(home)};
     process.env.GROUP_CHAT_TUTTI_CLI = ${JSON.stringify(fakeTutti)};
     process.env.GROUP_CHAT_LOCAL_AGENT_COMMAND = process.execPath + " " + ${JSON.stringify(fakeAgent)};
@@ -157,6 +158,59 @@ test("exact target selection rejects TOCTOU, unknown targets, and ambiguous prov
     const matchingUsage = workspace.getContextUsage({ conversation: bundle.conversation, participant: runParticipant });
     if (matchingUsage.source !== "provider" || matchingUsage.providerSessionId !== "target-a-session") {
       throw new Error("context usage did not expose the matching Agent target session");
+    }
+    sessionStore.write(bundle.conversation.id, {
+      agentTargetId: "target-a",
+      provider: "codex",
+      providerSessionId: "target-a-resume",
+      resumeToken: "resume-target-a",
+      model: "default",
+      usage: { contextWindow: { usedTokens: 80, totalTokens: 100 } },
+      contextWindow: { usedTokens: 80, totalTokens: 100, percentUsed: 80 },
+    });
+    sessionStore.updateUsage(bundle.conversation.id, {
+      agentTargetId: "target-b",
+      provider: "codex",
+      model: "default",
+      usage: { contextWindow: { usedTokens: 10, totalTokens: 100 } },
+    });
+    const switchedSession = sessionStore.read(bundle.conversation.id);
+    if (
+      switchedSession?.agentTargetId !== "target-b"
+      || switchedSession.providerSessionId
+      || switchedSession.resumeToken
+      || switchedSession.contextWindow?.usedTokens !== 10
+    ) {
+      throw new Error("target switch retained target-scoped resume state");
+    }
+    sessionStore.write("legacy-switch", {
+      provider: "codex",
+      providerSessionId: "codex-session",
+      resumeToken: "codex-resume",
+      model: "default",
+    });
+    sessionStore.write("legacy-switch", {
+      provider: "claude-code",
+      model: "default",
+    });
+    const legacySwitched = sessionStore.read("legacy-switch");
+    if (legacySwitched?.providerSessionId || legacySwitched?.resumeToken) {
+      throw new Error("legacy provider switch retained provider-scoped resume state");
+    }
+    const malformedSessionPath = join(
+      participantWorkspaceRoot(bundle.room.id, runParticipant.id),
+      ".group-chat",
+      "local-agent-sessions",
+      bundle.conversation.id + ".json",
+    );
+    await writeFile(malformedSessionPath, JSON.stringify({
+      agentTargetId: 42,
+      provider: "codex",
+      model: "default",
+      updatedAt: new Date().toISOString(),
+    }));
+    if (sessionStore.read(bundle.conversation.id) !== null) {
+      throw new Error("malformed durable Agent target id was accepted");
     }
     closeDb();
     }

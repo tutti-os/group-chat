@@ -32,6 +32,7 @@ import {
   resolveMentionSpeakingOrder,
   sanitizeMentionTargetForAgentContext,
   stripAssistantSkillDetails,
+  normalizeTuttiAgentProvider,
 } from "@group-chat/shared";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, isAbsolute, relative, resolve } from "node:path";
@@ -41,7 +42,7 @@ import { enrichAssistantContentWithWorkspaceResourceLinks } from "./assistant-re
 import { sha256ForFile } from "./artifact-content-hash.js";
 import { AgentToolTokenStore } from "./agent-tool-tokens.js";
 import { AgentWorkspaceService } from "./agent-workspace.js";
-import { ChatRepository } from "./chat-repository.js";
+import { ChatRepository, localAgentTargetRuntimeProfileId } from "./chat-repository.js";
 import {
   createVirtualTuttiAgentParticipant,
   defaultTuttiAgentParticipantName,
@@ -72,6 +73,7 @@ const AUTO_IMPORT_RUN_FILE_MAX_BYTES = 50 * 1024 * 1024;
 
 interface RuntimeInvocationContext {
   agentDetectContext?: DetectContext;
+  defaultAgentTargetId?: string;
   managedAgentHeaders?: ManagedAgentInvocationCredentialHeaders;
 }
 
@@ -88,7 +90,6 @@ export class ChatService {
   }>();
   private recoveredReplyQueue = false;
   private bootstrapMaintenanceStarted = false;
-  private defaultAgentTargetId = "";
 
   constructor(
     private readonly repo: ChatRepository,
@@ -115,8 +116,8 @@ export class ChatService {
 
   async listLocalAgentTargets(detectContext?: DetectContext) {
     const catalog = await this.runtimes.listLocalAgentTargets(detectContext);
-    this.defaultAgentTargetId = catalog.defaultAgentTargetId;
     this.repo.syncLocalAgentCatalog({
+      authoritative: !detectContext?.managedAgentInvocation,
       agents: catalog.agents.map((agent) => ({
         agentTargetId: agent.agentTargetId,
         providerId: agent.providerId,
@@ -129,8 +130,8 @@ export class ChatService {
     return catalog;
   }
 
-  createRoom(input: CreateRoomRequest) {
-    const defaultRuntimeProfileId = this.defaultAgentRuntimeProfile()?.id ?? null;
+  createRoom(input: CreateRoomRequest, defaultAgentTargetId = "") {
+    const defaultRuntimeProfileId = this.defaultAgentRuntimeProfile(defaultAgentTargetId)?.id ?? null;
     const bundle = this.repo.createRoom({
       ...input,
       ...(input.participants
@@ -183,8 +184,8 @@ export class ChatService {
     return bundle;
   }
 
-  createIdentity(input: CreateIdentityRequest) {
-    const identity = this.repo.createIdentity(this.resolveIdentityInput(input));
+  createIdentity(input: CreateIdentityRequest, defaultAgentTargetId = "") {
+    const identity = this.repo.createIdentity(this.resolveIdentityInput(input, undefined, defaultAgentTargetId));
     this.workspaces.materializeIdentity(identity);
     this.events.emit({
       type: "identity.created",
@@ -193,8 +194,11 @@ export class ChatService {
     return identity;
   }
 
-  updateIdentity(identityId: string, input: UpdateIdentityRequest) {
-    const identity = this.repo.updateIdentity(identityId, this.resolveIdentityInput(input, identityId));
+  updateIdentity(identityId: string, input: UpdateIdentityRequest, defaultAgentTargetId = "") {
+    const identity = this.repo.updateIdentity(
+      identityId,
+      this.resolveIdentityInput(input, identityId, defaultAgentTargetId),
+    );
     if (identity) {
       this.workspaces.materializeIdentity(identity);
       for (const participant of this.repo.listActiveParticipantsByIdentity(identity.id)) {
@@ -527,7 +531,6 @@ export class ChatService {
       status: "success",
       parentMessageId: input.parentMessageId ?? null,
     });
-    this.messageInvocationContexts.set(message.id, invocation);
     const blocks = [];
     const artifacts = [];
     this.repo.touchConversation(conversationId, content || "Attached files");
@@ -588,18 +591,26 @@ export class ChatService {
 
     const mentions = message.mentions;
     const workspaceAppOnlyDispatch = isWorkspaceAppOnlyTaskMessage({ userMessage: { content, mentions } });
-    const targets = this.resolveTargets(conversation, mentions, content);
+    const targets = this.resolveTargets(
+      conversation,
+      mentions,
+      content,
+      invocation.defaultAgentTargetId,
+    );
     this.materializeParticipants(conversation, targets);
-    void this.generateReplies(conversation.roomId, conversationId, message, targets, {
-      currentRound: 1,
-      maxRounds: input.maxReplyRounds
-        ? clampInteger(input.maxReplyRounds, 1, 8)
-        : workspaceAppOnlyDispatch ? 1 : maxReplyRoundsForTrigger(conversation, mentions),
-      order: resolveReplySpeakingOrder(conversation, mentions),
-      seenParticipantIds: new Set(targets.map((participant) => participant.id)),
-      mentionScoped: workspaceAppOnlyDispatch || isParticipantMentionScoped(message.mentions),
-      invocation,
-    });
+    if (targets.length > 0) {
+      this.messageInvocationContexts.set(message.id, invocation);
+      void this.generateReplies(conversation.roomId, conversationId, message, targets, {
+        currentRound: 1,
+        maxRounds: input.maxReplyRounds
+          ? clampInteger(input.maxReplyRounds, 1, 8)
+          : workspaceAppOnlyDispatch ? 1 : maxReplyRoundsForTrigger(conversation, mentions),
+        order: resolveReplySpeakingOrder(conversation, mentions),
+        seenParticipantIds: new Set(targets.map((participant) => participant.id)),
+        mentionScoped: workspaceAppOnlyDispatch || isParticipantMentionScoped(message.mentions),
+        invocation,
+      });
+    }
     return { message, blocks, artifacts, targets };
   }
 
@@ -693,6 +704,7 @@ export class ChatService {
       const result = this.repo.markMessageStatus(messageId, input.status);
       if (!result?.message) return null;
       this.repo.deletePendingRepliesForMessage(messageId);
+      this.messageInvocationContexts.delete(messageId);
       await this.cancelRunsForTriggerMessage(messageId);
       this.repo.touchConversation(conversation.id, "Message recalled");
       this.events.emit({
@@ -752,15 +764,25 @@ export class ChatService {
     const workspaceAppOnlyDispatch = isWorkspaceAppOnlyTaskMessage({
       userMessage: { content: result.message.content, mentions: result.message.mentions },
     });
-    const targets = this.resolveTargets(conversation, result.message.mentions, result.message.content);
-    void this.generateReplies(conversation.roomId, conversation.id, result.message, targets, {
-      currentRound: 1,
-      maxRounds: workspaceAppOnlyDispatch ? 1 : maxReplyRoundsForTrigger(conversation, result.message.mentions),
-      order: resolveReplySpeakingOrder(conversation, result.message.mentions),
-      seenParticipantIds: new Set(targets.map((participant) => participant.id)),
-      mentionScoped: workspaceAppOnlyDispatch || isParticipantMentionScoped(result.message.mentions),
-      invocation,
-    });
+    const targets = this.resolveTargets(
+      conversation,
+      result.message.mentions,
+      result.message.content,
+      invocation.defaultAgentTargetId,
+    );
+    if (targets.length > 0) {
+      this.messageInvocationContexts.set(result.message.id, invocation);
+      void this.generateReplies(conversation.roomId, conversation.id, result.message, targets, {
+        currentRound: 1,
+        maxRounds: workspaceAppOnlyDispatch ? 1 : maxReplyRoundsForTrigger(conversation, result.message.mentions),
+        order: resolveReplySpeakingOrder(conversation, result.message.mentions),
+        seenParticipantIds: new Set(targets.map((participant) => participant.id)),
+        mentionScoped: workspaceAppOnlyDispatch || isParticipantMentionScoped(result.message.mentions),
+        invocation,
+      });
+    } else {
+      this.messageInvocationContexts.delete(result.message.id);
+    }
     return {
       message: result.message,
       blocks: replacement ? replacement.blocks : result.block ? [result.block] : [],
@@ -872,7 +894,7 @@ export class ChatService {
 
     const legacyProvider = scope.groupChatRuntimeProvider?.trim()
       || (mention.referenceProviderId === "agent-session" ? scope.provider?.trim() : "");
-    const agentTargetId = scope.groupChatAgentTargetId?.trim()
+    const agentTargetId = scope.groupChatAgentTargetId
       || localAgentTargetFromLauncherAppId(mention.referenceEntityId)
       || this.resolveUniqueLegacyAgentTargetId(legacyProvider);
     if (!agentTargetId) return null;
@@ -944,12 +966,11 @@ export class ChatService {
   }
 
   private resolveUniqueLegacyAgentTargetId(provider: string | null | undefined) {
-    const normalized = provider?.trim() ?? "";
-    if (!normalized) return "";
-    const canonical = normalized.toLowerCase() === "claude" ? "claude-code" : normalized.toLowerCase();
+    const canonical = normalizeTuttiAgentProvider(provider);
+    if (!canonical) return "";
     const matches = this.repo.listRuntimeProfiles().filter((profile) =>
       profile.kind === "local-agent"
-      && (profile.provider.toLowerCase() === "claude" ? "claude-code" : profile.provider.toLowerCase()) === canonical
+      && normalizeTuttiAgentProvider(profile.provider) === canonical
       && profile.enabled
       && Boolean(profile.agentTargetId)
     );
@@ -1134,12 +1155,18 @@ export class ChatService {
     conversation: Conversation,
     mentions: NonNullable<SendMessageRequest["mentions"]>,
     userText: string,
+    defaultAgentTargetId = "",
   ) {
     const activeAi = this.repo
       .listParticipants(conversation.id)
       .filter((participant) => participant.kind === "ai" && participant.status === "active");
     if (mentions.some((mention) => mention.mentionType === "all")) return [];
-    const workspaceAppOnlyTarget = this.resolveWorkspaceAppOnlyDispatchTarget(conversation, mentions, userText);
+    const workspaceAppOnlyTarget = this.resolveWorkspaceAppOnlyDispatchTarget(
+      conversation,
+      mentions,
+      userText,
+      defaultAgentTargetId,
+    );
     if (workspaceAppOnlyTarget) return [workspaceAppOnlyTarget];
     const mentionedIds = new Set(mentions.map((mention) => mention.participantId));
     if (mentionedIds.size > 0) {
@@ -1160,12 +1187,13 @@ export class ChatService {
     conversation: Conversation,
     mentions: NonNullable<SendMessageRequest["mentions"]>,
     userText: string,
+    defaultAgentTargetId = "",
   ) {
     if (!isWorkspaceAppOnlyTaskMessage({ userMessage: { content: userText, mentions } })) return null;
     const runtimeProfile = this.repo.listRuntimeProfiles().find((profile) =>
       profile.kind === "local-agent"
       && profile.enabled
-      && profile.agentTargetId === this.defaultAgentTargetId
+      && profile.agentTargetId === defaultAgentTargetId
     ) ?? null;
     if (runtimeProfile?.kind !== "local-agent" || !runtimeProfile.enabled) return null;
     const appMention = mentions.find((mention) =>
@@ -2098,11 +2126,12 @@ export class ChatService {
   private resolveIdentityInput<T extends CreateIdentityRequest | UpdateIdentityRequest>(
     input: T,
     identityId?: string,
+    defaultAgentTargetId = "",
   ): T {
     const current = identityId ? this.repo.getIdentity(identityId) : null;
     const runtimeProfileId =
       input.defaultRuntimeProfileId === undefined
-        ? current?.defaultRuntimeProfileId ?? this.defaultAgentRuntimeProfile()?.id ?? null
+        ? current?.defaultRuntimeProfileId ?? this.defaultAgentRuntimeProfile(defaultAgentTargetId)?.id ?? null
         : input.defaultRuntimeProfileId;
     const resolvedInput = runtimeProfileId && runtimeProfileId !== input.defaultRuntimeProfileId
       ? { ...input, defaultRuntimeProfileId: runtimeProfileId }
@@ -2115,11 +2144,11 @@ export class ChatService {
     return { ...resolvedInput, defaultRuntimeProfileId: resolvedProfile.id };
   }
 
-  private defaultAgentRuntimeProfile() {
-    if (!this.defaultAgentTargetId) return null;
+  private defaultAgentRuntimeProfile(defaultAgentTargetId: string) {
+    if (!defaultAgentTargetId) return null;
     const profile = this.repo.listRuntimeProfiles().find((profile) =>
       profile.kind === "local-agent"
-      && profile.agentTargetId === this.defaultAgentTargetId
+      && profile.agentTargetId === defaultAgentTargetId
       && profile.enabled
     ) ?? null;
     return profile ? this.resolveCanonicalRuntimeProfile(profile) : null;
@@ -2127,11 +2156,13 @@ export class ChatService {
 
   private resolveCanonicalRuntimeProfile(profile: RuntimeProfile) {
     if (profile.kind !== "local-agent" || !profile.agentTargetId) return profile;
+    const canonicalId = localAgentTargetRuntimeProfileId(profile.agentTargetId);
     const canonical = this.repo
       .listRuntimeProfiles()
       .filter((item) => item.kind === "local-agent" && item.agentTargetId === profile.agentTargetId)
       .sort((left, right) =>
-        left.id.length - right.id.length
+        Number(right.id === canonicalId) - Number(left.id === canonicalId)
+        || left.id.length - right.id.length
         || left.createdAt.localeCompare(right.createdAt)
         || left.id.localeCompare(right.id)
       )[0];

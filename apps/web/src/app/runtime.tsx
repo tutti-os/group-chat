@@ -173,7 +173,9 @@ export function listCanonicalRuntimeProfiles(profiles: RuntimeProfile[]) {
   }
   for (const matches of byTarget.values()) {
     matches.sort((left, right) =>
-      left.id.length - right.id.length
+      Number(right.id.startsWith("local-agent-target:v1:"))
+        - Number(left.id.startsWith("local-agent-target:v1:"))
+      || left.id.length - right.id.length
       || left.createdAt.localeCompare(right.createdAt)
       || left.id.localeCompare(right.id)
     );
@@ -253,7 +255,7 @@ export function LocalAgentProvidersPanel(props: {
       profile,
       status: localAgentStatus(profile, props.localAgentProviders),
     })),
-    (item) => item.profile.agentTargetId,
+    (item) => item.profile.agentTargetId ?? item.profile.id,
   );
   return (
     <section className={"[margin:8px] [overflow:hidden] [border:0] [border-top:1px_solid_var(--border-1)] [border-radius:0] [background:transparent]"} aria-label={t("runtime.localAgents")}>

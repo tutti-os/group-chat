@@ -52,6 +52,9 @@ test("virtual Tutti agent participants use stable non-clone ids", async () => {
   assert.equal(localAgentTargetFromLauncherAppId("agent-target:workspace/agent:primary"), "workspace/agent:primary");
   assert.equal(tuttiAgentParticipantId("workspace/agent:primary"), "tutti-agent:target:workspace%2Fagent%3Aprimary");
   assert.equal(parseTuttiAgentParticipantId("tutti-agent:target:workspace%2Fagent%3Aprimary"), "workspace/agent:primary");
+  assert.equal(tuttiAgentParticipantId(" target with edges "), "tutti-agent:target:%20target%20with%20edges%20");
+  assert.equal(parseTuttiAgentParticipantId("tutti-agent:target:%20target%20with%20edges%20"), " target with edges ");
+  assert.equal(tuttiAgentParticipantId("\ud800"), "");
   assert.equal(parseTuttiAgentParticipantId("tutti-agent:codex"), "");
   assert.equal(parseLegacyTuttiAgentProviderParticipantId("tutti-agent:codex"), "codex");
   assert.equal(parseLegacyTuttiAgentProviderParticipantId("tutti-agent:target:codex"), "");
