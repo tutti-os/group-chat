@@ -87,7 +87,6 @@ export PORT="\${TUTTI_APP_PORT:-8788}"
 export GROUP_CHAT_APP_VERSION="${version}"
 export GROUP_CHAT_WEB_DIST="$package_dir/dist"
 export GROUP_CHAT_HOME="\${TUTTI_APP_DATA_DIR:-$package_dir/.data}"
-export GROUP_CHAT_WORKSPACE_ROOT="\${TUTTI_WORKSPACE_ROOT:-$GROUP_CHAT_HOME}"
 
 base_url="\${TUTTI_APP_BASE_URL:-http://$HOST:$PORT}"
 export GROUP_CHAT_SERVER_URL="$base_url"

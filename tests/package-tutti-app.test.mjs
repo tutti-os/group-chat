@@ -89,7 +89,7 @@ test("bootstrap maps Tutti runtime env into Group Chat env", () => {
   assert.match(bootstrap, /export PORT="\$\{TUTTI_APP_PORT:-8788\}"/);
   assert.match(bootstrap, /export GROUP_CHAT_APP_VERSION="9\.8\.7"/);
   assert.match(bootstrap, /export GROUP_CHAT_HOME="\$\{TUTTI_APP_DATA_DIR:-\$package_dir\/\.data\}"/);
-  assert.match(bootstrap, /export GROUP_CHAT_WORKSPACE_ROOT="\$\{TUTTI_WORKSPACE_ROOT:-\$GROUP_CHAT_HOME\}"/);
+  assert.doesNotMatch(bootstrap, /WORKSPACE_ROOT/);
   assert.match(bootstrap, /node_bin="\$\{TUTTI_APP_NODE:-node\}"/);
   assert.match(bootstrap, /exec "\$node_bin" "\$package_dir\/server\/server\.js"/);
 });
