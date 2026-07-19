@@ -33,7 +33,7 @@ const BINARY_EXTENSIONS = new Map<string, string>([
   [".webp", "image/webp"],
 ]);
 
-const INTERNAL_AGENT_WORKSPACE_ROOT_FILES = new Set([
+const INTERNAL_AGENT_WORKSPACE_FILES = new Set([
   "AGENTS.MD",
   "BOOTSTRAP.MD",
   "CLAUDE.MD",
@@ -76,7 +76,7 @@ export function shouldImportRunFileArtifactPath(
   const [firstSegment, ...rest] = relativePath.split("/");
   if (!firstSegment) return true;
   if (INTERNAL_AGENT_WORKSPACE_DIRS.has(firstSegment.toLowerCase())) return false;
-  return rest.length > 0 || !INTERNAL_AGENT_WORKSPACE_ROOT_FILES.has(firstSegment.toUpperCase());
+  return rest.length > 0 || !INTERNAL_AGENT_WORKSPACE_FILES.has(firstSegment.toUpperCase());
 }
 
 export function formatFileReferenceMarkdown(artifact: Pick<Artifact, "id" | "filename">) {

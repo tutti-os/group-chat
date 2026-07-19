@@ -48,7 +48,6 @@ const baseEnv = {
   GROUP_CHAT_WEB_DIST: webDist,
   GROUP_CHAT_SERVER_URL: baseUrl,
   GROUP_CHAT_TOOL_BASE_URL: baseUrl,
-  GROUP_CHAT_WORKSPACE_ROOT: process.env.TUTTI_WORKSPACE_ROOT || projectRoot,
 };
 
 function run(command, args, options = {}) {
