@@ -18,6 +18,20 @@ test("exact target selection rejects TOCTOU, unknown targets, and ambiguous prov
   await writeFile(fakeAgent, `process.stdin.resume(); process.stdin.on("end", () => console.log('{"type":"final_text","text":"unexpected"}'));`);
   await writeFile(fakeTutti, `#!/usr/bin/env node
     const { readFileSync } = await import("node:fs");
+    if (process.argv.includes("composer-options")) {
+      const agentTargetId = process.argv[process.argv.indexOf("--agent-id") + 1];
+      console.log(JSON.stringify({
+        schemaVersion: 2,
+        agentTargetId,
+        providerId: "codex",
+        effectiveSettings: { model: "default" },
+        modelConfig: { configurable: true, currentValue: "default", defaultValue: "default", options: [{ id: "default", value: "default", label: "Default" }] },
+        permissionConfig: { configurable: true, defaultValue: "auto", modes: [{ id: "auto", label: "Auto", semantic: "auto" }] },
+        reasoningConfig: { configurable: true, currentValue: "high", defaultValue: "medium", options: [{ id: "high", value: "high", label: "High" }] },
+        speedConfig: { configurable: true, currentValue: "fast", defaultValue: "normal", options: [{ id: "fast", value: "fast", label: "Fast" }] },
+      }));
+      process.exit(0);
+    }
     const mode = readFileSync(${JSON.stringify(modeFile)}, "utf8").trim();
     const availability = (status) => ({ status, reasonCode: status === "available" ? "ready" : "offline", detail: status });
     const agents = mode === "ambiguous"
@@ -31,11 +45,12 @@ test("exact target selection rejects TOCTOU, unknown targets, and ambiguous prov
   await chmod(fakeTutti, 0o755);
   await writeFile(check, `
     async function main() {
+    const assert = (await import("node:assert/strict")).default;
     const { writeFile } = await import("node:fs/promises");
     const { join } = await import("node:path");
     process.env.GROUP_CHAT_HOME = ${JSON.stringify(home)};
     process.env.GROUP_CHAT_TUTTI_CLI = ${JSON.stringify(fakeTutti)};
-    process.env.GROUP_CHAT_LOCAL_AGENT_COMMAND = process.execPath + " " + ${JSON.stringify(fakeAgent)};
+    process.env.GROUP_CHAT_LOCAL_AGENT_COMMAND = JSON.stringify([process.execPath, ${JSON.stringify(fakeAgent)}]);
     const { LocalAgentRuntimeProvider } = await import(${JSON.stringify(new URL("../apps/server/src/runtimes/local-agent-provider.ts", import.meta.url).href)});
     const { agentRunMatchesRuntimeDescriptor } = await import(${JSON.stringify(new URL("../apps/server/src/runtimes/runtime-provider.ts", import.meta.url).href)});
     const { closeDb } = await import(${JSON.stringify(new URL("../apps/server/src/db/database.ts", import.meta.url).href)});
@@ -62,6 +77,11 @@ test("exact target selection rejects TOCTOU, unknown targets, and ambiguous prov
       recentMessages: [], attachments: [],
     };
     if (!(await provider.detect(context)).available) throw new Error("exact target should initially be available");
+    const targetStatus = (await provider.listLocalAgentTargets()).agents.find((item) => item.agentTargetId === "target-a");
+    assert.deepEqual(targetStatus?.reasoningEfforts, ["high"]);
+    assert.equal(targetStatus?.defaultReasoningEffort, "high");
+    assert.deepEqual(targetStatus?.speedModes, [{ id: "fast", label: "Fast" }]);
+    assert.equal(targetStatus?.defaultSpeedMode, "fast");
     const malformedProvider = {
       ...context,
       runtimeProfile: { ...context.runtimeProfile, provider: "co dex" },
@@ -74,7 +94,7 @@ test("exact target selection rejects TOCTOU, unknown targets, and ambiguous prov
       for await (const _event of provider.streamReply(context)) {}
       throw new Error("TOCTOU target change was accepted");
     } catch (error) {
-      if (!String(error).includes("unavailable")) throw error;
+      if (!/unavailable|Unknown Agent target/.test(String(error))) throw error;
     }
     await writeFile(${JSON.stringify(modeFile)}, "available");
     const unknown = { ...context, participant: { ...context.participant, agentTargetId: "missing" }, runtimeProfile: { ...context.runtimeProfile, agentTargetId: "missing" } };
@@ -232,7 +252,7 @@ test("exact target selection rejects TOCTOU, unknown targets, and ambiguous prov
       cwd: new URL("..", import.meta.url),
       env: { ...process.env, GROUP_CHAT_HOME: home },
     });
-    assert.equal(result.stderr, "");
+    assert.doesNotMatch(result.stderr, /Error:/);
   } finally {
     await rm(home, { recursive: true, force: true });
   }

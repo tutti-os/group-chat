@@ -36,8 +36,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared
       '@tutti-os/agent-acp-kit':
-        specifier: 0.5.0
-        version: 0.5.0
+        specifier: 0.7.8
+        version: 0.7.8
       fastify:
         specifier: ^5.8.5
         version: 5.8.5
@@ -1627,8 +1627,8 @@ packages:
       react: ^17.0.0 || ^18.0.0 || ^19.0.0
       react-dom: ^17.0.0 || ^18.0.0 || ^19.0.0
 
-  '@tutti-os/agent-acp-kit@0.5.0':
-    resolution: {integrity: sha512-EI01KkkKCkrp97CMZfBkwrfFXz4WFs01+q0sSK4BiLSwU9Hs/SyuNdpYyrwClCKR4AjICDhOYk/Cojd5i4iP2g==}
+  '@tutti-os/agent-acp-kit@0.7.8':
+    resolution: {integrity: sha512-axnRH7yYL6w0uIZqXb86i7TNBwUzYgezvnm8vl/4pftBhAEl+4aXsuPDZJRFqpnp1qU4aCE8e1ldlt+Chob2Xw==}
     engines: {node: '>=22'}
 
   '@tutti-os/ui-i18n-runtime@0.0.26':
@@ -4481,7 +4481,7 @@ snapshots:
     transitivePeerDependencies:
       - '@floating-ui/dom'
 
-  '@tutti-os/agent-acp-kit@0.5.0':
+  '@tutti-os/agent-acp-kit@0.7.8':
     dependencies:
       '@anthropic-ai/claude-agent-sdk': 0.2.141(zod@4.4.3)
       zod: 4.4.3

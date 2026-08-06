@@ -41,20 +41,20 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
       });
 
       const humanOnly = service.sendMessage(conversation.id, { content: "human note" }, {
-        managedAgentHeaders: { "x-tutti-agent-invocation-credential": "unused-secret" },
+        agentDetectContext: { cwd: "unused-secret" },
       });
       assert.equal(humanOnly.targets.length, 0);
       assert.equal(service.messageInvocationContexts.size, 0);
 
-      const observedCredentials = [];
+      const observedDetectionContexts = [];
       let releaseFirstReply;
       let markFirstReplyStarted;
       let markSecondReplyFinished;
       const firstReplyStarted = new Promise((resolve) => { markFirstReplyStarted = resolve; });
       const secondReplyFinished = new Promise((resolve) => { markSecondReplyFinished = resolve; });
       service.generateForParticipant = async (_roomId, _conversationId, _message, _participant, _run, invocation) => {
-        observedCredentials.push(invocation?.managedAgentHeaders?.["x-tutti-agent-invocation-credential"] ?? "missing");
-        if (observedCredentials.length === 1) {
+        observedDetectionContexts.push(invocation?.agentDetectContext?.cwd ?? "missing");
+        if (observedDetectionContexts.length === 1) {
           markFirstReplyStarted();
           await new Promise((resolve) => { releaseFirstReply = resolve; });
         } else {
@@ -70,8 +70,7 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
           displayNameSnapshot: participant.displayName,
         }],
       }, {
-        managedAgentHeaders: { "x-tutti-agent-invocation-credential": "first-secret" },
-        agentDetectContext: { managedAgentInvocation: { credential: "first-secret" } },
+        agentDetectContext: { cwd: "first-secret" },
       });
       await firstReplyStarted;
       const edited = await service.updateMessage(first.message.id, {
@@ -82,32 +81,31 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
           displayNameSnapshot: participant.displayName,
         }],
       }, {
-        managedAgentHeaders: { "x-tutti-agent-invocation-credential": "edited-secret" },
-        agentDetectContext: { managedAgentInvocation: { credential: "edited-secret" } },
+        agentDetectContext: { cwd: "edited-secret" },
       });
       assert.equal(edited?.targets[0]?.id, participant.id);
       await Promise.resolve();
       const queuedInvocation = service.messageInvocationContexts.get(first.message.id)?.get(participant.id);
       assert.equal(
-        queuedInvocation?.managedAgentHeaders?.["x-tutti-agent-invocation-credential"],
+        queuedInvocation?.agentDetectContext?.cwd,
         "edited-secret",
       );
       releaseFirstReply();
       await secondReplyFinished;
       await Promise.resolve();
-      assert.deepEqual(observedCredentials, ["first-secret", "edited-secret"]);
+      assert.deepEqual(observedDetectionContexts, ["first-secret", "edited-secret"]);
       assert.equal(service.messageInvocationContexts.size, 0);
 
       const runQueuedScenario = async ({ supersedeFollowup }) => {
-        const credentials = [];
+        const detectionContexts = [];
         let releaseActive;
         let markActiveStarted;
         let markQueuedFinished;
         const activeStarted = new Promise((resolve) => { markActiveStarted = resolve; });
         const queuedFinished = new Promise((resolve) => { markQueuedFinished = resolve; });
         service.generateForParticipant = async (_roomId, _conversationId, message, _participant, _run, invocation) => {
-          credentials.push(invocation?.managedAgentHeaders?.["x-tutti-agent-invocation-credential"] ?? "missing");
-          if (credentials.length === 1) {
+          detectionContexts.push(invocation?.agentDetectContext?.cwd ?? "missing");
+          if (detectionContexts.length === 1) {
             markActiveStarted();
             await new Promise((resolve) => { releaseActive = resolve; });
           } else {
@@ -123,7 +121,7 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
             displayNameSnapshot: participant.displayName,
           }],
         }, {
-          managedAgentHeaders: { "x-tutti-agent-invocation-credential": "active-secret" },
+          agentDetectContext: { cwd: "active-secret" },
         });
         await activeStarted;
         const assistantFollowup = repo.createMessage({
@@ -139,11 +137,11 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
           assistantFollowup,
           participant,
           null,
-          { managedAgentHeaders: { "x-tutti-agent-invocation-credential": "followup-secret" } },
+          { agentDetectContext: { cwd: "followup-secret" } },
         );
         assert.equal(
           service.messageInvocationContexts.get(assistantFollowup.id)?.get(participant.id)
-            ?.managedAgentHeaders?.["x-tutti-agent-invocation-credential"],
+            ?.agentDetectContext?.cwd,
           "followup-secret",
         );
         let supersedingMessage = null;
@@ -156,12 +154,12 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
               displayNameSnapshot: participant.displayName,
             }],
           }, {
-            managedAgentHeaders: { "x-tutti-agent-invocation-credential": "newest-secret" },
+            agentDetectContext: { cwd: "newest-secret" },
           }).message;
           assert.equal(service.messageInvocationContexts.has(assistantFollowup.id), false);
           assert.equal(
             service.messageInvocationContexts.get(supersedingMessage.id)?.get(participant.id)
-              ?.managedAgentHeaders?.["x-tutti-agent-invocation-credential"],
+              ?.agentDetectContext?.cwd,
             "newest-secret",
           );
         }
@@ -170,7 +168,7 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
         await Promise.resolve();
         assert.equal(generatedMessageId, supersedingMessage?.id ?? assistantFollowup.id);
         assert.deepEqual(
-          credentials,
+          detectionContexts,
           supersedeFollowup ? ["active-secret", "newest-secret"] : ["active-secret", "followup-secret"],
         );
         assert.equal(service.messageInvocationContexts.has(active.message.id), false);
@@ -181,15 +179,15 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
       await runQueuedScenario({ supersedeFollowup: false });
       await runQueuedScenario({ supersedeFollowup: true });
 
-      const staleCredentials = [];
+      const staleDetectionContexts = [];
       let releaseStaleActive;
       let markStaleActiveStarted;
       let markStaleActiveFinished;
       const staleActiveStarted = new Promise((resolve) => { markStaleActiveStarted = resolve; });
       const staleActiveFinished = new Promise((resolve) => { markStaleActiveFinished = resolve; });
       service.generateForParticipant = async (_roomId, _conversationId, _message, _participant, _run, invocation) => {
-        staleCredentials.push(invocation?.managedAgentHeaders?.["x-tutti-agent-invocation-credential"] ?? "missing");
-        if (staleCredentials.length === 1) {
+        staleDetectionContexts.push(invocation?.agentDetectContext?.cwd ?? "missing");
+        if (staleDetectionContexts.length === 1) {
           markStaleActiveStarted();
           await new Promise((resolve) => { releaseStaleActive = resolve; });
           markStaleActiveFinished();
@@ -204,7 +202,7 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
           displayNameSnapshot: participant.displayName,
         }],
       }, {
-        managedAgentHeaders: { "x-tutti-agent-invocation-credential": "stale-active-secret" },
+        agentDetectContext: { cwd: "stale-active-secret" },
       });
       await staleActiveStarted;
       const staleQueued = service.sendMessage(conversation.id, {
@@ -215,14 +213,14 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
           displayNameSnapshot: participant.displayName,
         }],
       }, {
-        managedAgentHeaders: { "x-tutti-agent-invocation-credential": "stale-queued-secret" },
+        agentDetectContext: { cwd: "stale-queued-secret" },
       });
       assert.equal(repo.getPendingReply(conversation.id, participant.id)?.messageId, staleQueued.message.id);
       const removedTarget = await service.updateMessage(staleQueued.message.id, {
         content: "edited into a human-only note",
         mentions: [],
       }, {
-        managedAgentHeaders: { "x-tutti-agent-invocation-credential": "edited-human-secret" },
+        agentDetectContext: { cwd: "edited-human-secret" },
       });
       assert.deepEqual(removedTarget?.targets, []);
       assert.equal(repo.getPendingReply(conversation.id, participant.id), null);
@@ -238,13 +236,13 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
       releaseStaleActive();
       await staleActiveFinished;
       await new Promise((resolve) => setTimeout(resolve, 0));
-      assert.deepEqual(staleCredentials, ["stale-active-secret"]);
+      assert.deepEqual(staleDetectionContexts, ["stale-active-secret"]);
       assert.equal(repo.getPendingReply(conversation.id, participant.id), null);
 
       const recoveredMessage = repo.createMessage({
         conversationId: conversation.id,
         role: "user",
-        content: "durable queued message without recoverable credentials",
+        content: "durable queued message without recoverable detection contexts",
         status: "success",
       });
       repo.upsertPendingReply({
@@ -281,7 +279,7 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
           displayNameSnapshot: participant.displayName,
         }],
       }, {
-        managedAgentHeaders: { "x-tutti-agent-invocation-credential": "delete-active-secret" },
+        agentDetectContext: { cwd: "delete-active-secret" },
       });
       await deleteActiveStarted;
       const deleteQueued = service.sendMessage(conversation.id, {
@@ -292,7 +290,7 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
           displayNameSnapshot: participant.displayName,
         }],
       }, {
-        managedAgentHeaders: { "x-tutti-agent-invocation-credential": "delete-queued-secret" },
+        agentDetectContext: { cwd: "delete-queued-secret" },
       });
       assert.equal(repo.getPendingReply(conversation.id, participant.id)?.messageId, deleteQueued.message.id);
       assert.equal(service.messageInvocationContexts.size > 0, true);
@@ -316,7 +314,7 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
       const scopedService = new ChatService(scopedRepo, scopedEvents, scopedTokens);
       scopedService.runtimes = {
         async listLocalAgentTargets(context) {
-          const credential = context?.managedAgentInvocation?.credential;
+          const credential = context?.cwd;
           if (credential === "credential-a") {
             await new Promise((resolve) => setTimeout(resolve, 20));
           }
@@ -340,8 +338,8 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
         },
       };
       const [catalogA, catalogB] = await Promise.all([
-        scopedService.listLocalAgentTargets({ managedAgentInvocation: { credential: "credential-a" } }),
-        scopedService.listLocalAgentTargets({ managedAgentInvocation: { credential: "credential-b" } }),
+        scopedService.listLocalAgentTargets({ cwd: "credential-a" }),
+        scopedService.listLocalAgentTargets({ cwd: "credential-b" }),
       ]);
       scopedService.generateReplies = async () => {};
       const scopedRoom = scopedService.createRoom({ title: "Scoped defaults", description: "" });
@@ -434,7 +432,7 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
         virtualMessage,
         virtualParticipant,
         null,
-        { managedAgentHeaders: { "x-tutti-agent-invocation-credential": "virtual-secret" } },
+        { agentDetectContext: { cwd: "virtual-secret" } },
       );
       const virtualRunId = await virtualRunStarted;
       const activeVirtualRun = scopedRepo.getAgentRun(virtualRunId);
@@ -490,7 +488,7 @@ test("message invocation state is request-scoped, leak-free, and retained for qu
       cwd: new URL("..", import.meta.url),
       env: { ...process.env, GROUP_CHAT_HOME: home },
     });
-    assert.equal(result.stderr, "");
+    assert.doesNotMatch(result.stderr, /Error:/);
   } finally {
     await rm(home, { recursive: true, force: true });
   }

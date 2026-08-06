@@ -1,18 +1,22 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const require = createRequire(import.meta.url);
 
 async function loadModule() {
-  const output = "/tmp/local-agent-command.test.mjs";
+  const output = path.join(mkdtempSync(path.join(tmpdir(), "local-agent-command-")), "module.mjs");
   const build = spawnSync(
-    "pnpm",
+    process.execPath,
     [
-      "--filter", "@group-chat/server", "exec", "esbuild",
-      "src/runtimes/local-agent-command.ts",
+      require.resolve("esbuild/bin/esbuild"),
+      "apps/server/src/runtimes/local-agent-command.ts",
       "--bundle", "--platform=node", "--format=esm", `--outfile=${output}`,
     ],
     { cwd: rootDir, encoding: "utf8", stdio: "pipe", env: { ...process.env, ESBUILD_WORKER_THREADS: "0" } },
@@ -28,7 +32,10 @@ test("Claude Code command resolution keeps the legacy Claude override", async ()
     GROUP_CHAT_LOCAL_AGENT_COMMAND: "global",
   };
 
-  assert.equal(resolveLocalAgentCommand("claude-code", env), "legacy-claude");
+  assert.deepEqual(resolveLocalAgentCommand("claude-code", env), {
+    command: "legacy-claude",
+    args: [],
+  });
 });
 
 test("provider-specific command takes precedence over legacy and global overrides", async () => {
@@ -39,6 +46,23 @@ test("provider-specific command takes precedence over legacy and global override
     GROUP_CHAT_LOCAL_AGENT_COMMAND: "global",
   };
 
-  assert.equal(resolveLocalAgentCommand("claude-code", env), "specific");
-  assert.equal(resolveLocalAgentCommand("cursor", env), "global");
+  assert.deepEqual(resolveLocalAgentCommand("claude-code", env), {
+    command: "specific",
+    args: [],
+  });
+  assert.deepEqual(resolveLocalAgentCommand("cursor", env), {
+    command: "global",
+    args: [],
+  });
+});
+
+test("JSON argv preserves paths with spaces without a shell", async () => {
+  const { resolveLocalAgentCommand } = await loadModule();
+  const command = String.raw`C:\Program Files\Group Chat\agent.exe`;
+  assert.deepEqual(
+    resolveLocalAgentCommand("codex", {
+      GROUP_CHAT_LOCAL_AGENT_CODEX_COMMAND: JSON.stringify([command, "--mode", "json"]),
+    }),
+    { command, args: ["--mode", "json"] },
+  );
 });

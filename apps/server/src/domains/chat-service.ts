@@ -52,7 +52,7 @@ import {
   parseLegacyTuttiAgentProviderParticipantId,
   parseTuttiAgentParticipantId,
 } from "./tutti-agent-participant.js";
-import type { DetectContext, ManagedAgentInvocationCredentialHeaders } from "@tutti-os/agent-acp-kit";
+import type { DetectContext } from "@tutti-os/agent-acp-kit";
 import {
   extractLocalFilePathsFromContent,
   inferMimeTypeForPath,
@@ -75,7 +75,6 @@ const AUTO_IMPORT_RUN_FILE_MAX_BYTES = 50 * 1024 * 1024;
 interface RuntimeInvocationContext {
   agentDetectContext?: DetectContext;
   defaultAgentTargetId?: string;
-  managedAgentHeaders?: ManagedAgentInvocationCredentialHeaders;
 }
 
 export class ChatService {
@@ -118,7 +117,7 @@ export class ChatService {
   async listLocalAgentTargets(detectContext?: DetectContext) {
     const catalog = await this.runtimes.listLocalAgentTargets(detectContext);
     this.repo.syncLocalAgentCatalog({
-      authoritative: !detectContext?.managedAgentInvocation,
+      authoritative: !detectContext,
       agents: catalog.agents.map((agent) => ({
         agentTargetId: agent.agentTargetId,
         providerId: agent.providerId,
@@ -353,7 +352,6 @@ export class ChatService {
           recentMessages: [],
           attachments: [],
           agentDetectContext: invocation.agentDetectContext,
-          managedAgentHeaders: invocation.managedAgentHeaders,
         });
         const localCompaction = this.workspaces.compactConversationContext({ conversation, participant });
         return {
@@ -1543,7 +1541,6 @@ export class ChatService {
       recentMessages,
       attachments,
       agentDetectContext: invocation?.agentDetectContext,
-      managedAgentHeaders: invocation?.managedAgentHeaders,
     };
     const runDescriptor = provider.describeRun(runtimeContext);
     const run = this.repo.createAgentRun({
@@ -1611,7 +1608,6 @@ export class ChatService {
       recentMessages,
       attachments,
       agentDetectContext: invocation?.agentDetectContext,
-      managedAgentHeaders: invocation?.managedAgentHeaders,
     };
     const runDescriptor = provider.describeRun(runtimeContext);
     if (preacceptedRun && !agentRunMatchesRuntimeDescriptor(preacceptedRun, runDescriptor)) {
@@ -2125,7 +2121,6 @@ export class ChatService {
       attachments,
       runId: runtimeRunId,
       agentDetectContext: input.invocation.agentDetectContext,
-      managedAgentHeaders: input.invocation.managedAgentHeaders,
     };
     const now = new Date().toISOString();
     const buildTask = (partial: Pick<PrivateTaskSnapshot, "status" | "content" | "error" | "updatedAt">): PrivateTaskSnapshot => ({

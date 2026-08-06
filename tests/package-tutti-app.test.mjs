@@ -83,6 +83,7 @@ test("root command documentation matches the generated package command documenta
 
 test("bootstrap maps Tutti runtime env into Group Chat env", () => {
   const bootstrap = renderBootstrap({ version: "9.8.7" });
+  assert.doesNotMatch(bootstrap, /\r/);
 
   assert.match(bootstrap, /package_dir="\$\{TUTTI_APP_PACKAGE_DIR:-\$script_dir\}"/);
   assert.match(bootstrap, /export HOST="\$\{TUTTI_APP_HOST:-127\.0\.0\.1\}"/);

@@ -6,9 +6,6 @@ import { fileURLToPath } from "node:url";
 import {
   createDefaultLocalAgentProviderPlugins,
   createDefaultLocalAgentRuntime,
-  createManagedAgentRunContextFromHeaders,
-  getManagedAgentInvocationCredentialFromHeaders,
-  isManagedAgentInvocationProviderId,
   type AgentEvent,
   type AgentRunMessage,
   type LocalAgentMcpServerConfig,
@@ -17,12 +14,11 @@ import {
   type RawAgentStream,
   type DetectContext,
 } from "@tutti-os/agent-acp-kit";
+import { resolveProcessInvocation } from "@tutti-os/agent-acp-kit/process-adapter";
 import {
-  loadTuttiAgentCatalog,
   loadTuttiAgentComposerOptions,
   loadTuttiAgentSkillContext,
   resolveTuttiCliCommand,
-  type TuttiAgentCatalogEntry,
   type TuttiAgentSkillContext,
 } from "@tutti-os/agent-acp-kit/tutti";
 import {
@@ -47,7 +43,7 @@ import {
 import type { RuntimeProvider, RuntimeReplyContext, RuntimeStreamEvent } from "./runtime-provider.js";
 import { RuntimeProviderUnsupportedError } from "./runtime-provider.js";
 import { buildLocalAgentProcessEnv } from "./local-agent-env.js";
-import { resolveLocalAgentCommand } from "./local-agent-command.js";
+import { resolveLocalAgentCommand, type LocalAgentCommand } from "./local-agent-command.js";
 import { LocalAgentSessionStore } from "./local-agent-session-store.js";
 
 type GroupChatLocalAgentProviderPlugin = LocalAgentProviderPlugin<"local-agent", string>;
@@ -96,66 +92,61 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
   }
 
   async listLocalAgentTargets(detectContext?: DetectContext): Promise<LocalAgentTargetStatusResponse> {
-    const env = buildLocalAgentProcessEnv(process.env, tuttiCliEnv());
+    const detections = await this.detectLocalAgentTargets(detectContext);
     const cwd = detectContext?.cwd?.trim() || process.cwd();
-    const catalog = await loadTuttiAgentCatalog({
-      runtime: this.localAgentRuntime,
-      cwd,
-      env,
-      detectContext,
-      commandEnvNames: ["GROUP_CHAT_TUTTI_CLI"],
-    });
-    const detections = catalog.source === "standalone"
-      ? await this.localAgentRuntime.detect(detectContext)
-      : [];
-    const detectedByProvider = new Map(detections.map((item) => [item.provider, item]));
-    const agents = await Promise.all(catalog.agents.map(async (agent): Promise<LocalAgentTargetStatus> => {
-      const detected = detectedByProvider.get(agent.providerId);
+    const env = buildLocalAgentProcessEnv(process.env, tuttiCliEnv());
+    const agents = (await Promise.all(detections.map(async (agent): Promise<LocalAgentTargetStatus | null> => {
+      if (!agent.agentTargetId) return null;
       let composer: Awaited<ReturnType<typeof loadTuttiAgentComposerOptions>> | null = null;
       try {
         composer = await loadTuttiAgentComposerOptions({
           runtime: this.localAgentRuntime,
           agentTargetId: agent.agentTargetId,
           cwd,
-          env,
+          env: { ...env, ...detectContext?.env },
           detectContext,
           commandEnvNames: ["GROUP_CHAT_TUTTI_CLI"],
         });
       } catch {
-        // Catalog visibility is authoritative; composer metadata is optional UI enrichment.
+        // Exact target discovery remains authoritative; composer is UI-only enrichment.
       }
       const reasoningEfforts = composer?.reasoningConfig.options
         .map((option) => parseReasoningEffort(option.value))
-        .filter((effort): effort is ReasoningEffort => effort !== null)
-        ?? undefined;
-      const configDir = readString(toRecord(detected), "configDir");
+        .filter((effort): effort is ReasoningEffort => effort !== null);
       const status: LocalAgentTargetStatus = {
         agentTargetId: agent.agentTargetId,
-        providerId: agent.providerId,
-        provider: agent.providerId,
+        providerId: agent.provider,
+        provider: agent.provider,
         displayName: agent.displayName,
-        runtimeSupported: agent.runtimeSupported,
-        availabilityStatus: agent.availability.status,
-        available: agent.runtimeSupported && agent.availability.status === "available",
-        authState: authStateFromCatalog(agent, detected?.authState),
-        executablePath: "",
-        version: detected?.supported ? "detected" : "not-installed",
-        ...(configDir ? { configDir } : {}),
-        models: composer?.modelConfig.options.map((option) => ({
-          id: option.value,
-          label: option.label,
-          ...(option.description ? { description: option.description } : {}),
-        })) ?? (detected?.models ?? []).map((model) => ({ id: model.id, label: model.label })),
-        defaultModelId: composer?.modelConfig.currentValue || composer?.modelConfig.defaultValue || undefined,
+        runtimeSupported: true,
+        availabilityStatus: agent.supported ? "available" : "unavailable",
+        available: agent.supported,
+        authState: agent.authState,
+        executablePath: agent.executablePath ?? "",
+        version: agent.supported ? "detected" : "not-installed",
+        models: agent.models.map((model) => ({
+          id: model.id,
+          label: model.label,
+          ...(model.description ? { description: model.description } : {}),
+        })),
+        ...(agent.defaultModelId ? { defaultModelId: agent.defaultModelId } : {}),
         ...(reasoningEfforts?.length ? { reasoningEfforts } : {}),
-        defaultReasoningEffort: parseReasoningEffort(composer?.reasoningConfig.currentValue) ?? undefined,
-        speedModes: composer?.speedConfig.options.map((option) => ({ id: option.value, label: option.label })),
-        defaultSpeedMode: composer?.speedConfig.currentValue || composer?.speedConfig.defaultValue || undefined,
-        reason: agent.availability.status === "available" && agent.runtimeSupported ? undefined : agent.availability.detail,
+        ...(parseReasoningEffort(composer?.reasoningConfig.currentValue)
+          ? { defaultReasoningEffort: parseReasoningEffort(composer?.reasoningConfig.currentValue)! }
+          : {}),
+        ...(composer ? {
+          speedModes: composer.speedConfig.options.map((option) => ({ id: option.value, label: option.label })),
+          defaultSpeedMode: composer.speedConfig.currentValue || composer.speedConfig.defaultValue || undefined,
+        } : {}),
+        ...(agent.reason ? { reason: agent.reason } : {}),
       };
       return enrichLocalAgentTargetStatus(status);
-    }));
-    return { defaultAgentTargetId: catalog.defaultAgentTargetId, agents };
+    }))).filter((agent): agent is LocalAgentTargetStatus => agent !== null);
+    const defaultAgentTargetId = detections.find((agent) => agent.isDefault)?.agentTargetId
+      ?? detections.find((agent) => agent.supported)?.agentTargetId
+      ?? detections[0]?.agentTargetId
+      ?? "";
+    return { defaultAgentTargetId, agents };
   }
 
   async *streamReply(context: RuntimeReplyContext) {
@@ -169,25 +160,51 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       return;
     }
 
-    yield* this.streamKitBridge(context, target.providerId, target.agentTargetId, target.legacyProviderUnique);
+    yield* this.streamKitBridge(
+      context,
+      target.providerId,
+      target.agentTargetId,
+      target.executablePath,
+      target.legacyProviderUnique,
+    );
   }
 
   private async resolveExactTarget(agentTargetId: string, detectContext?: DetectContext) {
-    const catalog = await loadTuttiAgentCatalog({
-      runtime: this.localAgentRuntime,
-      ...(detectContext?.cwd ? { cwd: detectContext.cwd } : {}),
-      env: buildLocalAgentProcessEnv(process.env, tuttiCliEnv()),
-      detectContext,
-      commandEnvNames: ["GROUP_CHAT_TUTTI_CLI"],
-    });
-    const target = catalog.agents.find((agent) => agent.agentTargetId === agentTargetId);
-    if (!target) throw new RuntimeProviderUnsupportedError(`Unknown Agent target: ${agentTargetId}`);
-    const legacyProviderUnique = catalog.agents.filter((agent) =>
-      agent.providerId === target.providerId
-      && agent.runtimeSupported
-      && agent.availability.status === "available"
+    if (!tuttiCliEnv().TUTTI_CLI) {
+      const customCommandTarget = customCommandTargetForAgentTargetId(agentTargetId);
+      if (customCommandTarget) return customCommandTarget;
+    }
+    const detections = await this.detectLocalAgentTargets(detectContext);
+    const detection = detections.find((agent) => agent.agentTargetId === agentTargetId);
+    if (!detection) {
+      const customCommandTarget = customCommandTargetForAgentTargetId(agentTargetId);
+      if (customCommandTarget) return customCommandTarget;
+      throw new RuntimeProviderUnsupportedError(`Unknown Agent target: ${agentTargetId}`);
+    }
+    const legacyProviderUnique = detections.filter((agent) =>
+      agent.provider === detection.provider && agent.supported
     ).length === 1;
-    return { ...target, legacyProviderUnique };
+    return {
+      agentTargetId,
+      providerId: detection.provider,
+      runtimeSupported: true,
+      availability: {
+        status: detection.supported ? "available" as const : "unavailable" as const,
+        detail: detection.reason ?? "Agent target is unavailable.",
+      },
+      executablePath: detection.executablePath,
+      legacyProviderUnique,
+    };
+  }
+
+  private detectLocalAgentTargets(detectContext?: DetectContext) {
+    const cwd = detectContext?.cwd?.trim() || process.cwd();
+    const env = buildLocalAgentProcessEnv(process.env, tuttiCliEnv());
+    return this.localAgentRuntime.detect({
+      ...detectContext,
+      cwd,
+      env: { ...env, ...detectContext?.env },
+    });
   }
 
   private async resolveExactTargetForRun(context: RuntimeReplyContext) {
@@ -204,21 +221,9 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
 
   private async prepareEffectiveRunContext(context: RuntimeReplyContext, runId: string) {
     const workspaceRoot = participantWorkspaceRoot(context.conversation.roomId, context.participant.id);
-    const provisionalProvider = canonicalProviderId(context.runtimeProfile?.provider);
-    if (provisionalProvider && isManagedAgentInvocationProviderId(provisionalProvider)) {
-      await ensureManagedAgentRunContext(context, provisionalProvider, runId);
-    }
-
-    let runCwd = effectiveLocalAgentRunCwd(context, workspaceRoot);
+    const runCwd = effectiveLocalAgentRunCwd(workspaceRoot);
     context.agentDetectContext = localAgentRunDetectContext(context, runCwd);
-    let target = await this.resolveExactTargetForRun(context);
-
-    if (!context.managedAgentRunContext && hasManagedAgentCredential(context)) {
-      await ensureManagedAgentRunContext(context, target.providerId, runId);
-      runCwd = effectiveLocalAgentRunCwd(context, workspaceRoot);
-      context.agentDetectContext = localAgentRunDetectContext(context, runCwd);
-      target = await this.resolveExactTargetForRun(context);
-    }
+    const target = await this.resolveExactTargetForRun(context);
 
     return {
       target,
@@ -231,24 +236,27 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
   private async resolveUniqueLegacyProviderTarget(providerId: string | null | undefined, detectContext?: DetectContext) {
     const normalizedProviderId = canonicalProviderId(providerId);
     if (!normalizedProviderId) throw new RuntimeProviderUnsupportedError("Exact Agent target is required.");
-    const catalog = await loadTuttiAgentCatalog({
-      runtime: this.localAgentRuntime,
-      ...(detectContext?.cwd ? { cwd: detectContext.cwd } : {}),
-      env: buildLocalAgentProcessEnv(process.env, tuttiCliEnv()),
-      detectContext,
-      commandEnvNames: ["GROUP_CHAT_TUTTI_CLI"],
-    });
-    const matches = catalog.agents.filter((agent) =>
-      agent.providerId === normalizedProviderId
-      && agent.runtimeSupported
-      && agent.availability.status === "available"
+    if (!tuttiCliEnv().TUTTI_CLI && resolveLocalAgentCommand(normalizedProviderId)) {
+      return customCommandTarget(normalizedProviderId);
+    }
+    const detections = await this.detectLocalAgentTargets(detectContext);
+    const matches = detections.filter((agent) =>
+      agent.provider === normalizedProviderId && agent.supported && agent.agentTargetId
     );
     if (matches.length !== 1) {
       throw new RuntimeProviderUnsupportedError(
         `Legacy provider cannot be migrated to one available Agent target: ${normalizedProviderId}`,
       );
     }
-    return { ...matches[0]!, legacyProviderUnique: true };
+    const match = matches[0]!;
+    return {
+      agentTargetId: match.agentTargetId!,
+      providerId: match.provider,
+      runtimeSupported: true,
+      availability: { status: "available" as const, detail: "" },
+      executablePath: match.executablePath,
+      legacyProviderUnique: true,
+    };
   }
 
   async cancel(runId: string) {
@@ -300,7 +308,8 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
       model: localAgentModelIdForAcp(context.runtimeProfile?.model ?? previousSession.model ?? "default", provider),
       reasoning: context.participant.reasoningEffort ?? undefined,
       env: buildLocalAgentRunEnv({ ...context, runId }),
-      managedAgentInvocation: context.managedAgentRunContext?.managedAgentInvocation,
+      agentTargetId,
+      executablePath: target.executablePath,
       metadata: context.participant.speedMode ? { speedMode: context.participant.speedMode } : undefined,
       extraAllowedDirs,
       resume,
@@ -339,15 +348,7 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
     });
   }
 
-  private async *streamCommandBridge(context: RuntimeReplyContext, command: string) {
-    if (!command) {
-      const provider = context.runtimeProfile?.provider ?? "local-agent";
-      const model = context.runtimeProfile?.model ?? context.participant.runtimeProfileId ?? "unknown";
-      throw new RuntimeProviderUnsupportedError(
-        `${provider} runtime (${model}) is registered but no local command is configured.`,
-      );
-    }
-
+  private async *streamCommandBridge(context: RuntimeReplyContext, command: LocalAgentCommand) {
     let retryWithEnv: Record<string, string> | undefined;
     let canRetryWithoutUserSkills = context.runtimeProfile?.provider === "codex";
     while (true) {
@@ -373,15 +374,21 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
 
   private async *streamCommandBridgeAttempt(
     context: RuntimeReplyContext,
-    command: string,
+    command: LocalAgentCommand,
     envOverrides?: Record<string, string>,
   ) {
     const workspaceRoot = participantWorkspaceRoot(context.conversation.roomId, context.participant.id);
-    const runCwd = effectiveLocalAgentRunCwd(context, workspaceRoot);
-    const child = spawn(command, {
+    const runCwd = effectiveLocalAgentRunCwd(workspaceRoot);
+    const env = buildLocalAgentRunEnv(context, envOverrides);
+    const invocation = resolveProcessInvocation({
+      command: command.command,
+      args: command.args,
+      env,
+    });
+    const child = spawn(invocation.command, invocation.args, {
       cwd: runCwd,
-      env: buildLocalAgentRunEnv(context, envOverrides),
-      shell: true,
+      env: invocation.env,
+      shell: false,
       stdio: "pipe",
     });
     if (context.runId) {
@@ -433,10 +440,11 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
     context: RuntimeReplyContext,
     provider: string,
     agentTargetId: string,
+    executablePath: string | undefined,
     legacyProviderUnique: boolean,
   ) {
     const workspaceRoot = participantWorkspaceRoot(context.conversation.roomId, context.participant.id);
-    const runCwd = effectiveLocalAgentRunCwd(context, workspaceRoot);
+    const runCwd = effectiveLocalAgentRunCwd(workspaceRoot);
     const extraAllowedDirs = localAgentAllowedDirs(runCwd, workspaceRoot);
     const controller = new AbortController();
     if (context.runId) {
@@ -516,6 +524,8 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
             conversationId: context.conversation.id,
             sessionId: context.conversation.id,
             provider,
+            agentTargetId,
+            ...(executablePath ? { executablePath } : {}),
             runtimeKind: "local-agent",
             runtimeProvider: provider,
             cwd: runCwd,
@@ -527,7 +537,6 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
             ...(mcpServers ? { mcpServers } : {}),
             ...(skillManifest ? { skillManifest } : {}),
             env: buildLocalAgentRunEnv(context, skillFallbackEnv),
-            managedAgentInvocation: context.managedAgentRunContext?.managedAgentInvocation,
             metadata: context.participant.speedMode ? { speedMode: context.participant.speedMode } : undefined,
             ...(timeoutMs ? { timeoutMs } : {}),
             extraAllowedDirs,
@@ -612,6 +621,32 @@ export class LocalAgentRuntimeProvider implements RuntimeProvider {
   }
 }
 
+function customCommandTargetForAgentTargetId(agentTargetId: string) {
+  if (!agentTargetId.startsWith("local:")) return null;
+  const providerId = canonicalProviderId(agentTargetId.slice("local:".length));
+  if (!providerId || !resolveLocalAgentCommand(providerId)) return null;
+  return customCommandTarget(providerId);
+}
+
+function customCommandTarget(providerId: string) {
+  return {
+    agentTargetId: `local:${providerId}`,
+    providerId,
+    runtimeSupported: true,
+    availability: { status: "available" as const, detail: "" },
+    executablePath: undefined,
+    legacyProviderUnique: true,
+  };
+}
+
+const REASONING_EFFORTS = new Set<ReasoningEffort>(["low", "medium", "high", "xhigh"]);
+
+function parseReasoningEffort(value: unknown): ReasoningEffort | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  return REASONING_EFFORTS.has(normalized as ReasoningEffort) ? normalized as ReasoningEffort : null;
+}
+
 const SKILL_LOAD_FALLBACK_NOTICE = "检测到用户级 skill 元数据损坏，已临时隔离用户级 skills 并自动重试。";
 const SKILL_BUNDLE_UNAVAILABLE_NOTICE = "Tutti skill bundle 暂时不可用，已跳过 skill bundle 注入并继续执行。";
 const CONTEXT_WINDOW_FRESH_RETRY_NOTICE = "检测到 Codex 上下文窗口已满，已自动开启新线程并减少历史上下文重试。";
@@ -628,47 +663,17 @@ function localAgentRuntimeRunId(context: RuntimeReplyContext) {
   return context.runId ?? `${context.conversation.id}:${context.participant.id}`;
 }
 
-async function ensureManagedAgentRunContext(
-  context: RuntimeReplyContext,
-  providerId: string,
-  runId: string,
-) {
-  if (context.managedAgentRunContext || !hasManagedAgentCredential(context)) return;
-  context.managedAgentRunContext = await createManagedAgentRunContextFromHeaders(
-    context.managedAgentHeaders,
-    { providerId, runId },
-  );
-}
-
-function hasManagedAgentCredential(context: RuntimeReplyContext) {
-  return Boolean(getManagedAgentInvocationCredentialFromHeaders(context.managedAgentHeaders));
-}
-
-function effectiveLocalAgentRunCwd(
-  context: RuntimeReplyContext,
-  participantWorkspaceRoot: string,
-) {
-  return context.managedAgentRunContext?.cwd ?? participantWorkspaceRoot;
+function effectiveLocalAgentRunCwd(participantWorkspaceRoot: string) {
+  return participantWorkspaceRoot;
 }
 
 function localAgentRunDetectContext(
   context: RuntimeReplyContext,
   runCwd: string,
 ): DetectContext {
-  const managedAgentInvocation = context.managedAgentRunContext?.managedAgentInvocation;
-  const credential = managedAgentInvocation?.credential;
   return {
     ...(context.agentDetectContext ?? {}),
     cwd: runCwd,
-    ...(managedAgentInvocation ? { managedAgentInvocation } : {}),
-    ...(credential
-      ? {
-          redactionSecrets: Array.from(new Set([
-            ...(context.agentDetectContext?.redactionSecrets ?? []),
-            credential,
-          ])),
-        }
-      : {}),
   };
 }
 
@@ -776,43 +781,6 @@ function localAgentUnavailableReason(
   if (result.authState === "missing") return `${displayName} is installed but authentication is missing.`;
   if (result.authState === "expired") return `${displayName} authentication has expired.`;
   return `${displayName} is not available.`;
-}
-
-function authStateFromCatalog(
-  provider: TuttiAgentCatalogEntry,
-  detected: LocalAgentTargetStatus["authState"] | undefined,
-): LocalAgentTargetStatus["authState"] {
-  if (provider.availability.reasonCode === "auth_required") return "missing";
-  if (provider.availability.reasonCode === "auth_expired") return "expired";
-  return detected ?? "unknown";
-}
-
-const REASONING_EFFORTS = new Set<ReasoningEffort>(["low", "medium", "high", "xhigh"]);
-
-function readString(record: Record<string, unknown> | undefined, ...keys: string[]) {
-  if (!record) return undefined;
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return undefined;
-}
-
-function parseReasoningEffort(value: unknown): ReasoningEffort | null {
-  if (typeof value !== "string") return null;
-  const normalized = value.trim().toLowerCase();
-  return REASONING_EFFORTS.has(normalized as ReasoningEffort) ? (normalized as ReasoningEffort) : null;
-}
-
-function parseReasoningEfforts(value: unknown): ReasoningEffort[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const efforts = value
-    .map((item) => {
-      const itemRecord = toRecord(item);
-      return parseReasoningEffort(readString(itemRecord, "effort", "id", "value") ?? item);
-    })
-    .filter((effort): effort is ReasoningEffort => effort !== null);
-  return efforts.length ? [...new Set(efforts)] : undefined;
 }
 
 function buildGroupChatMcpServers(context: RuntimeReplyContext): LocalAgentMcpServerConfig[] {

@@ -1,0 +1,133 @@
+name: Windows Runtime Check
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/check-windows.yml"
+      - "apps/**"
+      - "packages/**"
+      - "scripts/**"
+      - "tests/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - name: Check shell-free command parsing
+        run: node --test tests/local-agent-command.test.mjs
+      - run: pnpm package:tutti
+      - name: Smoke packaged server with native Tutti CLI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $fixtureDir = Join-Path $env:RUNNER_TEMP 'Tutti CLI Fixture'
+          $fixturePath = Join-Path $fixtureDir 'tutti.exe'
+          $fixtureLog = Join-Path $env:RUNNER_TEMP 'tutti-fixture-argv.log'
+          New-Item -ItemType Directory -Force -Path $fixtureDir | Out-Null
+          $csc = Get-ChildItem "$env:WINDIR\Microsoft.NET\Framework64" -Filter csc.exe -Recurse |
+            Sort-Object FullName |
+            Select-Object -Last 1
+          $fixtureSource = (Resolve-Path 'tests\fixtures\windows\tutti-fixture.cs').Path
+          & $csc.FullName /nologo /out:"$fixturePath" "$fixtureSource"
+
+          $env:TUTTI_CLI = (Resolve-Path $fixturePath).Path
+          $env:GROUP_CHAT_TUTTI_FIXTURE_LOG = $fixtureLog
+          $env:CODEX_HOME = Join-Path $env:RUNNER_TEMP 'codex-fixture-home'
+          New-Item -ItemType Directory -Force -Path $env:CODEX_HOME | Out-Null
+          Set-Content -Path (Join-Path $env:CODEX_HOME 'auth.json') -Value '{}' -NoNewline
+          $env:TUTTI_APP_DATA_DIR = Join-Path $env:RUNNER_TEMP 'group-chat-home'
+          $env:TUTTI_APP_HOST = '127.0.0.1'
+          $env:TUTTI_APP_PORT = '18788'
+          $env:TUTTI_APP_NODE = (Get-Command node).Source
+          $stdout = Join-Path $env:RUNNER_TEMP 'group-chat-server.stdout.log'
+          $stderr = Join-Path $env:RUNNER_TEMP 'group-chat-server.stderr.log'
+          $bootstrap = (Resolve-Path 'build/tutti-app/package/bootstrap.sh').Path
+          $gitBash = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
+          if (-not (Test-Path $gitBash)) { throw "Git Bash not found at $gitBash" }
+          $server = Start-Process -FilePath $gitBash -ArgumentList $bootstrap -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          try {
+            $healthy = $false
+            for ($attempt = 0; $attempt -lt 40; $attempt++) {
+              try {
+                $health = Invoke-RestMethod 'http://127.0.0.1:18788/api/health'
+                if ($health.ok) { $healthy = $true; break }
+              } catch {
+                Start-Sleep -Milliseconds 250
+              }
+            }
+            if (-not $healthy) { throw "Packaged server did not become healthy.`n$(Get-Content $stderr -Raw)" }
+
+            # Run one startup snapshot before creating work so recovery maintenance cannot classify the test run as stale.
+            Invoke-RestMethod 'http://127.0.0.1:18788/api/bootstrap' | Out-Null
+            $catalog = Invoke-RestMethod 'http://127.0.0.1:18788/api/local-agent/agents'
+            if ($catalog.defaultAgentTargetId -ne 'fixture:codex') { throw 'Exact fixture Agent Target was not selected' }
+            if ($catalog.agents[0].agentTargetId -ne 'fixture:codex') { throw 'Agent catalog lost exact target identity' }
+
+            $jsonHeaders = @{ 'Content-Type' = 'application/json' }
+            $identity = Invoke-RestMethod -Method Post -Headers $jsonHeaders -Uri 'http://127.0.0.1:18788/api/identities' -Body '{"name":"Windows Agent"}'
+            $room = Invoke-RestMethod -Method Post -Headers $jsonHeaders -Uri 'http://127.0.0.1:18788/api/rooms' -Body '{"title":"Windows Runtime"}'
+            $participantBody = @{ identityId = $identity.identity.id; runtimeProfileId = $identity.identity.defaultRuntimeProfileId } | ConvertTo-Json -Compress
+            $participant = Invoke-RestMethod -Method Post -Headers $jsonHeaders -Uri "http://127.0.0.1:18788/api/conversations/$($room.conversation.id)/participants" -Body $participantBody
+            $messageBody = @{
+              content = '@Windows Agent run the native fixture'
+              maxReplyRounds = 1
+              mentions = @(@{
+                mentionType = 'participant'
+                participantId = $participant.participant.id
+                displayNameSnapshot = $participant.participant.displayName
+              })
+            } | ConvertTo-Json -Depth 4 -Compress
+            Invoke-RestMethod -Method Post -Headers $jsonHeaders -Uri "http://127.0.0.1:18788/api/conversations/$($room.conversation.id)/messages" -Body $messageBody | Out-Null
+
+            $completedRun = $null
+            $assistant = $null
+            for ($attempt = 0; $attempt -lt 80; $attempt++) {
+              $snapshot = Invoke-RestMethod 'http://127.0.0.1:18788/api/bootstrap'
+              $completedRun = $snapshot.agentRuns | Where-Object { $_.participantId -eq $participant.participant.id -and $_.status -eq 'completed' } | Select-Object -First 1
+              if ($completedRun) {
+                $assistant = $snapshot.messages | Where-Object { $_.id -eq $completedRun.assistantMessageId } | Select-Object -First 1
+                if ($assistant.content -eq 'windows-agent-ok') { break }
+              }
+              Start-Sleep -Milliseconds 250
+            }
+            if (-not $completedRun -or $assistant.content -ne 'windows-agent-ok') {
+              $runDiagnostics = $snapshot.agentRuns | ConvertTo-Json -Depth 6 -Compress
+              $messageDiagnostics = $snapshot.messages | Select-Object -Last 5 | ConvertTo-Json -Depth 6 -Compress
+              $callDiagnostics = if (Test-Path $fixtureLog) { (Get-Content $fixtureLog) -join '; ' } else { '<none>' }
+              throw "Native Windows Agent run did not complete through Group Chat.`nruns=$runDiagnostics`nmessages=$messageDiagnostics`ncalls=$callDiagnostics`n$(Get-Content $stderr -Raw)"
+            }
+
+            $calls = Get-Content $fixtureLog
+            if (-not ($calls | Where-Object { $_ -eq "--json$([char]0x1f)agent$([char]0x1f)list" })) {
+              throw "Native Tutti CLI did not receive the exact list argv: $($calls -join '; ')"
+            }
+            $expectedComposer = "--json$([char]0x1f)agent$([char]0x1f)composer-options$([char]0x1f)--agent-id$([char]0x1f)fixture:codex"
+            if (-not ($calls | Where-Object { $_.StartsWith($expectedComposer) })) {
+              throw "Native Tutti CLI did not receive the exact composer argv: $($calls -join '; ')"
+            }
+            $runPrefix = "RUN$([char]0x1f)exec$([char]0x1f)--json$([char]0x1f)--skip-git-repo-check$([char]0x1f)"
+            $runCall = $calls | Where-Object { $_.StartsWith($runPrefix) } | Select-Object -First 1
+            if (-not $runCall -or $runCall -notlike "*$([char]0x1f)-C$([char]0x1f)*") {
+              throw "Native Agent executable was not launched: $($calls -join '; ')"
+            }
+          } finally {
+            if (-not $server.HasExited) {
+              & taskkill.exe /pid $server.Id /T /F 2>$null | Out-Null
+            }
+          }

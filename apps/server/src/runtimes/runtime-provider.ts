@@ -8,11 +8,7 @@ import type {
   Participant,
   RuntimeProfile,
 } from "@group-chat/shared";
-import type {
-  DetectContext,
-  ManagedAgentInvocationCredentialHeaders,
-  ManagedAgentRunContext,
-} from "@tutti-os/agent-acp-kit";
+import type { DetectContext } from "@tutti-os/agent-acp-kit";
 
 export interface RuntimeReplyContext {
   runId?: string;
@@ -28,8 +24,6 @@ export interface RuntimeReplyContext {
   recentMessages: Message[];
   attachments: Artifact[];
   agentDetectContext?: DetectContext;
-  managedAgentHeaders?: ManagedAgentInvocationCredentialHeaders;
-  managedAgentRunContext?: ManagedAgentRunContext;
 }
 
 export interface RuntimeRunDescriptor {
