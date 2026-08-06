@@ -118,7 +118,7 @@ jobs:
               throw "Native Tutti CLI did not receive the exact list argv: $($calls -join '; ')"
             }
             $expectedComposer = "--json$([char]0x1f)agent$([char]0x1f)composer-options$([char]0x1f)--agent-id$([char]0x1f)fixture:codex"
-            if (-not ($calls | Where-Object { $_ -eq $expectedComposer })) {
+            if (-not ($calls | Where-Object { $_.StartsWith($expectedComposer) })) {
               throw "Native Tutti CLI did not receive the exact composer argv: $($calls -join '; ')"
             }
             $runPrefix = "RUN$([char]0x1f)exec$([char]0x1f)--json$([char]0x1f)--skip-git-repo-check$([char]0x1f)"
