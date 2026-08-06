@@ -104,7 +104,10 @@ jobs:
               Start-Sleep -Milliseconds 250
             }
             if (-not $completedRun -or $assistant.content -ne 'windows-agent-ok') {
-              throw "Native Windows Agent run did not complete through Group Chat.`n$(Get-Content $stderr -Raw)"
+              $runDiagnostics = $snapshot.agentRuns | ConvertTo-Json -Depth 6 -Compress
+              $messageDiagnostics = $snapshot.messages | Select-Object -Last 5 | ConvertTo-Json -Depth 6 -Compress
+              $callDiagnostics = if (Test-Path $fixtureLog) { (Get-Content $fixtureLog) -join '; ' } else { '<none>' }
+              throw "Native Windows Agent run did not complete through Group Chat.`nruns=$runDiagnostics`nmessages=$messageDiagnostics`ncalls=$callDiagnostics`n$(Get-Content $stderr -Raw)"
             }
 
             $calls = Get-Content $fixtureLog
