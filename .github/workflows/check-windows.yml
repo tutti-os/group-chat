@@ -121,5 +121,7 @@ jobs:
               throw "Native Agent executable was not launched: $($calls -join '; ')"
             }
           } finally {
-            if (-not $server.HasExited) { Stop-Process -Id $server.Id -Force }
+            if (-not $server.HasExited) {
+              & taskkill.exe /pid $server.Id /T /F 2>$null | Out-Null
+            }
           }
