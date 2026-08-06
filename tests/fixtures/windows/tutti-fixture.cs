@@ -29,7 +29,7 @@ public static class Program
             File.AppendAllText(logPath, "RUN\u001f" + String.Join("\u001f", args) + Environment.NewLine);
         }
         Console.In.ReadToEnd();
-        Console.WriteLine("{\"type\":\"text_delta\",\"text\":\"windows-agent-ok\"}");
+        Console.WriteLine("{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"windows-agent-ok\"}}");
         return 0;
     }
 }
