@@ -9,7 +9,7 @@ import test from "node:test";
 const execFileAsync = promisify(execFile);
 const providerModuleUrl = new URL("../apps/server/src/runtimes/local-agent-provider.ts", import.meta.url).href;
 
-test("managed and standalone runs use one effective cwd for detection, skills, runtime, and compaction", async () => {
+test("request-scoped and standalone runs use one effective cwd for detection, skills, runtime, and compaction", async () => {
   const home = await mkdtemp(join(tmpdir(), "group-chat-effective-cwd-"));
   const fakeTutti = join(home, "fake-tutti.mjs");
   const cliLog = join(home, "cli-cwds.jsonl");
@@ -61,9 +61,7 @@ test("managed and standalone runs use one effective cwd for detection, skills, r
       delete process.env.GROUP_CHAT_LOCAL_AGENT_COMMAND;
       delete process.env.GROUP_CHAT_LOCAL_AGENT_CODEX_COMMAND;
 
-      const credentialHeaders = { "x-tsh-managed-agent-credential": "managed-secret" };
-
-      function createContext(suffix, managed) {
+      function createContext(suffix, requestScoped) {
         const conversationId = \`conversation-\${suffix}\`;
         const roomId = \`room-\${suffix}\`;
         const participantId = \`participant-\${suffix}\`;
@@ -144,19 +142,28 @@ test("managed and standalone runs use one effective cwd for detection, skills, r
           userMessage,
           recentMessages: [],
           attachments: [],
-          ...(managed
-            ? {
-                managedAgentHeaders: credentialHeaders,
-              }
-            : {}),
+          ...(requestScoped ? { agentDetectContext: { cwd: process.cwd() } } : {}),
         };
       }
 
       async function main() {
         const { LocalAgentRuntimeProvider } = await import(${JSON.stringify(providerModuleUrl)});
         const runtimeInputs = [];
+        const detectInputs = [];
         const fakeRuntime = {
-          detect: async () => [],
+          detect: async (input) => {
+            detectInputs.push(input);
+            return [{
+              agentTargetId: "agent-1",
+              provider: "codex",
+              displayName: "Primary Agent",
+              supported: true,
+              executablePath: process.execPath,
+              models: [{ id: "default", label: "Default" }],
+              defaultModelId: "default",
+              isDefault: true,
+            }];
+          },
           listProviders: () => [{ id: "codex" }],
           cancel: async () => undefined,
           async *run(input) {
@@ -166,10 +173,10 @@ test("managed and standalone runs use one effective cwd for detection, skills, r
           },
         };
 
-        async function runCase(suffix, managed) {
+        async function runCase(suffix, requestScoped) {
           const provider = new LocalAgentRuntimeProvider();
           provider.localAgentRuntime = fakeRuntime;
-          const context = createContext(suffix, managed);
+          const context = createContext(suffix, requestScoped);
           for await (const _event of provider.streamReply(context)) {
             // Drain the stream so the session is persisted for compaction.
           }
@@ -188,51 +195,38 @@ test("managed and standalone runs use one effective cwd for detection, skills, r
         assert.deepEqual(standalone.input.extraAllowedDirs, [standaloneWorkspace]);
         assert.equal("GROUP_CHAT_WORKSPACE" in standalone.input.env, false);
 
-        const managed = await runCase("managed", true);
-        const managedWorkspace = resolve(join(
+        const requestScoped = await runCase("request-scoped", true);
+        const requestScopedWorkspace = resolve(join(
           ${JSON.stringify(home)},
           "rooms",
-          managed.context.conversation.roomId,
+          requestScoped.context.conversation.roomId,
           "agents",
-          managed.context.participant.id,
+          requestScoped.context.participant.id,
         ));
-        const managedCwd = resolve(managed.context.managedAgentRunContext.cwd);
-        assert.match(managedCwd, /\\.agent-runs\\//);
-        assert.equal(managed.input.cwd, managedCwd);
-        assert.equal(managed.input.managedAgentInvocation.cwd, managedCwd);
-        assert.deepEqual(managed.input.extraAllowedDirs, [managedCwd, managedWorkspace]);
-        assert.equal("GROUP_CHAT_WORKSPACE" in managed.input.env, false);
+        assert.equal(requestScoped.input.cwd, requestScopedWorkspace);
+        assert.deepEqual(requestScoped.input.extraAllowedDirs, [requestScopedWorkspace]);
+        assert.equal("GROUP_CHAT_WORKSPACE" in requestScoped.input.env, false);
+        assert.equal(await realpath(detectInputs[0].cwd), await realpath(standalone.input.cwd));
+        assert.equal(await realpath(detectInputs[1].cwd), await realpath(requestScoped.input.cwd));
 
         const cliCalls = (await readFile(${JSON.stringify(cliLog)}, "utf8"))
           .trim()
           .split("\\n")
           .map((line) => JSON.parse(line));
         const skillCalls = cliCalls.filter((call) => !call.args.includes("list"));
-        const detectCalls = cliCalls.filter((call) => call.args.includes("list"));
-        assert.equal(detectCalls.length, 4, JSON.stringify(cliCalls));
-        for (const call of detectCalls.slice(0, 2)) {
-          assert.equal(await realpath(call.cwd), await realpath(standalone.input.cwd));
-        }
-        for (const call of detectCalls.slice(2)) {
-          assert.equal(await realpath(call.cwd), await realpath(managed.input.cwd));
-        }
-        assert.ok(skillCalls.length >= 2, JSON.stringify(cliCalls));
-        assert.equal(await realpath(skillCalls.at(-2).cwd), await realpath(standalone.input.cwd));
-        assert.equal(await realpath(skillCalls.at(-1).cwd), await realpath(managed.input.cwd));
+        assert.ok(skillCalls.length >= 1, JSON.stringify(cliCalls));
+        assert.equal(await realpath(skillCalls[0].cwd), await realpath(standalone.input.cwd));
 
         const compactContext = {
-          ...managed.context,
+          ...requestScoped.context,
           runId: undefined,
-          managedAgentRunContext: undefined,
           agentDetectContext: undefined,
         };
-        await managed.provider.compactContext(compactContext);
+        await requestScoped.provider.compactContext(compactContext);
         const compactInput = runtimeInputs.at(-1);
-        const compactCwd = resolve(compactContext.managedAgentRunContext.cwd);
         assert.equal(compactInput.prompt, "/compact");
-        assert.equal(compactInput.cwd, compactCwd);
-        assert.equal(compactInput.managedAgentInvocation.cwd, compactCwd);
-        assert.deepEqual(compactInput.extraAllowedDirs, [compactCwd, managedWorkspace]);
+        assert.equal(compactInput.cwd, requestScopedWorkspace);
+        assert.deepEqual(compactInput.extraAllowedDirs, [requestScopedWorkspace]);
         assert.equal("GROUP_CHAT_WORKSPACE" in compactInput.env, false);
       }
 

@@ -15,6 +15,21 @@ const chatRepositoryModuleUrl = new URL("../apps/server/src/domains/chat-reposit
 const databaseModuleUrl = new URL("../apps/server/src/db/database.ts", import.meta.url).href;
 const eventHubModuleUrl = new URL("../apps/server/src/ws/event-hub.ts", import.meta.url).href;
 const tokenStoreModuleUrl = new URL("../apps/server/src/domains/agent-tool-tokens.ts", import.meta.url).href;
+const fakeComposerOptionsHandler = `
+  if (process.argv.includes("composer-options")) {
+    console.log(JSON.stringify({
+      schemaVersion: 2,
+      agentTargetId: "agent-1",
+      providerId: "codex",
+      effectiveSettings: { model: "default" },
+      modelConfig: { configurable: true, currentValue: "default", defaultValue: "default", options: [{ id: "default", value: "default", label: "Default" }] },
+      permissionConfig: { configurable: true, defaultValue: "auto", modes: [{ id: "auto", label: "Auto", semantic: "auto" }] },
+      reasoningConfig: { configurable: false, currentValue: "", defaultValue: "", options: [] },
+      speedConfig: { configurable: false, currentValue: "", defaultValue: "", options: [] },
+    }));
+    process.exit(0);
+  }
+`;
 
 test("retired provider launchers are not treated as workspace app-only tasks", async () => {
   const checkScript = join(await mkdtemp(join(tmpdir(), "group-chat-retired-launcher-intent-")), "check-intent.ts");
@@ -220,7 +235,7 @@ test("workspace app mentions keep structured context for the mentioned agent", a
       import assert from "node:assert/strict";
 
       process.env.GROUP_CHAT_HOME = ${JSON.stringify(home)};
-      process.env.GROUP_CHAT_LOCAL_AGENT_CODEX_COMMAND = \`\${process.execPath} ${agentScript}\`;
+      process.env.GROUP_CHAT_LOCAL_AGENT_CODEX_COMMAND = JSON.stringify([process.execPath, ${JSON.stringify(agentScript)}]);
 
       async function main() {
         const { LocalAgentRuntimeProvider } = await import(${JSON.stringify(providerModuleUrl)});
@@ -377,7 +392,7 @@ test("workspace app-only task fails closed before an Agent catalog is loaded", a
       import assert from "node:assert/strict";
 
       process.env.GROUP_CHAT_HOME = ${JSON.stringify(home)};
-      process.env.GROUP_CHAT_LOCAL_AGENT_CODEX_COMMAND = \`\${process.execPath} ${agentScript}\`;
+      process.env.GROUP_CHAT_LOCAL_AGENT_CODEX_COMMAND = JSON.stringify([process.execPath, ${JSON.stringify(agentScript)}]);
 
       async function main() {
         const { closeDb } = await import(${JSON.stringify(databaseModuleUrl)});
@@ -460,7 +475,7 @@ test("codex local agent retries with isolated user skills when skill metadata is
       import assert from "node:assert/strict";
 
       process.env.GROUP_CHAT_HOME = ${JSON.stringify(home)};
-      process.env.GROUP_CHAT_LOCAL_AGENT_CODEX_COMMAND = \`\${process.execPath} ${agentScript}\`;
+      process.env.GROUP_CHAT_LOCAL_AGENT_CODEX_COMMAND = JSON.stringify([process.execPath, ${JSON.stringify(agentScript)}]);
 
       async function main() {
         const { LocalAgentRuntimeProvider } = await import(${JSON.stringify(providerModuleUrl)});
@@ -586,6 +601,7 @@ test("codex local agent skips Tutti skill bundle for simple participant mentions
   await writeFile(
     fakeTutti,
     `#!/usr/bin/env node
+      ${fakeComposerOptionsHandler}
       if (process.argv.join(" ").includes("agent list")) {
         console.log(JSON.stringify({ schemaVersion: 1, defaultAgentTargetId: "agent-1", agents: [{ id: "agent-1", provider: "codex", name: "Primary Agent", availability: { status: "available", reasonCode: "ready", detail: "" } }] }));
         process.exit(0);
@@ -735,6 +751,7 @@ test("codex local agent continues when required Tutti skill bundle command is un
   await writeFile(
     fakeTutti,
     `#!/usr/bin/env node
+      ${fakeComposerOptionsHandler}
       if (process.argv.join(" ").includes("agent list")) {
         console.log(JSON.stringify({ schemaVersion: 1, defaultAgentTargetId: "agent-1", agents: [{ id: "agent-1", provider: "codex", name: "Primary Agent", availability: { status: "available", reasonCode: "ready", detail: "" } }] }));
         process.exit(0);
@@ -905,6 +922,7 @@ test("codex local agent falls back to minimal context after repeated context win
   await writeFile(
     fakeTutti,
     `#!/usr/bin/env node
+      ${fakeComposerOptionsHandler}
       if (process.argv.join(" ").includes("agent list")) {
         console.log(JSON.stringify({ schemaVersion: 1, defaultAgentTargetId: "agent-1", agents: [{ id: "agent-1", provider: "codex", name: "Primary Agent", availability: { status: "available", reasonCode: "ready", detail: "" } }] }));
         process.exit(0);
@@ -1109,7 +1127,7 @@ test("local agent command bridge forwards thinking deltas", async () => {
       import assert from "node:assert/strict";
 
       process.env.GROUP_CHAT_HOME = ${JSON.stringify(home)};
-      process.env.GROUP_CHAT_LOCAL_AGENT_CODEX_COMMAND = \`\${process.execPath} ${agentScript}\`;
+      process.env.GROUP_CHAT_LOCAL_AGENT_CODEX_COMMAND = JSON.stringify([process.execPath, ${JSON.stringify(agentScript)}]);
 
       async function main() {
         const { LocalAgentRuntimeProvider } = await import(${JSON.stringify(providerModuleUrl)});
@@ -1233,7 +1251,7 @@ test("completed local agent replies keep explicit thinking events", async () => 
       import assert from "node:assert/strict";
 
       process.env.GROUP_CHAT_HOME = ${JSON.stringify(home)};
-      process.env.GROUP_CHAT_LOCAL_AGENT_CODEX_COMMAND = \`\${process.execPath} ${agentScript}\`;
+      process.env.GROUP_CHAT_LOCAL_AGENT_CODEX_COMMAND = JSON.stringify([process.execPath, ${JSON.stringify(agentScript)}]);
 
       async function main() {
         const { closeDb } = await import(${JSON.stringify(databaseModuleUrl)});
@@ -1273,7 +1291,7 @@ test("completed local agent replies keep explicit thinking events", async () => 
           await new Promise((resolve) => setTimeout(resolve, 25));
         }
         const run = snapshot.agentRuns.find((item) => item.participantId === participant.id);
-        assert.equal(run?.status, "completed");
+        assert.equal(run?.status, "completed", run?.error ?? "Agent run did not complete");
         const thinking = snapshot.agentRunEvents.find((event) => event.runId === run.id && event.type === "thinking_delta");
         assert.equal(thinking?.content, "先读取上下文，再执行请求。");
         const assistant = snapshot.messages.find((message) => message.id === run.assistantMessageId);

@@ -96,7 +96,7 @@ runtime_dir="\${TUTTI_APP_RUNTIME_DIR:-$GROUP_CHAT_HOME/.runtime}"
 mkdir -p "$GROUP_CHAT_HOME" "$runtime_dir"
 
 exec "$node_bin" "$package_dir/server/server.js"
-`;
+`.replaceAll("\r\n", "\n");
 }
 
 export function renderAgentsGuide() {
@@ -428,7 +428,7 @@ async function writePackageFiles(manifest) {
 }
 
 async function bundleServer() {
-  await run("pnpm", [
+  await runPackageManager([
     "exec",
     "esbuild",
     "apps/server/src/main.ts",
@@ -442,7 +442,7 @@ async function bundleServer() {
 }
 
 async function bundleToolsMcp() {
-  await run("pnpm", [
+  await runPackageManager([
     "exec",
     "esbuild",
     "apps/server/src/local-agent-host/tools-mcp.mjs",
@@ -458,8 +458,20 @@ async function bundleToolsMcp() {
 async function createZip(version) {
   const zipPath = path.join(buildRoot, `${APP_ID}-${version}.zip`);
   await rm(zipPath, { force: true });
-  await run("zip", ["-qry", zipPath, "."], { cwd: packageRoot });
+  if (process.platform === "win32") {
+    await run("tar.exe", ["-a", "-c", "-f", zipPath, "."], { cwd: packageRoot });
+  } else {
+    await run("zip", ["-qry", zipPath, "."], { cwd: packageRoot });
+  }
   return zipPath;
+}
+
+function runPackageManager(args, options = {}) {
+  const entrypoint = process.env.npm_execpath?.trim();
+  if (!entrypoint) {
+    throw new Error("npm_execpath is required to run the package manager");
+  }
+  return run(process.execPath, [entrypoint, ...args], options);
 }
 
 export async function sha256File(filePath) {
@@ -545,7 +557,7 @@ export async function validatePackageRoot(root) {
   }
 
   const bootstrapMode = (await stat(path.join(root, "bootstrap.sh"))).mode;
-  if ((bootstrapMode & 0o111) === 0) {
+  if (process.platform !== "win32" && (bootstrapMode & 0o111) === 0) {
     throw new Error("bootstrap.sh must be executable");
   }
   await assertNoSymlinks(root);
@@ -564,8 +576,8 @@ export async function packageTuttiApp() {
     version,
   };
 
-  await run("pnpm", ["--filter", "@group-chat/shared", "build"]);
-  await run("pnpm", ["--filter", "@group-chat/web", "build"]);
+  await runPackageManager(["--filter", "@group-chat/shared", "build"]);
+  await runPackageManager(["--filter", "@group-chat/web", "build"]);
   await mkdir(buildRoot, { recursive: true });
   await writePackageFiles(manifest);
   await bundleServer();

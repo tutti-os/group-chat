@@ -8,10 +8,6 @@ import fastifyStatic from "@fastify/static";
 import fastifyWebsocket from "@fastify/websocket";
 import Fastify from "fastify";
 import {
-  createManagedAgentDetectContextFromHeaders,
-  type ManagedAgentInvocationCredentialHeaders,
-} from "@tutti-os/agent-acp-kit";
-import {
   parseLegacyTuttiAgentProviderParticipantId,
   parseTuttiAgentParticipantId,
   resolveMentionTargetReferenceScope,
@@ -139,9 +135,7 @@ server.put<{ Body: Partial<StoredUserProfile> }>("/api/user-profile", async (req
   return { profile };
 });
 
-server.get("/api/local-agent/agents", async (request) =>
-  chat.listLocalAgentTargets(createManagedAgentDetectContextFromHeaders(request.headers))
-);
+server.get("/api/local-agent/agents", async () => chat.listLocalAgentTargets());
 
 server.post<{ Body: unknown }>("/tutti/cli/conversations/list", async (request, reply) =>
   sendCliOutput(reply, listConversationsCliOutput(chat.bootstrap(), normalizeCliEnvelope(request.body))),
@@ -177,7 +171,7 @@ server.post<{ Body: CreateRoomRequest }>("/api/rooms", async (request) => {
     (participant) => participant.runtimeProfileId === undefined,
   ) ?? false;
   const catalog = needsDefaultAgent
-    ? await chat.listLocalAgentTargets(createManagedAgentDetectContextFromHeaders(request.headers))
+    ? await chat.listLocalAgentTargets()
     : null;
   return chat.createRoom(input, catalog?.defaultAgentTargetId);
 });
@@ -196,7 +190,7 @@ server.delete<{ Params: { roomId: string } }>("/api/rooms/:roomId", async (reque
 
 server.post<{ Body: CreateIdentityRequest }>("/api/identities", async (request) => {
   const catalog = request.body.defaultRuntimeProfileId === undefined
-    ? await chat.listLocalAgentTargets(createManagedAgentDetectContextFromHeaders(request.headers))
+    ? await chat.listLocalAgentTargets()
     : null;
   const identity = chat.createIdentity(request.body, catalog?.defaultAgentTargetId);
   return { identity, runtimeProfile: chat.getRuntimeProfile(identity.defaultRuntimeProfileId) };
@@ -270,12 +264,7 @@ server.post<{ Params: { conversationId: string }; Body: PrivateTaskRequest }>(
   "/api/conversations/:conversationId/private-tasks",
   async (request, reply) => {
     try {
-      const managedAgentHeaders = request.headers as ManagedAgentInvocationCredentialHeaders;
-      const agentDetectContext = createManagedAgentDetectContextFromHeaders(managedAgentHeaders);
-      return chat.runPrivateTask(request.params.conversationId, request.body ?? {}, {
-        agentDetectContext,
-        managedAgentHeaders,
-      });
+      return chat.runPrivateTask(request.params.conversationId, request.body ?? {});
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to start private task";
       return reply.code(400).send({ error: message });
@@ -303,15 +292,11 @@ server.get<{ Params: { conversationId: string } }>(
 server.post<{ Params: { conversationId: string }; Body: SendMessageRequest }>(
   "/api/conversations/:conversationId/messages",
   async (request) => {
-    const managedAgentHeaders = request.headers as ManagedAgentInvocationCredentialHeaders;
-    const agentDetectContext = createManagedAgentDetectContextFromHeaders(managedAgentHeaders);
     const catalog = messageRequiresAgentCatalog(request.body)
-      ? await chat.listLocalAgentTargets(agentDetectContext)
+      ? await chat.listLocalAgentTargets()
       : null;
     return chat.sendMessage(request.params.conversationId, request.body, {
-      agentDetectContext,
       ...(catalog ? { defaultAgentTargetId: catalog.defaultAgentTargetId } : {}),
-      managedAgentHeaders,
     });
   },
 );
@@ -332,8 +317,6 @@ server.patch<{ Params: { messageId: string }; Body: UpdateMessageRequest }>(
   "/api/messages/:messageId",
   async (request, reply) => {
     try {
-      const managedAgentHeaders = request.headers as ManagedAgentInvocationCredentialHeaders;
-      const agentDetectContext = createManagedAgentDetectContextFromHeaders(managedAgentHeaders);
       const currentMessage = request.body.status === "recalled"
         ? null
         : chat.getMessage(request.params.messageId);
@@ -341,12 +324,10 @@ server.patch<{ Params: { messageId: string }; Body: UpdateMessageRequest }>(
           content: request.body.content ?? currentMessage.content,
           mentions: request.body.mentions ?? currentMessage.mentions,
         })
-        ? await chat.listLocalAgentTargets(agentDetectContext)
+        ? await chat.listLocalAgentTargets()
         : null;
       const result = await chat.updateMessage(request.params.messageId, request.body, {
-        agentDetectContext,
         ...(catalog ? { defaultAgentTargetId: catalog.defaultAgentTargetId } : {}),
-        managedAgentHeaders,
       });
       if (!result) return reply.code(404).send({ error: "Message not found" });
       return result;
@@ -484,13 +465,8 @@ server.post<{ Params: { conversationId: string; participantId: string } }>(
   "/api/conversations/:conversationId/participants/:participantId/context-compact",
   async (request, reply) => {
     try {
-      const managedAgentHeaders = request.headers as ManagedAgentInvocationCredentialHeaders;
-      const agentDetectContext = createManagedAgentDetectContextFromHeaders(managedAgentHeaders);
-      await chat.listLocalAgentTargets(agentDetectContext);
-      return await chat.compactParticipantContext(request.params.conversationId, request.params.participantId, {
-        agentDetectContext,
-        managedAgentHeaders,
-      });
+      await chat.listLocalAgentTargets();
+      return await chat.compactParticipantContext(request.params.conversationId, request.params.participantId);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to compact context";
       return reply.code(message.includes("not found") ? 404 : 400).send({ error: message });
