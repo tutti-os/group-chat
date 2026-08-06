@@ -40,7 +40,10 @@ jobs:
           $fixturePath = Join-Path $fixtureDir 'tutti.exe'
           $fixtureLog = Join-Path $env:RUNNER_TEMP 'tutti-fixture-argv.log'
           New-Item -ItemType Directory -Force -Path $fixtureDir | Out-Null
-          Add-Type -Path 'tests/fixtures/windows/tutti-fixture.cs' -OutputAssembly $fixturePath -OutputType ConsoleApplication
+          $csc = Get-ChildItem "$env:WINDIR\Microsoft.NET\Framework64" -Filter csc.exe -Recurse |
+            Sort-Object FullName |
+            Select-Object -Last 1
+          & $csc.FullName /nologo /out:"$fixturePath" 'tests/fixtures/windows/tutti-fixture.cs'
 
           $env:TUTTI_CLI = (Resolve-Path $fixturePath).Path
           $env:GROUP_CHAT_TUTTI_FIXTURE_LOG = $fixtureLog
