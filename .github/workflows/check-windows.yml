@@ -43,7 +43,8 @@ jobs:
           $csc = Get-ChildItem "$env:WINDIR\Microsoft.NET\Framework64" -Filter csc.exe -Recurse |
             Sort-Object FullName |
             Select-Object -Last 1
-          & $csc.FullName /nologo /out:"$fixturePath" 'tests/fixtures/windows/tutti-fixture.cs'
+          $fixtureSource = (Resolve-Path 'tests\fixtures\windows\tutti-fixture.cs').Path
+          & $csc.FullName /nologo /out:"$fixturePath" "$fixtureSource"
 
           $env:TUTTI_CLI = (Resolve-Path $fixturePath).Path
           $env:GROUP_CHAT_TUTTI_FIXTURE_LOG = $fixtureLog
