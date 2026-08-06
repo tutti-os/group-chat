@@ -48,6 +48,9 @@ jobs:
 
           $env:TUTTI_CLI = (Resolve-Path $fixturePath).Path
           $env:GROUP_CHAT_TUTTI_FIXTURE_LOG = $fixtureLog
+          $env:CODEX_HOME = Join-Path $env:RUNNER_TEMP 'codex-fixture-home'
+          New-Item -ItemType Directory -Force -Path $env:CODEX_HOME | Out-Null
+          Set-Content -Path (Join-Path $env:CODEX_HOME 'auth.json') -Value '{}' -NoNewline
           $env:TUTTI_APP_DATA_DIR = Join-Path $env:RUNNER_TEMP 'group-chat-home'
           $env:TUTTI_APP_HOST = '127.0.0.1'
           $env:TUTTI_APP_PORT = '18788'
