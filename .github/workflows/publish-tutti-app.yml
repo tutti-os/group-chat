@@ -22,8 +22,34 @@ on:
         required: false
         type: boolean
         default: false
+      prepare_only:
+        description: Whether to prepare and attest a production candidate without publishing it.
+        required: false
+        type: boolean
+        default: false
+      candidate_run_id:
+        description: Workflow run ID containing the prepared production candidate to publish.
+        required: false
+        type: string
+        default: ""
+      expected_version:
+        description: Exact release version expected from the production candidate.
+        required: false
+        type: string
+        default: ""
+      expected_artifact_sha256:
+        description: SHA-256 expected for the prepared production artifact.
+        required: false
+        type: string
+        default: ""
+      expected_git_sha:
+        description: Exact source commit expected for the production candidate.
+        required: false
+        type: string
+        default: ""
 
 permissions:
+  actions: read
   contents: write
   id-token: write
 
@@ -38,9 +64,15 @@ jobs:
       icon_path: build/tutti-app/package/icon.png
       release_tag_prefix: group-chat-v
       release_bump: ${{ inputs.release_bump }}
-      create_release_tag: ${{ !inputs.catalog_only }}
+      create_release_tag: ${{ !inputs.catalog_only && !inputs.prepare_only }}
+      prepare_only: ${{ inputs.prepare_only }}
+      candidate_run_id: ${{ inputs.candidate_run_id }}
+      expected_version: ${{ inputs.expected_version }}
+      expected_artifact_sha256: ${{ inputs.expected_artifact_sha256 }}
+      expected_git_sha: ${{ inputs.expected_git_sha }}
       runner: macos-latest
       pnpm_version: 10.11.0
+      release_tools_package: "@tutti-os/app-release-tools@0.0.412"
       aws_region: ${{ vars.TUTTI_APP_RELEASES_PRODUCTION_AWS_REGION || vars.TUTTI_APP_RELEASES_AWS_REGION }}
       aws_role_arn: ${{ vars.TUTTI_APP_RELEASES_PRODUCTION_AWS_ROLE_ARN || vars.TUTTI_APP_RELEASES_AWS_ROLE_ARN }}
       s3_bucket: ${{ vars.TUTTI_APP_RELEASES_PRODUCTION_S3_BUCKET || vars.TUTTI_APP_RELEASES_S3_BUCKET }}
